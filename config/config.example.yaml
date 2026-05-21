@@ -1,0 +1,106 @@
+# ── System Configuration ──────────────────────────────────────────────────────────
+system:
+  paper_mode: true               # Set to false for live trading (default: true)
+  log_level: "INFO"              # DEBUG, INFO, WARNING, ERROR
+  vps_location: "new_york"       # Location for VPS deployment
+  dashboard_port: 5000           # Web dashboard port
+  health_port: 8080              # Health check port
+  telegram_enabled: false        # Enable Telegram alerts
+  version: "1.0.0"               # Current version
+
+# ── Capital Configuration ────────────────────────────────────────────────────────
+capital:
+  total_deployed_usd: 0.0        # Total capital deployed (start at 0)
+  phase: 1                       # Trading phase (1=Kalshi only, 2=+Polymarket, 3=+others)
+  kalshi_allocation_pct: 100.0   # Allocation to Kalshi
+  polymarket_allocation_pct: 0.0 # Allocation to Polymarket (phase 2+)
+  reserve_pct: 30.0              # Keep 30% liquid at all times
+
+# ── Risk Configuration ─────────────────────────────────────────────────────────
+risk:
+  max_capital_per_trade_pct: 5.0     # Max 5% of capital per trade
+  max_capital_locked_pct: 40.0        # Max 40% of capital locked
+  polymarket_max_capital_pct: 30.0   # Max 30% on gray-area platform
+  max_daily_loss_pct: 3.0            # Max 3% daily loss
+  max_weekly_loss_pct: 7.0           # Max 7% weekly loss
+  max_daily_trades: 50               # Max 50 trades per day
+  leg_timeout_seconds: 10            # Leg timeout in seconds
+  max_slippage_pct: 0.3              # Max 0.3% slippage
+  pause_window_minutes: 5            # Pause window after announcements
+  gas_fee_ceiling_pct: 15.0          # Max gas as % of expected profit
+  kelly_fraction: 0.15               # Kelly criterion fraction
+
+# ── Strategy Configuration ─────────────────────────────────────────────────────
+strategies:
+  s1_rebalancing_enabled: true       # Enable rebalancing strategy
+  s1_min_net_profit_pct: 0.3         # Min profit for rebalancing
+  s2_cross_platform_enabled: false  # Enable cross-platform strategy (phase 2+)
+  s2_min_net_profit_pct: 1.5         # Higher bar for cross-platform
+  s3_logical_arb_enabled: false      # Enable logical arbitrage (phase 2+)
+  s3_min_edge_pct: 2.0               # Min edge for logical arb
+  s3_min_confidence: "HIGH"          # Minimum confidence level
+  s4_settlement_arb_enabled: false   # Enable settlement arbitrage (phase 2+)
+  s4_max_seconds_from_event: 120     # Max seconds from event
+  s5_combinatorial_enabled: false    # Enable combinatorial strategy
+  s5_paper_mode_only: true           # Only run in paper mode
+  s6_options_signal_enabled: false   # Enable options signal strategy (phase 2+)
+  s6_min_divergence_pct: 5.0         # Min divergence for options signal
+  s7_behavioral_bias_enabled: false  # Enable behavioral bias strategy (phase 3+)
+  s7_paper_mode_only: true           # Only run in paper mode
+
+# ── Intelligence Configuration ───────────────────────────────────────────────────
+intelligence:
+  llm_model_analysis: "claude-sonnet-4-6"    # Model for market analysis
+  llm_model_debate: "claude-opus-4-6"      # Model for debates
+  llm_batch_size: 20                      # Markets per LLM API call
+  llm_cache_ttl_minutes: 10               # Cache TTL in minutes
+  llm_daily_spend_limit: 10.0             # USD daily spend limit
+  high_value_trade_threshold_usd: 200.0   # Threshold for debate review
+  persona_enabled: true                     # Enable persona tracking
+  whale_min_win_rate: 0.65                # Min win rate for whale tracking
+  whale_min_trade_count: 10               # Min trades to trust win rate
+  alt_source_shadow_days: 30              # Shadow monitoring days
+  correlation_enabled: true               # Enable correlation engine
+  correlation_min_sample: 20              # Min resolutions to trust
+  correlation_p_threshold: 0.05           # Statistical significance
+
+# ── Data Feeds Configuration ───────────────────────────────────────────────────
+data_feeds:
+  kalshi_ws_enabled: true                 # Enable Kalshi WebSocket
+  polymarket_ws_enabled: false           # Enable Polymarket WebSocket (phase 2+)
+  ws_reconnect_max_tries: 10              # Max reconnection attempts
+  ws_reconnect_delay_sec: 1.0             # Reconnection delay in seconds
+  calendar_enabled: true                  # Enable economic calendar
+  calendar_refresh_hours: 6               # Calendar refresh interval
+  news_enabled: true                      # Enable news feed
+  news_poll_interval_sec: 60              # News poll interval
+  news_relevance_threshold: 0.6           # News relevance threshold
+  ads_b_enabled: false                    # Enable ads B (phase 2+)
+  ship_tracking_enabled: false            # Enable ship tracking (phase 2+)
+  satellite_enabled: false                # Enable satellite tracking (phase 3+)
+  foia_enabled: true                      # Enable FOIA records
+  congress_trading_enabled: true          # Enable Congress trading
+  sec_filings_enabled: true               # Enable SEC filings
+  google_trends_enabled: true             # Enable Google Trends
+  wikipedia_enabled: true                 # Enable Wikipedia
+  reddit_enabled: true                    # Enable Reddit
+
+# ── Compliance Configuration ─────────────────────────────────────────────────────
+compliance:
+  tax_year: 2026                        # Tax year for reporting
+  state: "FL"                           # State for tax purposes
+  monthly_export_day: 1                 # Day for monthly exports
+  log_retention_months: 84              # 7 years retention (IRS requirement)
+  vpn_check_enabled: true               # Enable VPN check
+  mnpi_check_enabled: true              # Enable MNPI check
+
+# ── Alert Configuration ──────────────────────────────────────────────────────────
+alerts:
+  trade_executed: true                  # Alert on trade execution
+  daily_pnl_summary: true               # Daily PnL summary
+  risk_limit_hit: true                  # Alert on risk limit hit
+  agent_health_failure: true            # Alert on health failure
+  strategy_self_disabled: true          # Alert on strategy disable
+  new_correlation_found: true           # Alert on new correlation
+  regulatory_change: true               # Alert on regulatory changes
+  kill_switch_activated: true           # Alert on kill switch
