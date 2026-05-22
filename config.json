@@ -1,0 +1,40 @@
+{
+  "system": {
+    "debug": false,
+    "log_level": "INFO"
+  },
+  "trading": {
+    "mode": "paper",
+    "max_position_size": 1000,
+    "risk_tolerance": 0.05
+  },
+  "api": {
+    "polymarket": {
+      "enabled": true,
+      "api_key": "",
+      "base_url": "https://api.polymarket.com"
+    },
+    "kalshi": {
+      "enabled": false,
+      "api_key": "",
+      "base_url": "https://api.kalshi.com"
+    }
+  },
+  "data": {
+    "cache_duration": 3600,
+    "max_retries": 3,
+    "timeout": 30
+  },
+  "strategies": {
+    "simple_arbitrage": {
+      "enabled": true,
+      "min_profit": 0.01,
+      "max_slippage": 0.02
+    },
+    "price_trend_following": {
+      "enabled": true,
+      "lookback_period": 24,
+      "threshold": 0.05
+    }
+  }
+}

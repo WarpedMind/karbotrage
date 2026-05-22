@@ -1,44 +1,124 @@
-# Karbot Rage!
+# Karbot Rage! - Automated Trading System
 
-A sophisticated automated trading system for prediction markets.
+An automated trading system for decentralized prediction markets.
 
-## Project Structure
+## Overview
 
+Karbot Rage! is a modular, extensible automated trading system designed for decentralized prediction markets. It provides a framework for analyzing market data, executing trading strategies, and managing trades across multiple prediction market platforms.
+
+## Features
+
+- Modular architecture for easy extension
+- Support for multiple trading modes (paper, live, backtest)
+- Configurable strategies with parameters
+- Comprehensive logging and monitoring
+- Asynchronous data fetching for performance
+- Error handling and graceful degradation
+
+## Architecture
+
+The system follows a clean architecture with separation of concerns:
+
+1. **Core Components**
+   - `core/` - Core system components (configuration, initialization)
+   - `execution/` - Main execution engine that orchestrates all components
+   - `data/` - Data handling and market data fetching
+   - `intelligence/` - Analysis and intelligence components
+   - `strategies/` - Strategy management and execution
+   - `trading/` - Trade execution and management
+   - `monitoring/` - Logging and monitoring
+
+2. **Main Entry Point**
+   - `main.py` - Main application entry point with argument parsing and system initialization
+
+3. **Configuration**
+   - `config.json` - Default configuration file
+   - `requirements.txt` - Python dependencies
+
+## Installation
+
+1. Clone the repository
+2. Create a virtual environment:
+   ```bash
+   python3 -m venv karbotrage_env
+   source karbotrage_env/bin/activate
+   ```
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+## Usage
+
+Run the system with:
+```bash
+python main.py
 ```
-karbotrage_v1/
-├── config/                 # Configuration files
-│   ├── config.example.yaml # Example configuration
-│   └── config.yaml         # Actual configuration (not in repo)
-├── core/                   # Core system components
-│   └── config.py          # Configuration system
-├── agents/                 # Trading agents
-├── compliance/             # Compliance tools
-├── data/                   # Data handling
-├── docs/                   # Documentation
-├── execution/              # Execution engine
-├── intelligence/           # Intelligence modules
-├── monitoring/             # Monitoring and alerting
-├── scripts/                # Utility scripts
-└── tests/                  # Test suite
-```
 
-## Setup
+### Command Line Options
 
-1. Copy `.env.example` to `.env` and fill in your API keys
-2. Copy `config/config.example.yaml` to `config/config.yaml` and configure as needed
-3. Install dependencies: `pip install -e .`
+- `--config, -c`: Path to configuration file
+- `--mode, -m`: Trading mode (paper, live, backtest)
+- `--debug`: Enable debug mode
 
 ## Configuration
 
-The system uses a hierarchical configuration approach:
-- All operational parameters are configurable via `config/config.yaml`
-- Secrets are never stored in config files — they must be provided via environment variables
-- Hard limits are constants in code and cannot be configured away for safety
-- Config is validated on startup with clear error messages
-- Config changes are logged for audit trail
+The system uses a JSON configuration file (`config.json`) with the following structure:
 
-## Security
+```json
+{
+  "system": {
+    "debug": false,
+    "log_level": "INFO"
+  },
+  "trading": {
+    "mode": "paper",
+    "max_position_size": 1000,
+    "risk_tolerance": 0.05
+  },
+  "api": {
+    "polymarket": {
+      "enabled": true,
+      "api_key": "",
+      "base_url": "https://api.polymarket.com"
+    },
+    "kalshi": {
+      "enabled": false,
+      "api_key": "",
+      "base_url": "https://api.kalshi.com"
+    }
+  },
+  "data": {
+    "cache_duration": 3600,
+    "max_retries": 3,
+    "timeout": 30
+  },
+  "strategies": {
+    "simple_arbitrage": {
+      "enabled": true,
+      "min_profit": 0.01,
+      "max_slippage": 0.02
+    },
+    "price_trend_following": {
+      "enabled": true,
+      "lookback_period": 24,
+      "threshold": 0.05
+    }
+  }
+}
+```
 
-- All secrets are loaded from environment variables only
-- Configuration files are never committed to version control
-- Hard limits in code prevent misconfiguration that could lead to losses
+## Testing
+
+Run tests with:
+```bash
+python -m pytest tests/
+```
+
+## License
+
+This project is licensed under the MIT License.
+
+## Contributing
+
+Contributions are welcome! Please submit a pull request.
