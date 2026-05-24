@@ -36,7 +36,7 @@ class ExecutionEngine:
 
         self.running = False
 
-    def start(self):
+    async def start(self):
         """
         Start the execution engine
         """
@@ -44,22 +44,25 @@ class ExecutionEngine:
         self.running = True
 
         try:
+            # Initialize all components
+            await self.market_data.initialize()
+
             # Run a single cycle of execution
-            self._execute_cycle()
+            await self._execute_cycle()
         except Exception as e:
             self.logger.error(f"Error in execution cycle: {str(e)}")
             raise
         finally:
-            self.stop()
+            await self.stop()
 
-    def _execute_cycle(self):
+    async def _execute_cycle(self):
         """
         Execute a single cycle of the trading system
         """
         self.logger.info("Starting execution cycle")
 
         # 1. Get market data
-        markets = self.market_data.get_market_data()
+        markets = await self.market_data.get_market_data()
         self.logger.info(f"Retrieved {len(markets)} markets")
 
         # 2. Analyze markets
@@ -79,7 +82,7 @@ class ExecutionEngine:
 
         self.logger.info("Execution cycle completed")
 
-    def stop(self):
+    async def stop(self):
         """
         Stop the execution engine
         """
@@ -91,7 +94,7 @@ class ExecutionEngine:
 
         # Cleanup components
         try:
-            self.market_data.cleanup()
+            await self.market_data.close()
         except Exception as e:
             self.logger.error(f"Error during market data cleanup: {str(e)}")
 

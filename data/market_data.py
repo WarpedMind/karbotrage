@@ -7,6 +7,10 @@ import asyncio
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
 
+# Import the data sources
+from data.sources.polymarket import PolymarketDataSource
+from data.sources.kalshi import KalshiDataSource
+
 class MarketData:
     """
     Handles market data fetching and caching
@@ -23,51 +27,65 @@ class MarketData:
         self.logger = logging.getLogger(__name__)
         self.logger.info("Initializing Market Data Handler")
 
+        # Initialize data sources
+        self.polymarket_source = PolymarketDataSource(config)
+        self.kalshi_source = KalshiDataSource(config)
+
         # Cache for market data
         self._cache = {}
         self._cache_timestamps = {}
 
-    def get_market_data(self) -> List[Dict[str, Any]]:
+    async def initialize(self):
+        """
+        Initialize all data sources
+        """
+        self.logger.info("Initializing market data sources")
+        await self.polymarket_source.initialize()
+        await self.kalshi_source.initialize()
+        self.logger.info("Market data sources initialized")
+
+    async def get_market_data(self) -> List[Dict[str, Any]]:
         """
         Get market data from APIs
 
         Returns:
             List of market data dictionaries
         """
-        self.logger.info("Fetching market data")
+        self.logger.info("Fetching market data from all sources")
 
-        # In a real implementation, this would fetch from multiple APIs
-        # For now, we'll return some mock data
+        markets = []
 
-        markets = [
-            {
-                'market_id': 'market_1',
-                'name': 'Will Bitcoin reach $100,000 by end of 2026?',
-                'price': 0.75,
-                'volume': 1000000,
-                'timestamp': datetime.now().isoformat(),
-                'source': 'polymarket'
-            },
-            {
-                'market_id': 'market_2',
-                'name': 'Will Ethereum reach $5,000 by end of 2026?',
-                'price': 0.45,
-                'volume': 500000,
-                'timestamp': datetime.now().isoformat(),
-                'source': 'polymarket'
-            },
-            {
-                'market_id': 'market_3',
-                'name': 'Will Apple stock close above $200 by end of 2026?',
-                'price': 0.30,
-                'volume': 2000000,
-                'timestamp': datetime.now().isoformat(),
-                'source': 'kalshi'
-            }
-        ]
+        # Fetch from Polymarket
+        polymarket_markets = await self.polymarket_source.fetch_markets()
+        markets.extend(polymarket_markets)
 
-        self.logger.info(f"Fetched {len(markets)} markets")
+        # Fetch from Kalshi
+        kalshi_markets = await self.kalshi_source.fetch_markets()
+        markets.extend(kalshi_markets)
+
+        self.logger.info(f"Fetched {len(markets)} markets from all sources")
         return markets
+
+    async def get_market_details(self, market_id: str) -> Dict[str, Any]:
+        """
+        Get detailed information for a specific market
+
+        Args:
+            market_id: ID of the market to fetch
+
+        Returns:
+            Market details dictionary
+        """
+        self.logger.info(f"Fetching details for market {market_id}")
+
+        # Try to fetch from Polymarket first
+        details = await self.polymarket_source.fetch_market_details(market_id)
+        if details:
+            return details
+
+        # If not found in Polymarket, try Kalshi
+        details = await self.kalshi_source.fetch_market_details(market_id)
+        return details
 
     def _is_cache_valid(self, cache_key: str, max_age: int = 3600) -> bool:
         """

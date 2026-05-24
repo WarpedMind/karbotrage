@@ -9,6 +9,7 @@ import sys
 import os
 import logging
 import argparse
+import asyncio
 from typing import Dict, Any
 
 # Add the current directory to Python path
@@ -18,9 +19,9 @@ from core.config import load_config
 from execution.engine import ExecutionEngine
 from monitoring.logger import setup_logger
 
-def main():
+async def main():
     """
-    Main function to run the Karbot Rage! system
+    Main async function to run the Karbot Rage! system
     """
     # Setup logging
     logger = setup_logger('karbotrage')
@@ -54,7 +55,7 @@ def main():
 
         # Initialize and start execution engine
         engine = ExecutionEngine(config)
-        engine.start()
+        await engine.start()
 
         logger.info("Karbot Rage! completed successfully")
 
@@ -66,9 +67,9 @@ def main():
     finally:
         # Cleanup
         try:
-            engine.stop()
+            await engine.stop()
         except:
             pass
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

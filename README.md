@@ -1,124 +1,134 @@
 # Karbot Rage! - Automated Trading System
 
-An automated trading system for decentralized prediction markets.
-
-## Overview
-
-Karbot Rage! is a modular, extensible automated trading system designed for decentralized prediction markets. It provides a framework for analyzing market data, executing trading strategies, and managing trades across multiple prediction market platforms.
+An automated trading system for prediction markets, built with Python and async/await for high performance.
 
 ## Features
 
-- Modular architecture for easy extension
-- Support for multiple trading modes (paper, live, backtest)
-- Configurable strategies with parameters
-- Comprehensive logging and monitoring
-- Asynchronous data fetching for performance
-- Error handling and graceful degradation
+- **Async Execution Engine**: Fully asynchronous execution using Python's asyncio
+- **Multi-Source Market Data**: Supports data from multiple prediction market platforms
+- **Strategy Management**: Modular strategy framework for different trading approaches
+- **Risk Management**: Built-in risk tolerance and position sizing controls
+- **Paper Trading Mode**: Test strategies without real money
+- **Extensible Architecture**: Easy to add new data sources and trading strategies
 
 ## Architecture
 
-The system follows a clean architecture with separation of concerns:
-
-1. **Core Components**
-   - `core/` - Core system components (configuration, initialization)
-   - `execution/` - Main execution engine that orchestrates all components
-   - `data/` - Data handling and market data fetching
-   - `intelligence/` - Analysis and intelligence components
-   - `strategies/` - Strategy management and execution
-   - `trading/` - Trade execution and management
-   - `monitoring/` - Logging and monitoring
-
-2. **Main Entry Point**
-   - `main.py` - Main application entry point with argument parsing and system initialization
-
-3. **Configuration**
-   - `config.json` - Default configuration file
-   - `requirements.txt` - Python dependencies
+```
+karbotrage/
+├── main.py                 # Main entry point
+├── config.yaml             # Configuration file
+├── core/
+│   ├── config.py           # Configuration handling
+│   └── __init__.py
+├── execution/
+│   ├── engine.py           # Async execution engine
+│   └── __init__.py
+├── data/
+│   ├── market_data.py      # Market data handling
+│   ├── sources/
+│   │   ├── __init__.py
+│   │   ├── polymarket.py   # Polymarket data source
+│   │   └── kalshi.py       # Kalshi data source
+│   └── __init__.py
+├── intelligence/
+│   ├── analyzer.py         # Market analysis
+│   └── __init__.py
+├── strategies/
+│   ├── strategy_manager.py # Strategy management
+│   └── __init__.py
+├── trading/
+│   ├── trader.py           # Trade execution
+│   └── __init__.py
+├── monitoring/
+│   ├── logger.py           # Logging setup
+│   └── __init__.py
+└── requirements.txt        # Dependencies
+```
 
 ## Installation
 
 1. Clone the repository
-2. Create a virtual environment:
+2. Install dependencies:
    ```bash
-   python3 -m venv karbotrage_env
-   source karbotrage_env/bin/activate
-   ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
+   pip3 install --break-system-packages -r requirements.txt
    ```
 
 ## Usage
 
-Run the system with:
 ```bash
-python main.py
+# Run with default configuration
+python3 main.py
+
+# Run with custom configuration
+python3 main.py --config /path/to/config.yaml
+
+# Run in live trading mode
+python3 main.py --mode live
+
+# Enable debug mode
+python3 main.py --debug
 ```
-
-### Command Line Options
-
-- `--config, -c`: Path to configuration file
-- `--mode, -m`: Trading mode (paper, live, backtest)
-- `--debug`: Enable debug mode
 
 ## Configuration
 
-The system uses a JSON configuration file (`config.json`) with the following structure:
+The system uses a YAML configuration file (`config.yaml`) with the following structure:
 
-```json
-{
-  "system": {
-    "debug": false,
-    "log_level": "INFO"
-  },
-  "trading": {
-    "mode": "paper",
-    "max_position_size": 1000,
-    "risk_tolerance": 0.05
-  },
-  "api": {
-    "polymarket": {
-      "enabled": true,
-      "api_key": "",
-      "base_url": "https://api.polymarket.com"
-    },
-    "kalshi": {
-      "enabled": false,
-      "api_key": "",
-      "base_url": "https://api.kalshi.com"
-    }
-  },
-  "data": {
-    "cache_duration": 3600,
-    "max_retries": 3,
-    "timeout": 30
-  },
-  "strategies": {
-    "simple_arbitrage": {
-      "enabled": true,
-      "min_profit": 0.01,
-      "max_slippage": 0.02
-    },
-    "price_trend_following": {
-      "enabled": true,
-      "lookback_period": 24,
-      "threshold": 0.05
-    }
-  }
-}
+```yaml
+system:
+  debug: true
+  log_level: INFO
+  log_file: karbotrage.log
+
+trading:
+  mode: paper
+  max_positions: 10
+  position_size: 1000
+  risk_tolerance: 0.02
+
+api:
+  polymarket:
+    enabled: true
+    api_key: "your-polymarket-api-key"
+    base_url: "https://api.polymarket.com"
+  kalshi:
+    enabled: false
+    api_key: "your-kalshi-api-key"
+    base_url: "https://api.kalshi.com"
+
+strategy:
+  enabled: true
+  name: "basic_strategy"
+  parameters:
+    threshold: 0.1
+    max_loss: 0.05
+    max_gain: 0.2
+
+monitoring:
+  enabled: true
+  metrics:
+    - "market_data"
+    - "trades"
+    - "portfolio"
 ```
 
-## Testing
+## Components
 
-Run tests with:
-```bash
-python -m pytest tests/
-```
+### Execution Engine
+The core execution engine (`execution/engine.py`) orchestrates the entire system with async/await, managing the flow from data fetching to strategy execution to trade execution.
+
+### Data Sources
+- **Polymarket**: Fetches data from Polymarket API
+- **Kalshi**: Fetches data from Kalshi API
+
+### Intelligence
+- **Market Analyzer**: Analyzes market data and generates trading signals
+
+### Strategies
+- **Strategy Manager**: Manages and executes trading strategies
+
+### Trading
+- **Trader**: Executes trades based on strategy signals
 
 ## License
 
-This project is licensed under the MIT License.
-
-## Contributing
-
-Contributions are welcome! Please submit a pull request.
+MIT License
