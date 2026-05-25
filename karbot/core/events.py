@@ -1,0 +1,66 @@
+"""
+karbot/core/events.py
+─────────────────────
+Re-exports the central event bus from core.events so agents can import
+from karbot.core.events regardless of how sys.path is configured.
+"""
+
+from core.events import (
+    Event,
+    Priority,
+    EventBus,
+    Handler,
+    PriceUpdateEvent,
+    BookSnapshotEvent,
+    FeedHealthEvent,
+    OpportunityEvent,
+    ApprovedOpportunityEvent,
+    RejectedOpportunityEvent,
+    TradeExecutedEvent,
+    LegFailureEvent,
+    TradeResolvedEvent,
+    PositionSnapshot,
+    RiskLimitHitEvent,
+    KillSwitchEvent,
+    NewsSignalEvent,
+    AnnouncementWarningEvent,
+    LogicalArbCandidateEvent,
+    SmartMoneySignalEvent,
+    ImpliedProbabilityDivergenceEvent,
+    ResolutionVerificationResult,
+    GeopoliticalRiskEvent,
+    CorrelationDiscoveryEvent,
+    StrategyWeightUpdateEvent,
+    AgentHeartbeat,
+    ComplianceAlertEvent,
+)
+
+__all__ = [
+    "Event",
+    "Priority",
+    "EventBus",
+    "Handler",
+    "PriceUpdateEvent",
+    "BookSnapshotEvent",
+    "FeedHealthEvent",
+    "OpportunityEvent",
+    "ApprovedOpportunityEvent",
+    "RejectedOpportunityEvent",
+    "TradeExecutedEvent",
+    "LegFailureEvent",
+    "TradeResolvedEvent",
+    "PositionSnapshot",
+    "RiskLimitHitEvent",
+    "KillSwitchEvent",
+    "NewsSignalEvent",
+    "AnnouncementWarningEvent",
+    "LogicalArbCandidateEvent",
+    "SmartMoneySignalEvent",
+    "ImpliedProbabilityDivergenceEvent",
+    "ResolutionVerificationResult",
+    "GeopoliticalRiskEvent",
+    "CorrelationDiscoveryEvent",
+    "StrategyWeightUpdateEvent",
+    "AgentHeartbeat",
+    "ComplianceAlertEvent",
+]

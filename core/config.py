@@ -27,16 +27,17 @@ def load_config(config_path: str = None) -> Dict[str, Any]:
             "max_position_size": 1000,
             "risk_tolerance": 0.05
         },
+        "polymarket_ws_enabled": False,   # Phase 1: Kalshi only. Set True in Phase 2+.
         "api": {
-            "polymarket": {
+            "kalshi": {
                 "enabled": True,
                 "api_key": "",
-                "base_url": "https://api.polymarket.com"
-            },
-            "kalshi": {
-                "enabled": False,
-                "api_key": "",
                 "base_url": "https://api.kalshi.com"
+            },
+            "polymarket": {
+                "enabled": False,             # Phase 2 only — never enable in Phase 1
+                "api_key": "",
+                "base_url": "https://api.polymarket.com"
             }
         },
         "data": {

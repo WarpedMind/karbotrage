@@ -9,21 +9,29 @@ Karbot Rage! is a multi-agent automated trading system designed for decentralize
 - Run with: python main.py
 
 ## Architecture
-- main.py: Main entry point and system initialization
-- core/config.py: Configuration management
-- execution/engine.py: Main execution engine coordinating all components
-- data/market_data.py: Market data handling
-- intelligence/analyzer.py: Market analysis and signal generation
-- strategies/strategy_manager.py: Strategy execution
-- trading/trader.py: Trade execution
-- monitoring/logger.py: Logging system
+
+### Target architecture (event-bus-driven agents — extend this, not the legacy path)
+- core/events.py: EventBus + all typed event dataclasses — the communication backbone
+- karbot/core/config.py: KarbotConfig typed dataclass with enforced risk hard limits
+- karbot/core/events.py: Re-exports from core/events.py for agent imports
+- agents/floor/price_watcher.py: WebSocket → PriceUpdateEvent publisher
+- agents/floor/arb_scanner.py: PriceUpdateEvent → OpportunityEvent detector
+- agents/floor/risk_gate.py: OpportunityEvent → ApprovedOpportunityEvent (8 pre-trade checks)
+- agents/research/market_analyst.py: LLM semantic analysis → LogicalArbCandidateEvent
+- agents/management/reflection.py: Nightly learning cycle, strategy weight updates
+
+### Legacy execution path (do not extend — scheduled for removal)
+- main.py / karbot/main.py: Old entry point
+- execution/engine.py: Monolithic orchestrator — calls components directly, bypasses event bus
+- data/market_data.py: Market data (Kalshi-first, Polymarket gated behind polymarket_ws_enabled)
 
 ## Current status
-- Complete modular framework with all components implemented
-- Configuration system with defaults
-- Core architecture working
-- Documentation in place
-- Tests exist but not fully implemented
+- core/events.py: Full event bus with all typed events — production-ready
+- karbot/core/config.py: KarbotConfig with Phase 1 invariant enforcement at instantiation
+- Agent stubs: All wired to EventBus via register_subscriptions(); imports resolve
+- requirements.txt: Full — aiohttp, pydantic, websockets, structlog, tenacity, aiosqlite, anthropic, etc.
+- execution/engine.py: Monolithic (flagged for incremental event-bus refactor)
+- Paper trading: Not yet end-to-end tested via agent layer
 
 ## GitHub
 - Repo: https://github.com/WarpedMind/karbotrage_v1
