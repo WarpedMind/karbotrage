@@ -138,6 +138,11 @@ class KarbotConfig:
     strategies:   StrategiesConfig  = field(default_factory=StrategiesConfig)
     intelligence: IntelligenceConfig = field(default_factory=IntelligenceConfig)
 
+    # Regulatory compliance fields (set manually in config.yaml after reading guidance)
+    regulatory_halt: bool = False
+    regulatory_halt_reason: str = ""
+    regulatory_check_interval_hours: int = 6
+
     def __post_init__(self):
         # Phase 1 invariant: if phase=1, Polymarket must be disabled
         if self.capital.phase == 1 and self.data_feeds.polymarket_ws_enabled:
@@ -186,4 +191,11 @@ class KarbotConfig:
             log_level=raw.get("system", {}).get("log_level", "INFO"),
         )
 
-        return cls(system=system)
+        return cls(
+            system=system,
+            regulatory_halt=raw.get("regulatory_halt", False),
+            regulatory_halt_reason=raw.get("regulatory_halt_reason", ""),
+            regulatory_check_interval_hours=raw.get(
+                "regulatory_check_interval_hours", 6
+            ),
+        )

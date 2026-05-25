@@ -2,7 +2,25 @@
 
 **Karbot Rage!** is a multi-agent automated trading system for decentralized prediction markets. It is a WallStRobotics / CAIO-grade project — built to production standards from session one.
 
-> **Name etymology:** *Arbitrage* → swap "bit" for "bot" (it's a bot) → *Arbotrage* → prefix K for Kalshi → *Karbotrage* → split and add ! for brand energy → **Karbot Rage!**
+## The Name
+
+**Karbot Rage!** is a backronym — every component has deliberate meaning:
+
+| Letters | Word | Meaning |
+|---|---|---|
+| K | Kalshi | The primary CFTC-regulated exchange the bot trades on |
+| Ar | Arbitrage | The core strategy — exploiting price mispricings |
+| BOT | Bot | Automated trading system |
+| RAGE! | Rage | Relentless, disciplined, emotion-free hunting for edge |
+
+K + Ar + BOT + RAGE! = KARBOT RAGE!
+
+The exclamation point belongs to RAGE, not the sentence. This is a
+deliberate easter egg for traders and technologists who understand
+the space. Casual observers see an energetic brand name. Those in
+the know see the full etymology.
+
+Version naming follows the theme: Rage → Fury → Wrath → Vengeance
 
 ## What it does
 

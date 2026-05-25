@@ -33,3 +33,13 @@ monitoring:
     - "market_data"
     - "trades"
     - "portfolio"
+
+# ── Regulatory compliance ──────────────────────────────────────────────────────
+# Set regulatory_halt to true manually after reading regulatory guidance
+# that requires halting operations. Bot refuses to start when true.
+# Document your reasoning in compliance_actions.jsonl before clearing.
+regulatory_halt: false
+regulatory_halt_reason: ""
+
+# How often to poll regulatory sources (hours)
+regulatory_check_interval_hours: 6
