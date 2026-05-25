@@ -21,7 +21,7 @@ Karbot Rage! is a multi-agent automated trading system designed for decentralize
 - agents/floor/risk_gate.py: `RiskGateAgent` (full impl, has register_subscriptions) + `RiskGate` (inherits it, adds run() stub)
 - agents/research/market_analyst.py: `MarketAnalystAgent` (full impl) + `MarketAnalyst` (BaseAgent-conforming stub used by runner)
 - agents/management/reflection.py: `ReflectionAgentImpl` (full impl, renamed from ReflectionAgent) + `ReflectionAgent` (BaseAgent-conforming stub used by runner)
-- agents/management/compliance.py: **NEW** — `ComplianceOfficer` stub; always-on, cannot be disabled; subscriptions to be wired next session
+- agents/management/compliance.py: **FULL v2 IMPL** — IRS dual-track logging, append-only audit trail, regulatory monitoring (CFTC RSS + Federal Register every 6h), compliance action log, REGULATORY_HALT enforcement; subscriptions wired to TradeExecutedEvent, LegFailureEvent, RejectedOpportunityEvent
 
 ### BaseAgent interface (all runner-facing classes implement this)
 ```python
@@ -38,17 +38,31 @@ async def run(self): ...
 ## Current status
 - karbot_runner.py: **Written and verified** — all 3 spec verification steps pass; 6 agents start, run, and shut down cleanly
 - core/events.py: Full event bus with all typed events — production-ready
-- karbot/core/config.py: KarbotConfig Phase 1 invariants structural + from_yaml() + .phase + .paper_mode added
-- agents/management/compliance.py: Created — ComplianceOfficer stub running
+- karbot/core/config.py: KarbotConfig Phase 1 invariants structural + from_yaml() + .phase + .paper_mode + regulatory_halt fields added
+- agents/management/compliance.py: **v2 COMPLETE** — IRS trade logging, audit trail, regulatory monitoring, REGULATORY_HALT — all 7 spec verification steps pass
 - All Phase 1 agent stubs: Conforming run() and register_subscriptions() on all 6 runner-facing classes
 - requirements.txt: aiohttp, pydantic, websockets, pyyaml, python-json-logger, structlog, tenacity, aiosqlite, anthropic, pytest, pytest-asyncio, black, flake8
 - execution/engine.py: INTENTIONALLY DEFERRED — do not refactor until paper tested end-to-end
 - Paper trading: Not yet end-to-end tested via agent layer
 
+## REGULATORY CONTEXT (May 2026 — current)
+- CFTC Letter 26-15 (May 19 2026, EFFECTIVE NOW): New cooperation
+  policy — voluntary self-reporting + full cooperation + remediation
+  = path to declination. compliance_actions.jsonl IS this evidence.
+- CFTC enforcement priorities: insider trading (#1), manipulation,
+  wash trading. CFTC using AI surveillance on prediction markets.
+- CFTC v. Van Dyke (Apr 23 2026): First insider trading prosecution
+  involving event contracts. DOJ also filed charges.
+- DEATH BETS Act (introduced Mar 2026): would prohibit contracts
+  on terrorism/assassination/war/death. Monitor for passage.
+- Karbot Rage! is clean: public data only, arbitrage only, no MNPI,
+  Kalshi only Phase 1, full audit trail from day one.
+- regulatory_halt flag in config.yaml: operator sets after reading
+  guidance, bot refuses to start until cleared and documented.
+
 ## Next session priorities (in order)
-1. Wire ComplianceOfficer subscriptions to TradeExecutedEvent
-2. IRS dual-track logging (Kalshi = ordinary income, Polymarket = capital gains)
-3. Paper trading end-to-end test
+1. Paper trading end-to-end test
+2. Wire execution layer to emit TradeExecutedEvent / LegFailureEvent so compliance logs real trades
 
 ## GitHub
 - Repo: https://github.com/WarpedMind/karbotrage_v1
