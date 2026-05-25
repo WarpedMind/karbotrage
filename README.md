@@ -1,134 +1,77 @@
-# Karbot Rage! - Automated Trading System
+# Karbot Rage!
 
-An automated trading system for prediction markets, built with Python and async/await for high performance.
+**Karbot Rage!** is a multi-agent automated trading system for decentralized prediction markets. It is a WallStRobotics / CAIO-grade project — built to production standards from session one.
 
-## Features
+> **Name etymology:** *Arbitrage* → swap "bit" for "bot" (it's a bot) → *Arbotrage* → prefix K for Kalshi → *Karbotrage* → split and add ! for brand energy → **Karbot Rage!**
 
-- **Async Execution Engine**: Fully asynchronous execution using Python's asyncio
-- **Multi-Source Market Data**: Supports data from multiple prediction market platforms
-- **Strategy Management**: Modular strategy framework for different trading approaches
-- **Risk Management**: Built-in risk tolerance and position sizing controls
-- **Paper Trading Mode**: Test strategies without real money
-- **Extensible Architecture**: Easy to add new data sources and trading strategies
+## What it does
 
-## Architecture
+Six specialized agents run concurrently over a shared async event bus, covering the full trading loop:
 
-```
-karbotrage/
-├── main.py                 # Main entry point
-├── config.yaml             # Configuration file
-├── core/
-│   ├── config.py           # Configuration handling
-│   └── __init__.py
-├── execution/
-│   ├── engine.py           # Async execution engine
-│   └── __init__.py
-├── data/
-│   ├── market_data.py      # Market data handling
-│   ├── sources/
-│   │   ├── __init__.py
-│   │   ├── polymarket.py   # Polymarket data source
-│   │   └── kalshi.py       # Kalshi data source
-│   └── __init__.py
-├── intelligence/
-│   ├── analyzer.py         # Market analysis
-│   └── __init__.py
-├── strategies/
-│   ├── strategy_manager.py # Strategy management
-│   └── __init__.py
-├── trading/
-│   ├── trader.py           # Trade execution
-│   └── __init__.py
-├── monitoring/
-│   ├── logger.py           # Logging setup
-│   └── __init__.py
-└── requirements.txt        # Dependencies
-```
+| Agent | Role |
+|---|---|
+| PriceWatcher | Watches Kalshi market prices in real time |
+| ArbScanner | Scans for arbitrage opportunities |
+| RiskGate | Enforces position and exposure limits |
+| MarketAnalyst | Analyzes market signals |
+| ReflectionAgent | Post-trade reflection and strategy tuning |
+| ComplianceOfficer | Always-on compliance monitoring (cannot be disabled) |
 
-## Installation
+## Tech stack
 
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   pip3 install --break-system-packages -r requirements.txt
-   ```
+- Python 3.8+, asyncio
+- Pydantic typed config (`KarbotConfig`)
+- Custom `EventBus` with typed event dataclasses (`core/events.py`)
+- aiohttp, websockets, pyyaml, structlog, tenacity, aiosqlite
+- Anthropic SDK (for future intelligence layer)
+- pytest / pytest-asyncio
 
-## Usage
+## How to run
 
 ```bash
-# Run with default configuration
-python3 main.py
+# Activate the project virtualenv
+source karbotrage_env/bin/activate
 
-# Run with custom configuration
-python3 main.py --config /path/to/config.yaml
-
-# Run in live trading mode
-python3 main.py --mode live
-
-# Enable debug mode
-python3 main.py --debug
+# Start all 6 agents (canonical entry point)
+python karbot_runner.py
 ```
 
-## Configuration
+The legacy `python main.py` path still works but is intentionally not extended — it bypasses the event bus.
 
-The system uses a YAML configuration file (`config.yaml`) with the following structure:
+## Current phase: Phase 1
 
-```yaml
-system:
-  debug: true
-  log_level: INFO
-  log_file: karbotrage.log
+- Kalshi is the primary data source; Polymarket is gated behind `polymarket_ws_enabled` (disabled in Phase 1)
+- Phase 1 invariants are enforced structurally in `KarbotConfig.__init__` — enabling Polymarket WebSocket or cross-platform strategies while `phase=1` raises `ValueError` at startup
+- Paper trading mode only; live execution deferred until end-to-end paper test passes
 
-trading:
-  mode: paper
-  max_positions: 10
-  position_size: 1000
-  risk_tolerance: 0.02
+## Project layout
 
-api:
-  polymarket:
-    enabled: true
-    api_key: "your-polymarket-api-key"
-    base_url: "https://api.polymarket.com"
-  kalshi:
-    enabled: false
-    api_key: "your-kalshi-api-key"
-    base_url: "https://api.kalshi.com"
-
-strategy:
-  enabled: true
-  name: "basic_strategy"
-  parameters:
-    threshold: 0.1
-    max_loss: 0.05
-    max_gain: 0.2
-
-monitoring:
-  enabled: true
-  metrics:
-    - "market_data"
-    - "trades"
-    - "portfolio"
+```
+karbot_runner.py          # Entry point — starts all 6 agents
+core/events.py            # EventBus + all typed event dataclasses
+karbot/core/
+  config.py               # KarbotConfig (Phase 1 invariants, from_yaml, .phase, .paper_mode)
+  events.py               # Re-exports from core/events.py
+agents/
+  floor/
+    price_watcher.py      # PriceWatcher
+    arb_scanner.py        # ArbScanner
+    risk_gate.py          # RiskGate
+  research/
+    market_analyst.py     # MarketAnalyst
+  management/
+    reflection.py         # ReflectionAgent
+    compliance.py         # ComplianceOfficer (always-on)
+execution/engine.py       # Legacy monolith — do not extend until paper tested
+data/market_data.py       # Kalshi-first market data
 ```
 
-## Components
+## Next up
 
-### Execution Engine
-The core execution engine (`execution/engine.py`) orchestrates the entire system with async/await, managing the flow from data fetching to strategy execution to trade execution.
-
-### Data Sources
-- **Polymarket**: Fetches data from Polymarket API
-- **Kalshi**: Fetches data from Kalshi API
-
-### Intelligence
-- **Market Analyzer**: Analyzes market data and generates trading signals
-
-### Strategies
-- **Strategy Manager**: Manages and executes trading strategies
-
-### Trading
-- **Trader**: Executes trades based on strategy signals
+1. Wire `ComplianceOfficer` subscriptions to `TradeExecutedEvent`
+2. IRS dual-track logging (Kalshi = ordinary income, Polymarket = capital gains)
+3. Paper trading end-to-end test
 
 ## License
 
-MIT License
+MIT
