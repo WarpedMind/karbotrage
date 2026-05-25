@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import aiohttp
 import structlog
 import websockets
+import websockets.exceptions
 from tenacity import (
     retry, stop_after_attempt, wait_exponential,
     retry_if_exception_type, before_sleep_log
@@ -518,3 +519,21 @@ class PriceWatcherAgent:
     @property
     def all_books(self) -> Dict[str, OrderBook]:
         return self._books
+
+
+# ── karbot_runner.py-compatible stub ─────────────────────────────────────────
+
+class PriceWatcher:
+    """Stub conforming to the BaseAgent interface for karbot_runner.py."""
+
+    def __init__(self, bus: EventBus, config: KarbotConfig):
+        self.bus = bus
+        self.config = config
+
+    def register_subscriptions(self):
+        pass
+
+    async def run(self):
+        log.info("PriceWatcher stub running (not yet implemented)")
+        while True:
+            await asyncio.sleep(60)

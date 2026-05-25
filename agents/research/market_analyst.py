@@ -549,3 +549,21 @@ Return ONLY valid JSON, no other text.
                     f"candidates={self._candidates_found}"
                 ),
             ))
+
+
+# ── karbot_runner.py-compatible stub ─────────────────────────────────────────
+
+class MarketAnalyst:
+    """Stub conforming to the BaseAgent interface for karbot_runner.py."""
+
+    def __init__(self, bus: EventBus, config: KarbotConfig):
+        self.bus = bus
+        self.config = config
+
+    def register_subscriptions(self):
+        pass
+
+    async def run(self):
+        log.info("MarketAnalyst stub running (not yet implemented)")
+        while True:
+            await asyncio.sleep(60)

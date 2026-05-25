@@ -582,3 +582,17 @@ class RiskGateAgent:
             "kill_switch_active": self._kill_switch_active,
             "trading_paused":     self._trading_paused,
         }
+
+
+# ── karbot_runner.py-compatible stub ─────────────────────────────────────────
+
+class RiskGate(RiskGateAgent):
+    """Stub conforming to the BaseAgent interface for karbot_runner.py."""
+
+    def __init__(self, bus: EventBus, config: KarbotConfig):
+        super().__init__(config=config, event_bus=bus)
+
+    async def run(self):
+        log.info("RiskGate stub running (not yet implemented)")
+        while True:
+            await asyncio.sleep(60)

@@ -15,6 +15,8 @@ Phase rules:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict
 
 
 # ── Hard risk limits (non-negotiable) ─────────────────────────────────────────
@@ -149,3 +151,39 @@ class KarbotConfig:
                 "Phase 1 invariant violated: s2_cross_platform_enabled must be False "
                 "in Phase 1."
             )
+
+    # ── Convenience properties (used by karbot_runner.py) ─────────────────────
+
+    @property
+    def phase(self) -> int:
+        return self.capital.phase
+
+    @property
+    def paper_mode(self) -> bool:
+        return self.system.paper_mode
+
+    # ── YAML loader ───────────────────────────────────────────────────────────
+
+    @classmethod
+    def from_yaml(cls, path: str) -> "KarbotConfig":
+        """Load config from a YAML file, falling back to safe defaults."""
+        import yaml
+
+        yaml_path = Path(path)
+        raw: Dict[str, Any] = {}
+        if yaml_path.exists():
+            with open(yaml_path) as f:
+                raw = yaml.safe_load(f) or {}
+
+        # Map legacy config.yaml fields to KarbotConfig structure.
+        # Unknown keys are silently ignored — defaults are Phase 1 safe.
+        trading = raw.get("trading", {})
+        paper = trading.get("mode", "paper") == "paper"
+
+        system = SystemConfig(
+            paper_mode=paper,
+            debug=raw.get("system", {}).get("debug", False),
+            log_level=raw.get("system", {}).get("log_level", "INFO"),
+        )
+
+        return cls(system=system)

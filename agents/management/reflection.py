@@ -69,7 +69,7 @@ class SourceCredibility:
     trend:            str   = "STABLE"
 
 
-class ReflectionAgent:
+class ReflectionAgentImpl:
     """
     Management Agent — Nightly Learning Engine.
 
@@ -583,3 +583,21 @@ Include one specific observation about what the data suggests for tomorrow.
                     f"last_run={self._last_run.isoformat() if self._last_run else 'never'}"
                 ),
             ))
+
+
+# ── karbot_runner.py-compatible stub ─────────────────────────────────────────
+
+class ReflectionAgent:
+    """Stub conforming to the BaseAgent interface for karbot_runner.py."""
+
+    def __init__(self, bus: EventBus, config: KarbotConfig):
+        self.bus = bus
+        self.config = config
+
+    def register_subscriptions(self):
+        pass
+
+    async def run(self):
+        log.info("ReflectionAgent stub running (not yet implemented)")
+        while True:
+            await asyncio.sleep(60)

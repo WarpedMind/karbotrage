@@ -566,3 +566,17 @@ class ArbScannerAgent:
             "markets_tracked":     sum(len(v) for v in self._prices.values()),
             "strategy_weights":    self._strategy_weights,
         }
+
+
+# ── karbot_runner.py-compatible stub ─────────────────────────────────────────
+
+class ArbScanner(ArbScannerAgent):
+    """Stub conforming to the BaseAgent interface for karbot_runner.py."""
+
+    def __init__(self, bus: EventBus, config: KarbotConfig):
+        super().__init__(config=config, event_bus=bus)
+
+    async def run(self):
+        log.info("ArbScanner stub running (not yet implemented)")
+        while True:
+            await asyncio.sleep(60)
