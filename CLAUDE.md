@@ -64,6 +64,16 @@ async def run(self): ...
 1. Paper trading end-to-end test
 2. Wire execution layer to emit TradeExecutedEvent / LegFailureEvent so compliance logs real trades
 
+## FUTURE ROADMAP (do not build yet — design required first)
+
+- **Regulatory Intelligence Agent** (Research Floor): Uses Claude API to read and
+  interpret regulatory documents, assess urgency 1-5, send Telegram notifications
+  with recommendations, ask operator permission before acting. Replaces keyword
+  scanning with genuine AI interpretation. Weekly automated check cycle plus
+  immediate alerts for high-urgency keywords.
+- **Telegram notification integration**: Real-time operator alerts for regulatory
+  events, system health issues, and permission requests.
+
 ## GitHub
 - Repo: https://github.com/WarpedMind/karbotrage_v1
 - Branch strategy: main = stable, feature branches for new work
