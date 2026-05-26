@@ -1,5 +1,42 @@
 # Karbot Rage! Session Summary
 
+## 2026-05-26 (Session 8 — Security + TradeResolvedEvent)
+
+### What was built
+- SecretsConfig dataclass in karbot/core/config.py — all credentials load from
+  environment variables only; warns on missing secrets at startup
+- config.yaml moved to .gitignore; config.yaml.example and .env.example created
+- python-dotenv added to requirements.txt; load_dotenv() at top of karbot_runner.py
+- telegram_agent.py updated to read credentials from config.secrets.*
+- regulatory_intelligence.py updated to pass API key explicitly to AsyncAnthropic()
+- SystemConfig.paper_resolution_delay_seconds added (default 300s)
+- PaperExecutor now schedules TradeResolvedEvent via asyncio.create_task() after
+  paper_resolution_delay_seconds; realized_pnl computed from net_profit_pct * capital
+- PositionTracker._on_trade_resolved() confirmed correct — no changes needed
+- tests/test_paper_trading.py — 2 new tests: test_paper_trade_resolves_after_delay
+  (1s delay, confirms capital returns to 0, total_capital grows) and
+  test_full_paper_pnl_cycle (two trades resolve, cumulative P&L verified)
+- Full paper P&L cycle confirmed end-to-end
+
+### What was decided
+- SecretsConfig is the project-wide permanent pattern for credential loading
+- config.yaml is never committed — config.yaml.example is the committed reference
+- 30-day paper trading clock starts this session (target complete 2026-06-25)
+- Next milestone: Kalshi credential provisioning + live executor spec
+
+### Verification
+- python -m pytest tests/ -v: 35/35 passed ✓
+- karbot_runner.py --exit-after-test: starts and exits cleanly ✓
+- config.yaml confirmed gitignored ✓
+- No credential values in runner output ✓
+
+### What to do first next session
+- Review paper trading daily summary logs (logs/compliance_actions.jsonl)
+- When 30-day clock completes: provision Kalshi RSA credentials per .env.example
+  instructions, then open a spec session for live_executor.py
+
+---
+
 ## 2026-05-26 (Session 7)
 
 ### What was built

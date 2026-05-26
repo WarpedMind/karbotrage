@@ -40,11 +40,14 @@ from core.events import (
     EventBus,
     PriceUpdateEvent,
     PositionSnapshot,
+    TradeExecutedEvent,
+    TradeResolvedEvent,
 )
-from karbot.core.config import KarbotConfig
+from karbot.core.config import KarbotConfig, SystemConfig
 from agents.floor.arb_scanner import ArbScanner
 from agents.floor.risk_gate import RiskGate
 from agents.floor.paper_executor import PaperExecutor
+from agents.floor.position_tracker import PositionTracker
 from agents.management.compliance import ComplianceOfficer
 
 FIXTURE = PROJECT_ROOT / "tests" / "fixtures" / "paper_test_prices.json"
@@ -259,4 +262,174 @@ async def test_scenario3_no_opportunity(tmp_path, monkeypatch):
     assert len(rejected_entries) == 0, (
         f"Expected no RejectedOpportunityEvents, got {len(rejected_entries)}"
         " (price sum > 1.0 should not reach RiskGate)"
+    )
+
+
+# ── Scenario 4: Paper trade resolves after delay ───────────────────────────────
+
+@pytest.mark.asyncio
+async def test_paper_trade_resolves_after_delay(tmp_path, monkeypatch):
+    """
+    Scenario 4: TradeResolvedEvent fires after paper_resolution_delay_seconds.
+
+    Setup:  1-second resolution delay; happy-path price → trade executes.
+    Expect: TradeResolvedEvent emitted with correct trade_id and positive realized_pnl.
+            PositionTracker deployed_capital returns to 0.0 after resolution.
+            PositionTracker open_positions is empty after resolution.
+            PositionTracker total_capital increased by realized_pnl.
+    """
+    logs_dir = tmp_path / "logs"
+    monkeypatch.setattr("agents.management.compliance.LOGS_DIR", logs_dir)
+
+    config = KarbotConfig(system=SystemConfig(paper_mode=True, paper_resolution_delay_seconds=1))
+    bus = EventBus()
+
+    tracker = PositionTracker(bus=bus, config=config)
+    arb     = ArbScanner(bus=bus, config=config)
+    gate    = RiskGate(bus=bus, config=config)
+    exec_   = PaperExecutor(bus=bus, config=config)
+    comp    = ComplianceOfficer(bus=bus, config=config)
+
+    resolved_events = []
+    async def _collect_resolved(ev):
+        resolved_events.append(ev)
+    bus.subscribe(TradeResolvedEvent, _collect_resolved)
+
+    executed_events = []
+    async def _collect_executed(ev):
+        executed_events.append(ev)
+    bus.subscribe(TradeExecutedEvent, _collect_executed)
+
+    bus_task = await _run_pipeline(bus, [tracker, arb, gate, exec_, comp])
+
+    # Provide PositionSnapshot so RiskGate can approve
+    await bus.publish(PositionSnapshot(
+        source="test",
+        total_capital_usd=10_000.0,
+        deployed_capital_usd=1_000.0,
+        free_capital_usd=9_000.0,
+        correlation_score=0.1,
+        daily_pnl_usd=0.0,
+        daily_trades=0,
+    ))
+    await asyncio.sleep(0.05)
+
+    await _inject_price(bus, _load_fixture(0))
+    await asyncio.sleep(0.3)  # pipeline: price → arb → gate → exec
+
+    assert len(executed_events) == 1, (
+        f"Expected 1 TradeExecutedEvent before resolution, got {len(executed_events)}"
+    )
+    executed_trade_id = executed_events[0].trade_id
+
+    # Wait for 1s resolution delay + buffer
+    await asyncio.sleep(2.0)
+
+    bus_task.cancel()
+    await asyncio.gather(bus_task, return_exceptions=True)
+
+    assert len(resolved_events) == 1, (
+        f"Expected 1 TradeResolvedEvent, got {len(resolved_events)}"
+    )
+    assert resolved_events[0].trade_id == executed_trade_id
+    assert resolved_events[0].realized_pnl > 0, (
+        "TradeResolvedEvent should have positive realized_pnl"
+    )
+
+    # PositionTracker state after resolution
+    assert tracker._deployed_capital == pytest.approx(0.0), (
+        f"deployed_capital should be 0.0 after resolution, got {tracker._deployed_capital}"
+    )
+    assert len(tracker._open_positions) == 0, (
+        "open_positions should be empty after resolution"
+    )
+    assert tracker._total_capital > 10_000.0, (
+        f"total_capital should have grown after resolution, got {tracker._total_capital}"
+    )
+
+
+# ── Scenario 5: Full paper P&L cycle with two trades ──────────────────────────
+
+@pytest.mark.asyncio
+async def test_full_paper_pnl_cycle(tmp_path, monkeypatch):
+    """
+    Scenario 5: Two trades execute and both resolve. Verify cumulative P&L.
+
+    Expect: total_capital increased by sum of both realized_pnl values.
+            deployed_capital is 0.0 after both resolve.
+            open_positions is empty after both resolve.
+    """
+    logs_dir = tmp_path / "logs"
+    monkeypatch.setattr("agents.management.compliance.LOGS_DIR", logs_dir)
+
+    config = KarbotConfig(system=SystemConfig(paper_mode=True, paper_resolution_delay_seconds=1))
+    bus = EventBus()
+
+    tracker = PositionTracker(bus=bus, config=config)
+    arb     = ArbScanner(bus=bus, config=config)
+    gate    = RiskGate(bus=bus, config=config)
+    exec_   = PaperExecutor(bus=bus, config=config)
+    comp    = ComplianceOfficer(bus=bus, config=config)
+
+    resolved_events = []
+    async def _collect_resolved(ev):
+        resolved_events.append(ev)
+    bus.subscribe(TradeResolvedEvent, _collect_resolved)
+
+    bus_task = await _run_pipeline(bus, [tracker, arb, gate, exec_, comp])
+
+    initial_capital = tracker._total_capital  # PAPER_DEFAULT_CAPITAL = 10_000
+
+    # Inject two profitable price events (fixtures 0 and 1 are both 0.40/0.40)
+    await bus.publish(PositionSnapshot(
+        source="test",
+        total_capital_usd=10_000.0,
+        deployed_capital_usd=0.0,
+        free_capital_usd=10_000.0,
+        correlation_score=0.0,
+        daily_pnl_usd=0.0,
+        daily_trades=0,
+    ))
+    await asyncio.sleep(0.05)
+
+    await _inject_price(bus, _load_fixture(0))   # KALSHI-TEST-001
+    await asyncio.sleep(0.2)
+
+    # After first trade, publish fresh snapshot so second trade can also be approved
+    await bus.publish(PositionSnapshot(
+        source="test",
+        total_capital_usd=10_000.0,
+        deployed_capital_usd=tracker._deployed_capital,
+        free_capital_usd=10_000.0 - tracker._deployed_capital,
+        correlation_score=0.0,
+        daily_pnl_usd=0.0,
+        daily_trades=1,
+    ))
+    await asyncio.sleep(0.05)
+
+    await _inject_price(bus, _load_fixture(1))   # KALSHI-TEST-002
+    await asyncio.sleep(0.2)
+
+    # Wait for both 1-second resolution timers + buffer
+    await asyncio.sleep(2.5)
+
+    bus_task.cancel()
+    await asyncio.gather(bus_task, return_exceptions=True)
+
+    assert len(resolved_events) == 2, (
+        f"Expected 2 TradeResolvedEvents, got {len(resolved_events)}"
+    )
+
+    total_realized = sum(e.realized_pnl for e in resolved_events)
+    assert total_realized > 0, "Sum of realized_pnl should be positive"
+
+    assert tracker._deployed_capital == pytest.approx(0.0), (
+        f"deployed_capital should be 0.0 after both resolve, got {tracker._deployed_capital}"
+    )
+    assert len(tracker._open_positions) == 0, (
+        "open_positions should be empty after both trades resolve"
+    )
+    assert tracker._total_capital == pytest.approx(initial_capital + total_realized), (
+        f"total_capital should be {initial_capital + total_realized:.4f}, "
+        f"got {tracker._total_capital:.4f}"
     )

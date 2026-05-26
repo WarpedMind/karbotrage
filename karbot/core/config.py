@@ -14,9 +14,13 @@ Phase rules:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import logging
+import os
+from dataclasses import dataclass, field, fields as dataclass_fields
 from pathlib import Path
 from typing import Any, Dict, List
+
+log = logging.getLogger(__name__)
 
 
 # ── Hard risk limits (non-negotiable) ─────────────────────────────────────────
@@ -38,6 +42,7 @@ class SystemConfig:
     paper_mode: bool = True   # Must be True until live trading is explicitly enabled
     debug: bool = False
     log_level: str = "INFO"
+    paper_resolution_delay_seconds: int = 300   # delay before emitting TradeResolvedEvent in paper mode
 
 
 @dataclass
@@ -157,6 +162,26 @@ class RegulatoryIntelligenceConfig:
     poll_interval_hours: int = 6
 
 
+@dataclass
+class SecretsConfig:
+    kalshi_api_key_id: str = field(
+        default_factory=lambda: os.environ.get("KALSHI_API_KEY_ID", ""))
+    kalshi_private_key_path: str = field(
+        default_factory=lambda: os.environ.get("KALSHI_PRIVATE_KEY_PATH", ""))
+    telegram_bot_token: str = field(
+        default_factory=lambda: os.environ.get("TELEGRAM_BOT_TOKEN", ""))
+    telegram_chat_id: str = field(
+        default_factory=lambda: os.environ.get("TELEGRAM_CHAT_ID", ""))
+    anthropic_api_key: str = field(
+        default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY", ""))
+
+    def __post_init__(self):
+        missing = [f.name for f in dataclass_fields(self)
+                   if not getattr(self, f.name)]
+        if missing:
+            log.warning("secrets_missing_at_startup fields=%s", missing)
+
+
 # ── Top-level config ──────────────────────────────────────────────────────────
 
 @dataclass
@@ -169,6 +194,7 @@ class KarbotConfig:
     intelligence:             IntelligenceConfig            = field(default_factory=IntelligenceConfig)
     telegram:                 TelegramConfig                = field(default_factory=TelegramConfig)
     regulatory_intelligence:  RegulatoryIntelligenceConfig = field(default_factory=RegulatoryIntelligenceConfig)
+    secrets:                  SecretsConfig                 = field(default_factory=SecretsConfig)
 
     # Regulatory compliance fields (set manually in config.yaml after reading guidance)
     regulatory_halt: bool = False
@@ -217,10 +243,14 @@ class KarbotConfig:
         trading = raw.get("trading", {})
         paper = trading.get("mode", "paper") == "paper"
 
+        sys_raw = raw.get("system", {})
         system = SystemConfig(
             paper_mode=paper,
-            debug=raw.get("system", {}).get("debug", False),
-            log_level=raw.get("system", {}).get("log_level", "INFO"),
+            debug=sys_raw.get("debug", False),
+            log_level=sys_raw.get("log_level", "INFO"),
+            paper_resolution_delay_seconds=sys_raw.get(
+                "paper_resolution_delay_seconds", 300
+            ),
         )
 
         tg_raw = raw.get("telegram", {})

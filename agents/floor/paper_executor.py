@@ -22,6 +22,7 @@ from karbot.core.events import (
     EventBus,
     ApprovedOpportunityEvent,
     TradeExecutedEvent,
+    TradeResolvedEvent,
     Priority,
 )
 
@@ -103,3 +104,30 @@ class PaperExecutor:
         )
 
         await self.bus.publish(trade_event)
+
+        # Schedule paper resolution after the configured delay
+        delay = self.config.system.paper_resolution_delay_seconds
+        first_market_id = opp.legs[0].get("market_id", "") if opp.legs else ""
+        trade_id = trade_event.trade_id
+
+        async def _resolve():
+            await asyncio.sleep(delay)
+            resolved = TradeResolvedEvent(
+                source=self.AGENT_NAME,
+                priority=Priority.HIGH,
+                trade_id=trade_id,
+                market_id=first_market_id,
+                platform="kalshi",
+                resolution="YES",
+                realized_pnl=expected_pnl,
+                holding_period_hours=delay / 3600,
+            )
+            await self.bus.publish(resolved)
+            log.info(
+                "paper_trade_resolved",
+                trade_id=trade_id,
+                realized_pnl=round(expected_pnl, 4),
+                delay_seconds=delay,
+            )
+
+        asyncio.create_task(_resolve(), name=f"paper_resolve_{trade_id[:8]}")

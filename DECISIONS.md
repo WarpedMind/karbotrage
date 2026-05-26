@@ -1,5 +1,27 @@
 # Decision Log
 
+## 2026-05-26 — Session: Security hardening + TradeResolvedEvent
+
+### Secrets management pattern (project-wide, permanent)
+- SecretsConfig dataclass loads all credentials from environment variables only
+- config.yaml moved to .gitignore; config.yaml.example committed in its place
+- .env.example documents all required environment variables with setup instructions
+- python-dotenv added: local dev uses .env file; VPS uses systemd EnvironmentFile
+- load_dotenv() in karbot_runner.py is a no-op when real env vars already set
+- Agents access credentials via config.secrets.* exclusively — never os.environ directly
+
+### TradeResolvedEvent wiring
+- PaperExecutor now emits TradeResolvedEvent after paper_resolution_delay_seconds (default 300)
+- Full paper P&L cycle now closes: trade opens → capital deploys → trade resolves →
+  capital frees → P&L accumulates in _total_capital
+- 30-day paper trading clock starts after this session (2026-05-26, target complete 2026-06-25)
+
+### Known remaining debt
+- correlation_score in PositionSnapshot permanently 0.0 — Phase 3 item
+- execution/engine.py legacy path — deferred until after live executor is built and tested
+
+---
+
 ## 2026-05-26 — Session: PositionTracker Phase 2
 
 ### What was wired

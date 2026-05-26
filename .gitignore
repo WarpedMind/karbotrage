@@ -26,9 +26,20 @@ wheels/
 .installed.cfg
 *.egg
 
-# Environment variables
+# Secrets — never commit
 .env
+.env.*
+!.env.example
+
+# Config with real values — never commit
+config.yaml
 config/config.yaml
+!config.yaml.example
+
+# Kalshi RSA private key — never commit
+*.pem
+*.key
+secrets/
 
 # IDE
 .vscode/
@@ -46,8 +57,13 @@ logs/
 *.csv
 *.jsonl
 
+# Python
+.pytest_cache/
+*.egg-info/
+
 # Virtual environments
 venv/
 env/
 ENV/
 env.bak/
+karbotrage_env/

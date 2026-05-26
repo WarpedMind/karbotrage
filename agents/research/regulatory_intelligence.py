@@ -331,7 +331,9 @@ class RegulatoryIntelligenceAgentImpl:
             return self._fallback_result(item)
 
         if self._claude is None:
-            self._claude = _anthropic.AsyncAnthropic()
+            self._claude = _anthropic.AsyncAnthropic(
+                api_key=self.config.secrets.anthropic_api_key
+            )
 
         raw_title = item.get("title", "")
         source_url = item.get("url", "")

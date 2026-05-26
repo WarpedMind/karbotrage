@@ -8,6 +8,36 @@ Karbot Rage! is a multi-agent automated trading system designed for decentralize
 - Modular architecture with core, execution, data, intelligence, strategies, trading, and monitoring components
 - Run with: `karbotrage_env/bin/python karbot_runner.py` (new path) or `python main.py` (legacy)
 
+## SECURITY RULES — non-negotiable, apply to every session
+
+### Secrets
+- Credentials load from environment variables only — never from config.yaml, never hardcoded
+- SecretsConfig in karbot/core/config.py is the only place secrets are read from environment
+- Agents read credentials from config.secrets.* — never os.environ directly
+- config.yaml is in .gitignore — only config.yaml.example is committed
+- .env is in .gitignore — never committed under any circumstances
+
+### Logs
+- No credential values, API keys, tokens, or private key paths in any log output
+- No SecretsConfig field values ever logged at any level
+- Prompt text sent to Claude API is logged at DEBUG only, never INFO or above
+- audit_trail.jsonl and kalshi_trades.csv contain trade data only — no auth material
+
+### Git
+- Before every commit: confirm no .env, no config.yaml, no *.pem in staged files
+- If a secret is ever accidentally committed: rotate the credential immediately,
+  then remove from git history with git filter-repo
+
+### VPS (when provisioned)
+- Private keys stored in /etc/karbot/secrets/, chmod 600, owned by service user
+- Bot runs as dedicated karbot_user — never as root
+- Secrets injected via systemd EnvironmentFile — not from .env inside the repo directory
+
+### New credentials (Kalshi RSA, future exchanges)
+- Generate RSA key pairs locally — never on the VPS, never online
+- Upload public key only to the exchange
+- Private key goes directly to /etc/karbot/secrets/ — nowhere else
+
 ## Architecture
 
 ### Target architecture (event-bus-driven agents — extend this, not the legacy path)
@@ -40,27 +70,33 @@ async def run(self): ...
 ## Current status
 - karbot_runner.py: **Written and verified** — supports --mock-prices and --exit-after-test flags; 10 agents start and exit cleanly
 - core/events.py: Full event bus with all typed events — production-ready; RegulatoryAlertEvent has full AI-assessment fields (urgency, summary, affected, recommended_action, raw_title, cycle_type); TelegramPermissionResponseEvent has response_text field; priority queue fixed with sequence tiebreaker
-- karbot/core/config.py: KarbotConfig Phase 1 invariants structural + from_yaml() + .phase + .paper_mode + regulatory_halt + TelegramConfig + RegulatoryIntelligenceConfig sub-dataclasses
+- karbot/core/config.py: KarbotConfig Phase 1 invariants structural + from_yaml() + .phase + .paper_mode + regulatory_halt + TelegramConfig + RegulatoryIntelligenceConfig + SecretsConfig sub-dataclasses; SystemConfig.paper_resolution_delay_seconds added
 - agents/research/regulatory_intelligence.py: **COMPLETE** — full Regulatory Intelligence Agent; 11 tests passing; Claude Sonnet urgency assessment; cost controls (daily cap, circuit breaker, overflow queue, spend estimator); operator clear flow via Telegram
 - agents/management/compliance.py: **v2 UPDATED** — polling loop removed; subscribes to RegulatoryAlertEvent; logs AI-assessed regulatory alerts to compliance_actions.jsonl
 - agents/floor/risk_gate.py: **UPDATED** — subscribes to RegulatoryAlertEvent; _regulatory_pause blocks trades on urgency=5; cleared on urgency=0
 - agents/notifications/telegram_agent.py: **UPDATED** — response_text field populated on every operator message for clear phrase detection
-- agents/floor/paper_executor.py: **COMPLETE** — paper trading fill simulator; subscribes to ApprovedOpportunityEvent, emits TradeExecutedEvent(paper_mode=True)
+- agents/floor/paper_executor.py: **UPDATED** — paper trading fill simulator; subscribes to ApprovedOpportunityEvent, emits TradeExecutedEvent(paper_mode=True); schedules TradeResolvedEvent via asyncio.create_task after paper_resolution_delay_seconds (default 300s)
 - agents/floor/mock_price_watcher.py: **COMPLETE** — fixture-driven price replay for end-to-end tests; signals done via asyncio.Event; 0.1s initial delay ensures PositionSnapshot is dispatched before first price
 - agents/floor/position_tracker.py: **Phase 2 COMPLETE** — subscribes to TradeExecutedEvent, TradeResolvedEvent, LegFailureEvent; deployed_capital_usd, open_positions, daily_trades, daily_pnl all update in real time; daily UTC reset; publishes snapshot on every state change; correlation_score=0.0 (Phase 3 item)
-- tests/test_paper_trading.py: **COMPLETE** — 3 scenarios passing (happy path, rejection, no-opportunity)
+- tests/test_paper_trading.py: **UPDATED** — 5 scenarios passing (happy path, rejection, no-opportunity, resolve-after-delay, full P&L cycle)
 - tests/test_position_tracker.py: **COMPLETE** — 9 tests passing; includes integration test confirming Risk Gate enforces capital limits against real deployed capital
 - tests/test_regulatory_intelligence.py: **COMPLETE** — 11 tests passing; all mocked (no real API calls)
 - tests/fixtures/paper_test_prices.json: **COMPLETE** — 3 price snapshots for test scenarios
 - All Phase 1 agent stubs: Conforming run() and register_subscriptions() on all 10 runner-facing classes
-- requirements.txt: aiohttp, pydantic, websockets, pyyaml, python-json-logger, structlog, tenacity, aiosqlite, anthropic, pytest, pytest-asyncio, black, flake8
+- requirements.txt: aiohttp, pydantic, websockets, pyyaml, python-json-logger, structlog, tenacity, aiosqlite, anthropic, pytest, pytest-asyncio, black, flake8, python-dotenv
 - execution/engine.py: INTENTIONALLY DEFERRED — do not refactor until paper tested end-to-end
+- SecretsConfig: implemented — all credentials load from environment variables only ✓
+- config.yaml: moved to .gitignore; config.yaml.example + .env.example committed ✓
 - Paper trading: End-to-end tested ✓ (kalshi_trades.csv confirmed populated)
-- Full test suite: 33/33 passing ✓
+- TradeResolvedEvent: wired via PaperExecutor — full paper P&L cycle closes ✓
+- 30-day paper trading clock started: 2026-05-26
+- Full test suite: 35/35 passing ✓
 
 ## KNOWN DEBT
-- TradeResolvedEvent is never emitted by the execution layer — positions never close, _total_capital never updates, _daily_pnl is never realised. Must fix before live trading.
-- correlation_score in PositionSnapshot is permanently 0.0 — Phase 3 item.
+
+- correlation_score in PositionSnapshot is permanently 0.0 — Phase 3 item
+- execution/engine.py — legacy monolithic path, intentionally deferred,
+  must be removed or replaced before live trading; do not extend
 
 ## REGULATORY CONTEXT (May 2026 — current)
 - CFTC Letter 26-15 (May 19 2026, EFFECTIVE NOW): New cooperation
@@ -78,8 +114,9 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. Wire execution layer to emit TradeExecutedEvent and LegFailureEvent on real fills so the live path mirrors the paper path
-2. Wire TradeResolvedEvent on market resolution so positions close and total_capital updates correctly (required before live trading)
+1. Monitor paper trading for 30 days — review daily summary logs weekly
+2. Provision Kalshi API credentials (RSA key generation and registration per .env.example)
+3. Begin live executor spec after 30-day paper run completes (2026-06-25)
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 

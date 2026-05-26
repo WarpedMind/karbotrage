@@ -21,7 +21,6 @@ Design decisions:
 import asyncio
 import datetime
 import logging
-import os
 from typing import Dict
 
 import aiohttp
@@ -57,13 +56,13 @@ class TelegramNotificationAgent:
     def __init__(self, bus: EventBus, config: KarbotConfig):
         self.bus = bus
         self.config = config
-        self._token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-        self._chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+        self._token = config.secrets.telegram_bot_token
+        self._chat_id = config.secrets.telegram_chat_id
 
         if config.telegram.enabled and (not self._token or not self._chat_id):
             logger.warning(
-                "TelegramAgent: enabled=True but TELEGRAM_BOT_TOKEN or "
-                "TELEGRAM_CHAT_ID not set — messages will be silently dropped"
+                "TelegramAgent: enabled=True but credentials not configured "
+                "— messages will be silently dropped"
             )
 
         self._outbound_queue: asyncio.Queue = asyncio.Queue()
@@ -110,7 +109,7 @@ class TelegramNotificationAgent:
 
     async def _send_message(self, text: str):
         if not self._token or not self._chat_id:
-            logger.debug(f"TelegramAgent: no credentials — dropped: {text[:80]}")
+            logger.debug("TelegramAgent: no credentials — message dropped")
             return
         url = f"https://api.telegram.org/bot{self._token}/sendMessage"
         try:

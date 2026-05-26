@@ -15,6 +15,9 @@ CLI flags:
                              (2-second settling delay for in-flight events)
 """
 
+from dotenv import load_dotenv
+load_dotenv()  # loads .env if present; no-op if absent; real env vars always win
+
 import argparse
 import asyncio
 import logging
