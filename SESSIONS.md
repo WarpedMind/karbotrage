@@ -88,3 +88,27 @@
 ### What to do first next session
 - Implement PositionTracker agent so runner mode can emit PositionSnapshot events (currently Risk Gate always rejects with NO_POSITION_DATA in runner mode)
 - Wire execution layer to emit TradeExecutedEvent / LegFailureEvent from real trade attempts
+
+## 2026-05-25 (Session 4)
+
+### What was built
+- agents/floor/position_tracker.py — new BaseAgent that publishes a PositionSnapshot at the very top of run() before entering its periodic loop; PAPER_DEFAULT_CAPITAL=10_000 used when config.capital.total_deployed_usd is 0 and paper_mode=True; 30s periodic re-publish to keep snapshot fresh
+- agents/floor/mock_price_watcher.py — added 0.1s initial delay before first price emit; this gives PositionTracker's startup snapshot one event-loop iteration to be dispatched to RiskGate before the first OpportunityEvent can arrive
+- karbot_runner.py — PositionTracker imported and placed first in both agent lists (mock and normal branches); ordering comment explains why it must be first
+
+### What was decided
+- Startup sequencing is the fix, not a ready-gate in RiskGate: PositionTracker publishes synchronously at the start of run(), bus.run() dispatches it before MockPriceWatcher's 0.1s sleep expires, so RiskGate always has a snapshot before the first OpportunityEvent
+- PAPER_DEFAULT_CAPITAL=10_000 avoids ZERO_CAPITAL rejection in dev/test runs where operator has not set total_deployed_usd in config.yaml
+- PositionTracker.run() never calls agent.run() in tests — tests continue to inject PositionSnapshot manually via bus.publish() for full control over capital state
+
+### Verification
+- Runner --exit-after-test: trades approved and logged (KALSHI-TEST-001 and KALSHI-TEST-002 both executed) ✓
+- logs/kalshi_trades.csv: header + 2 data rows ✓
+- logs/audit_trail.jsonl: 2 × TradeExecutedEvent entries present ✓
+- tests/test_paper_trading.py: 3/3 pass ✓
+- tests/ full suite: 10 collected, 2 pre-existing Secrets import errors (not introduced here), 0 new failures ✓
+
+### What to do first next session
+- Wire PositionTracker to subscribe to TradeExecutedEvent and update deployed capital across runs (Phase 2)
+- Wire execution layer to emit LegFailureEvent on partial fill / API error
+- Address pre-existing Secrets import collection errors in test_config.py and test_core_config.py

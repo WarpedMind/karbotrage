@@ -30,6 +30,7 @@ from karbot.core.config import KarbotConfig
 from agents.floor.price_watcher import PriceWatcher
 from agents.floor.arb_scanner import ArbScanner
 from agents.floor.risk_gate import RiskGate
+from agents.floor.position_tracker import PositionTracker
 
 # Phase 1 agents — Research Floor
 from agents.research.market_analyst import MarketAnalyst
@@ -40,7 +41,6 @@ from agents.management.compliance import ComplianceOfficer
 
 # Phase 2 agents — DO NOT instantiate yet
 # from agents.floor.execution_agent import ExecutionAgent
-# from agents.floor.position_tracker import PositionTracker
 # from agents.research.news_analyst import NewsAnalyst
 # from agents.research.sentiment_agent import SentimentAgent
 # from agents.research.geopolitical_agent import GeopoliticalAgent
@@ -108,6 +108,10 @@ async def run(args: argparse.Namespace = None):
         from agents.floor.paper_executor import PaperExecutor
         mock_watcher = MockPriceWatcher(bus=bus, config=config, fixture_path=args.mock_prices)
         agents = [
+            # PositionTracker MUST be first: its run() publishes the startup
+            # PositionSnapshot before MockPriceWatcher emits any prices, so
+            # Risk Gate has a snapshot when the first OpportunityEvent arrives.
+            PositionTracker(bus=bus, config=config),
             mock_watcher,
             ArbScanner(bus=bus, config=config),
             RiskGate(bus=bus, config=config),
@@ -119,6 +123,9 @@ async def run(args: argparse.Namespace = None):
         logger.info(f"Mock mode: MockPriceWatcher + PaperExecutor active | fixture={args.mock_prices}")
     else:
         agents = [
+            # PositionTracker first: publishes startup PositionSnapshot before
+            # PriceWatcher begins emitting market data.
+            PositionTracker(bus=bus, config=config),
             PriceWatcher(bus=bus, config=config),
             ArbScanner(bus=bus, config=config),
             RiskGate(bus=bus, config=config),

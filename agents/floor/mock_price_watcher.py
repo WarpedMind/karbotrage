@@ -59,6 +59,15 @@ class MockPriceWatcher:
         with open(fixture) as f:
             entries = json.load(f)
 
+        # Brief pause before emitting prices.  PositionTracker.run() publishes
+        # its startup PositionSnapshot synchronously (no await before the first
+        # publish call), but the EventBus still needs one event-loop iteration to
+        # dispatch it to RiskGate._on_position_snapshot.  Without this delay the
+        # first PriceUpdateEvent can arrive at ArbScanner before the snapshot has
+        # been dispatched, causing the resulting OpportunityEvent to be rejected
+        # with NO_POSITION_DATA.  0.1 s is sufficient — dispatch takes < 1 ms.
+        await asyncio.sleep(0.1)
+
         log.info("mock_price_watcher_starting", total_entries=len(entries))
 
         for entry in entries:

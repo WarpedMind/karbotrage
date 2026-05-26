@@ -11,7 +11,7 @@ Karbot Rage! is a multi-agent automated trading system designed for decentralize
 ## Architecture
 
 ### Target architecture (event-bus-driven agents — extend this, not the legacy path)
-- karbot_runner.py: **NEW entry point** — starts all 6 Phase 1 agents as concurrent asyncio tasks; verified working. Use this, not main.py.
+- karbot_runner.py: **NEW entry point** — starts all 7 Phase 1 agents as concurrent asyncio tasks; verified working. Use this, not main.py.
 - core/events.py: EventBus + all typed event dataclasses — the communication backbone
 - karbot/core/: Package exists — agents import from here
   - karbot/core/config.py: KarbotConfig typed dataclass; Phase 1 invariants enforced structurally at `__init__` — `polymarket_ws_enabled=True` with `phase=1` raises `ValueError`, `s2_cross_platform_enabled=True` with `phase=1` raises `ValueError`; RiskConfig hard limits also enforced at instantiation. Now also has `from_yaml(path)` classmethod, `.phase` property (→ capital.phase), and `.paper_mode` property (→ system.paper_mode).
@@ -41,13 +41,14 @@ async def run(self): ...
 - karbot/core/config.py: KarbotConfig Phase 1 invariants structural + from_yaml() + .phase + .paper_mode + regulatory_halt fields added
 - agents/management/compliance.py: **v2 COMPLETE** — IRS trade logging, audit trail, regulatory monitoring, REGULATORY_HALT — all 7 spec verification steps pass; fixed datetime JSON serialization in _append_audit
 - agents/floor/paper_executor.py: **NEW** — paper trading fill simulator; subscribes to ApprovedOpportunityEvent, emits TradeExecutedEvent(paper_mode=True)
-- agents/floor/mock_price_watcher.py: **NEW** — fixture-driven price replay for end-to-end tests; signals done via asyncio.Event
+- agents/floor/mock_price_watcher.py: **NEW** — fixture-driven price replay for end-to-end tests; signals done via asyncio.Event; 0.1s initial delay ensures PositionSnapshot is dispatched before first price
+- agents/floor/position_tracker.py: **NEW** — publishes startup PositionSnapshot at top of run() so RiskGate can approve trades immediately; PAPER_DEFAULT_CAPITAL=10_000 when config.capital.total_deployed_usd not set
 - tests/test_paper_trading.py: **NEW** — 3 scenarios passing (happy path, rejection, no-opportunity)
 - tests/fixtures/paper_test_prices.json: **NEW** — 3 price snapshots for test scenarios
-- All Phase 1 agent stubs: Conforming run() and register_subscriptions() on all 6 runner-facing classes
+- All Phase 1 agent stubs: Conforming run() and register_subscriptions() on all 7 runner-facing classes
 - requirements.txt: aiohttp, pydantic, websockets, pyyaml, python-json-logger, structlog, tenacity, aiosqlite, anthropic, pytest, pytest-asyncio, black, flake8
 - execution/engine.py: INTENTIONALLY DEFERRED — do not refactor until paper tested end-to-end
-- Paper trading: End-to-end tested ✓
+- Paper trading: End-to-end tested ✓ (kalshi_trades.csv confirmed populated)
 
 ## REGULATORY CONTEXT (May 2026 — current)
 - CFTC Letter 26-15 (May 19 2026, EFFECTIVE NOW): New cooperation
@@ -65,8 +66,9 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. Wire execution layer to emit TradeExecutedEvent / LegFailureEvent so compliance logs real trades (PositionTracker → emit PositionSnapshot so RiskGate can approve live trades)
-2. Implement PositionTracker agent so runner can approve real (paper) trades end-to-end without injecting manual PositionSnapshot
+1. Wire PositionTracker to subscribe to TradeExecutedEvent so deployed capital is tracked accurately across runs (Phase 2 of PositionTracker)
+2. Wire execution layer to emit LegFailureEvent on partial fill / API error so compliance audit trail captures failures
+3. Address pre-existing Secrets import collection errors in test_config.py and test_core_config.py (tech debt — Secrets class was removed from karbot/core/config.py)
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 
