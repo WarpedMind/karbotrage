@@ -59,6 +59,16 @@ from agents.notifications.telegram_agent import TelegramAgent
 logger = logging.getLogger(__name__)
 
 
+async def _run_supervised(agent_name: str, coro) -> None:
+    """Run an agent coroutine; catch and log crashes so other agents keep running."""
+    try:
+        await coro
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception(f"Agent {agent_name!r} crashed — runner continues with remaining agents")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Karbot Rage! Agent Runner — WallStRobotics"
@@ -159,7 +169,10 @@ async def run(args: argparse.Namespace = None):
     # --- 5. Start all agents as concurrent asyncio tasks ---
     tasks = []
     for agent in agents:
-        task = asyncio.create_task(agent.run(), name=agent.__class__.__name__)
+        task = asyncio.create_task(
+            _run_supervised(agent.__class__.__name__, agent.run()),
+            name=agent.__class__.__name__,
+        )
         tasks.append(task)
         logger.info(f"Started task: {agent.__class__.__name__}")
 
@@ -188,7 +201,7 @@ async def run(args: argparse.Namespace = None):
         return
 
     try:
-        await asyncio.gather(bus_task, *tasks)
+        await asyncio.gather(bus_task, *tasks, return_exceptions=True)
     except asyncio.CancelledError:
         logger.info("Shutdown signal received — cancelling agent tasks")
         bus_task.cancel()

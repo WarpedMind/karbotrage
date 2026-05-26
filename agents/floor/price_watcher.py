@@ -534,6 +534,15 @@ class PriceWatcher:
         pass
 
     async def run(self):
-        log.info("PriceWatcher stub running (not yet implemented)")
-        while True:
-            await asyncio.sleep(60)
+        if self.config.paper_mode:
+            log.info(
+                "PriceWatcher: paper mode active, no mock feed configured — idling. "
+                "No PriceUpdateEvents will be emitted."
+            )
+            while True:
+                await asyncio.sleep(60)
+                log.debug("PriceWatcher: paper idle heartbeat")
+        else:
+            log.info("PriceWatcher stub running (not yet implemented)")
+            while True:
+                await asyncio.sleep(60)

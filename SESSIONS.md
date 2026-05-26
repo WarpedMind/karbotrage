@@ -1,6 +1,44 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-05-26 (Session 10 — Continuous paper mode fix)
+
+### What was built
+- karbot_runner.py — added `_run_supervised()` helper; wraps each agent's `run()` so
+  any non-CancelledError exception is logged and swallowed, letting all other agents
+  continue running; agent task creation now passes through the supervisor wrapper;
+  main `asyncio.gather()` updated to `return_exceptions=True`
+- agents/floor/price_watcher.py — `PriceWatcher.run()` (the BaseAgent stub ONLY;
+  `PriceWatcherAgent` full impl was not touched) now checks `config.paper_mode`:
+  - If True: logs INFO "PriceWatcher: paper mode active, no mock feed configured —
+    idling. No PriceUpdateEvents will be emitted." then enters 60s sleep loop with
+    DEBUG heartbeat; zero network calls
+  - If False (future live path): falls through to existing "stub running" loop
+
+### What was verified (9/9 smoke test checks green)
+- Runner starts without errors in continuous paper mode ✓
+- All agents log startup messages ✓
+- PriceWatcher paper idle message logged exactly once ✓
+- No WebSocket connection attempts in logs ✓
+- No credential-related errors ✓
+- No exceptions or tracebacks ✓
+- python -m pytest tests/ -v: 35/35 passed ✓
+- karbot_runner.py --exit-after-test still works (mock path unaffected) ✓
+- Ctrl+C (SIGINT) exits cleanly (exit_code=0) ✓
+
+### What was decided
+- PriceWatcher paper idle path lives only in the stub (PriceWatcher.run()), never in
+  PriceWatcherAgent — confirmed explicitly
+- Supervisor wrapper swallows non-fatal agent exceptions so one crash cannot kill others
+- 30-day paper trading clock is confirmed running — continuous mode is stable
+
+### What to do first next session
+- Review paper trading daily summary logs (logs/compliance_actions.jsonl)
+- When 30-day clock completes (2026-06-25): provision Kalshi RSA credentials per
+  .env.example, then open spec session for live_executor.py
+
+---
+
 ## 2026-05-26 (Session 9 — Security + TradeResolvedEvent)
 
 ### What was built
