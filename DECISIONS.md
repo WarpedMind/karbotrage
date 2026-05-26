@@ -1,5 +1,68 @@
 # Decision Log
 
+## 2026-05-26 — Session: Regulatory Intelligence Agent
+
+### Model selection
+- Claude Sonnet (claude-sonnet-4-6) selected over Haiku for regulatory interpretation
+- Rationale: quality matters for compliance decisions; cost still negligible at 10 calls/cycle
+
+### Cost controls
+- Per-cycle cap: 10 calls (configurable via regulatory_ai_calls_per_cycle)
+- Daily hard cap: 50 calls/day (configurable); hit → stop + Telegram alert
+- Circuit breaker: 20 calls in 10 minutes (configurable) → immediate stop + Telegram alert + runner restart required
+- Monthly spend estimator: logged daily at 00:00 UTC reset
+- Overflow queue: items exceeding per-cycle cap held for processing in the next cycle — not dropped
+
+### Operator control philosophy
+- Urgency 5 pauses new trade approvals — AI recommends, operator decides
+- Clear phrase in config.yaml (regulatory_clear_phrase) — operator sends via Telegram to resume
+- Circuit breaker requires runner restart — not clearable via Telegram by design
+
+### TelegramPermissionResponseEvent: response_text field added
+- Added response_text: str = "" to TelegramPermissionResponseEvent
+- TelegramAgent now always publishes TelegramPermissionResponseEvent with response_text for every operator message (not just when a pending request exists)
+- This allows RegulatoryIntelligenceAgent to detect the clear phrase without requiring a formal permission request cycle
+- Existing behavior for FIFO permission resolution unchanged — additive only
+
+### EventBus priority queue tiebreaker
+- Fixed pre-existing bug: asyncio.PriorityQueue with (priority, event) tuples fails when two events have the same priority (heapq tries to compare event objects)
+- Fix: use 3-tuple (priority, seq, event) where seq is a monotonic counter
+- Exposed by Python 3.14 but would have failed in earlier versions too whenever same-priority events were enqueued simultaneously
+- No behavior change; FIFO ordering preserved within same priority level
+
+### ComplianceOfficer polling loop removed
+- Polling was: fetch CFTC RSS + Federal Register every 6h, keyword scan, log to file
+- Replaced by: RegulatoryIntelligenceAgent does the same fetching with AI interpretation
+- ComplianceOfficer now subscribes to RegulatoryAlertEvent and logs AI-assessed alerts to compliance_actions.jsonl
+- regulatory_alerts.txt removed (was written by ComplianceOfficer; no longer needed)
+
+---
+
+## 2026-05-26 — Session: Telegram notification agent
+
+### Polling vs webhook
+- Polling selected over webhook
+- Rationale: VPS does not expose public inbound ports (dashboard is local-only per architecture doc). Polling is consistent with that posture, requires zero additional infrastructure, and handles the operator permission use case adequately given 3-second polling intervals are fast enough for human response times.
+- Implementation: getUpdates polling every 3 seconds, last_update_id tracked across calls
+
+### Operator reply resolution for permission requests
+- Single-operator simplification: any "yes"/"no" reply resolves the oldest pending permission request (FIFO)
+- Rationale: Only one operator. Multi-request concurrency is not a real scenario in Phase 1.
+- Revisit when: Regulatory Intelligence Agent generates concurrent permission requests (unlikely but possible)
+
+### New event types added to core/events.py
+- `RegulatoryAlertEvent`: published by ComplianceOfficer when regulatory keyword match found (not yet wired in compliance.py — TelegramAgent subscribed and ready)
+- `TelegramNotificationEvent`: any agent can publish to request a Telegram message (tier 1=critical, 2=trade-level, 3=digest)
+- `TelegramPermissionRequestEvent`: any agent can publish to request operator permission with timeout + default
+- `TelegramPermissionResponseEvent`: TelegramAgent publishes on operator reply or timeout; `source` field = "operator" or "timeout"
+
+### TelegramConfig: credentials from env vars only
+- TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID never stored in config.yaml
+- enabled=False default — must be explicitly opted in
+- graceful degradation: if enabled=True but env vars missing, logs warning and drops messages silently
+
+---
+
 ## 2026-05-26 — Session: Paper trading verification, debt cleanup, next phase sequencing
 
 ### Telegram architecture decision

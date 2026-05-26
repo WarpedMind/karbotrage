@@ -37,13 +37,12 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-import aiohttp
-
 from core.events import (
     EventBus,
     TradeExecutedEvent,
     LegFailureEvent,
     RejectedOpportunityEvent,
+    RegulatoryAlertEvent,
 )
 from karbot.core.config import KarbotConfig
 
@@ -51,52 +50,6 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_VERSION = "1.0.0"
 LOGS_DIR = Path("logs")
-
-# ── Regulatory sources ─────────────────────────────────────────────────────
-REGULATORY_SOURCES = [
-    {
-        "name": "CFTC Press Releases",
-        "url": "https://www.cftc.gov/PressRoom/PressReleases/rss.xml",
-        "type": "rss",
-    },
-    {
-        "name": "CFTC Speeches & Testimony",
-        "url": "https://www.cftc.gov/PressRoom/SpeechesTestimony/rss.xml",
-        "type": "rss",
-    },
-    {
-        "name": "Federal Register — CFTC Rules",
-        "url": (
-            "https://www.federalregister.gov/api/v1/articles.json"
-            "?agencies[]=commodity-futures-trading-commission"
-            "&per_page=5&order=newest"
-        ),
-        "type": "json",
-    },
-]
-
-REGULATORY_KEYWORDS = [
-    # Platform-specific
-    "kalshi", "polymarket", "forecastex",
-    # Contract types
-    "event contract", "prediction market", "designated contract market", "dcm",
-    # Enforcement actions
-    "cease", "suspend", "halt", "enforcement action", "fine", "sanction",
-    "complaint", "charges", "prosecution", "injunction", "disgorgement",
-    # CFTC priority areas (as of Mar 2026)
-    "insider trading", "material nonpublic", "mnpi",
-    "wash trading", "spoofing", "manipulation", "disruptive trading",
-    # Tax
-    "irs", "form 1099", "tax treatment", "section 1256", "form 8949",
-    # Regulatory process
-    "proposed rule", "final rule", "effective date", "compliance deadline",
-    "prohibited", "restricted", "contrary to public interest",
-    # Legislation (active as of May 2026)
-    "death bets act", "prediction markets security",
-    "commodity exchange act",
-    # Cooperation policy
-    "self-report", "letter 26-15", "cooperation policy",
-]
 
 # ── CSV schemas ────────────────────────────────────────────────────────────
 KALSHI_CSV_HEADERS = [
@@ -152,12 +105,10 @@ class ComplianceOfficer:
         self._kalshi_csv = LOGS_DIR / "kalshi_trades.csv"
         self._polymarket_csv = LOGS_DIR / "polymarket_trades.csv"
         self._audit_trail = LOGS_DIR / "audit_trail.jsonl"
-        self._regulatory_alerts = LOGS_DIR / "regulatory_alerts.txt"
         self._compliance_actions = LOGS_DIR / "compliance_actions.jsonl"
 
         self._ensure_log_files()
         self._last_summary_date = ""
-        self._last_reg_check = datetime.min.replace(tzinfo=timezone.utc)
 
         # Document startup as a compliance action
         self._log_compliance_action(
@@ -225,11 +176,7 @@ class ComplianceOfficer:
             )
 
         # All other log files
-        for path in (
-            self._audit_trail,
-            self._compliance_actions,
-            self._regulatory_alerts,
-        ):
+        for path in (self._audit_trail, self._compliance_actions):
             if not path.exists():
                 path.touch()
                 logger.info(f"Created {path}")
@@ -241,18 +188,19 @@ class ComplianceOfficer:
         self.bus.subscribe(TradeExecutedEvent, self.handle_trade_executed)
         self.bus.subscribe(LegFailureEvent, self.handle_leg_failure)
         self.bus.subscribe(RejectedOpportunityEvent, self.handle_rejected)
+        self.bus.subscribe(RegulatoryAlertEvent, self.handle_regulatory_alert)
         logger.info("ComplianceOfficer subscriptions registered")
 
     async def run(self):
         """
         Main loop — runs forever.
         Trade logging is event-driven via subscriptions.
-        Periodic tasks: regulatory check and daily summary.
+        Periodic task: daily compliance summary.
+        Regulatory monitoring is handled by RegulatoryIntelligenceAgent.
         """
         logger.info("ComplianceOfficer running — cannot be disabled")
         while True:
             await self._daily_summary_if_due()
-            await self._regulatory_check_if_due()
             await asyncio.sleep(60)
 
     # ── Event handlers ─────────────────────────────────────────────────────
@@ -324,138 +272,49 @@ class ComplianceOfficer:
                 exc_info=True,
             )
 
-    # ── Regulatory monitoring ──────────────────────────────────────────────
-
-    async def _regulatory_check_if_due(self):
-        """Poll regulatory sources on configured interval (default 6h)."""
-        interval = getattr(
-            self.config, "regulatory_check_interval_hours", 6
-        )
-        now = datetime.now(timezone.utc)
-        hours_since = (now - self._last_reg_check).total_seconds() / 3600
-        if hours_since < interval:
-            return
-        self._last_reg_check = now
-        await self._run_regulatory_check()
-
-    async def _run_regulatory_check(self):
+    async def handle_regulatory_alert(self, event: RegulatoryAlertEvent):
         """
-        Fetch regulatory sources and scan for keywords.
-        On match: log alert to file + audit trail + emit WARNING log.
-        Does NOT halt trading automatically — alert only.
-        Operator reads alert and sets REGULATORY_HALT manually if needed.
+        Log RegulatoryAlertEvent from RegulatoryIntelligenceAgent.
+        Records to compliance_actions.jsonl and audit trail.
+        This is the compliance record that demonstrates good-faith
+        regulatory monitoring under CFTC Letter 26-15.
         """
-        logger.info("[COMPLIANCE] Running regulatory check...")
-        alerts_found = []
-
-        async with aiohttp.ClientSession() as session:
-            for source in REGULATORY_SOURCES:
-                try:
-                    async with session.get(
-                        source["url"],
-                        timeout=aiohttp.ClientTimeout(total=15),
-                    ) as resp:
-                        if resp.status != 200:
-                            logger.warning(
-                                f"[COMPLIANCE] {source['name']} "
-                                f"returned HTTP {resp.status}"
-                            )
-                            continue
-                        text = await resp.text()
-                        matches = self._scan_keywords(text)
-                        if matches:
-                            alerts_found.append({
-                                "source": source["name"],
-                                "url": source["url"],
-                                "matched_keywords": matches,
-                                "timestamp_utc": datetime.now(
-                                    timezone.utc
-                                ).isoformat(),
-                            })
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        f"[COMPLIANCE] Timeout: {source['name']}"
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"[COMPLIANCE] Error fetching {source['name']}: {e}"
-                    )
-
-        if alerts_found:
-            self._record_regulatory_alerts(alerts_found)
-        else:
-            logger.info("[COMPLIANCE] Regulatory check complete — no alerts")
-
-    def _scan_keywords(self, text: str) -> list:
-        """Return list of keywords found in text (case-insensitive)."""
-        text_lower = text.lower()
-        return [kw for kw in REGULATORY_KEYWORDS if kw in text_lower]
-
-    def _record_regulatory_alerts(self, alerts: list):
-        """
-        Write alerts to regulatory_alerts.txt (human-readable)
-        and audit_trail.jsonl (machine-readable).
-        Emit loud WARNING log that cannot be missed.
-        """
-        timestamp = datetime.now(timezone.utc).isoformat()
-
-        with open(self._regulatory_alerts, "a") as f:
-            f.write(f"\n{'='*60}\n")
-            f.write(f"REGULATORY ALERT — {timestamp}\n")
-            f.write(f"{'='*60}\n")
-            for alert in alerts:
-                f.write(f"Source:   {alert['source']}\n")
-                f.write(f"URL:      {alert['url']}\n")
-                f.write(
-                    f"Keywords: {', '.join(alert['matched_keywords'])}\n"
+        try:
+            self._log_compliance_action(
+                action_type="REGULATORY_ALERT",
+                description=(
+                    f"Urgency {event.urgency} | {event.summary or event.raw_title}"
+                ),
+                triggered_by="regulatory_intelligence_agent",
+                details={
+                    "urgency": event.urgency,
+                    "source_url": event.source_url,
+                    "affected": event.affected,
+                    "recommended_action": event.recommended_action,
+                    "raw_title": event.raw_title,
+                    "cycle_type": event.cycle_type,
+                },
+            )
+            self._append_audit(
+                event_type="RegulatoryAlertEvent",
+                platform="REGULATORY",
+                market_id="",
+                payload=self._safe_dict(event),
+            )
+            if event.urgency >= 4:
+                logger.warning(
+                    f"[COMPLIANCE] Regulatory alert urgency={event.urgency} logged | "
+                    f"{event.summary or event.raw_title}"
                 )
-                f.write(f"Time:     {alert['timestamp_utc']}\n\n")
-            f.write("ACTION REQUIRED:\n")
-            f.write("1. Review each source URL above\n")
-            f.write(
-                "2. Assess whether this affects Karbot Rage! operations\n"
+            else:
+                logger.info(
+                    f"[COMPLIANCE] Regulatory alert urgency={event.urgency} logged"
+                )
+        except Exception as e:
+            logger.error(
+                f"[COMPLIANCE] Failed to log regulatory alert: {e}",
+                exc_info=True,
             )
-            f.write(
-                "3. If action required: set regulatory_halt: true in "
-                "config.yaml\n"
-            )
-            f.write(
-                "4. Document your decision in logs/compliance_actions.jsonl\n"
-            )
-            f.write("5. Consult legal counsel if uncertain\n")
-            f.write(
-                "6. Under CFTC Letter 26-15 (May 2026): if you discover a\n"
-                "   potential violation, early voluntary self-reporting to\n"
-                "   the CFTC creates a path to declination (no charges).\n"
-            )
-            f.write(f"{'='*60}\n")
-
-        self._append_audit(
-            event_type="RegulatoryAlert",
-            platform="REGULATORY",
-            market_id="",
-            payload={"alerts": alerts, "alert_count": len(alerts)},
-        )
-
-        # Loud warning — impossible to miss
-        sources_str = "".join(
-            f"  ║  • {a['source'][:50]:<50}  ║\n" for a in alerts
-        )
-        logger.warning(
-            "\n"
-            "╔══════════════════════════════════════════════════════╗\n"
-            "║              ⚠  REGULATORY ALERT  ⚠                 ║\n"
-            "╠══════════════════════════════════════════════════════╣\n"
-            f"  ║  {len(alerts)} regulatory source(s) matched keywords           ║\n"
-            "  ║                                                      ║\n"
-            "  ║  ACTION: Review logs/regulatory_alerts.txt           ║\n"
-            "  ║  If halt needed: set regulatory_halt: true in        ║\n"
-            "  ║  config.yaml and document in compliance_actions      ║\n"
-            "  ║                                                      ║\n"
-            "  ║  Sources flagged:                                    ║\n"
-            + sources_str
-            + "╚══════════════════════════════════════════════════════╝"
-        )
 
     # ── Compliance action log ──────────────────────────────────────────────
 

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 
 # ── Hard risk limits (non-negotiable) ─────────────────────────────────────────
@@ -127,16 +127,48 @@ class IntelligenceConfig:
     llm_batch_size: int         = 20     # Markets per LLM batch call
 
 
+@dataclass
+class TelegramConfig:
+    enabled: bool = False
+    notify_on_trade: bool = True        # Tier 2: live always True; paper follows this flag
+    notify_on_rejection: bool = False   # Tier 2: off by default to reduce noise
+    permission_timeout_seconds: int = 300
+    # bot_token and chat_id come from environment variables only:
+    # TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
+    # Never stored in config.yaml
+
+
+@dataclass
+class RegulatoryIntelligenceConfig:
+    enabled: bool = True
+    regulatory_ai_calls_per_cycle: int = 10
+    regulatory_ai_daily_cap: int = 50
+    regulatory_circuit_breaker_calls: int = 20
+    regulatory_circuit_breaker_window_minutes: int = 10
+    regulatory_cost_per_call_usd: float = 0.003
+    regulatory_clear_phrase: str = "CLEAR REGULATORY HOLD"
+    regulatory_keywords: List[str] = field(default_factory=lambda: [
+        "prediction market", "event contract", "CFTC", "enforcement",
+        "insider trading", "manipulation", "wash trading", "DEATH BETS",
+        "self-reporting", "declination", "Van Dyke",
+    ])
+    weekly_sweep_day: str = "sunday"
+    weekly_sweep_hour_utc: int = 6
+    poll_interval_hours: int = 6
+
+
 # ── Top-level config ──────────────────────────────────────────────────────────
 
 @dataclass
 class KarbotConfig:
-    system:       SystemConfig      = field(default_factory=SystemConfig)
-    data_feeds:   DataFeedsConfig   = field(default_factory=DataFeedsConfig)
-    capital:      CapitalConfig     = field(default_factory=CapitalConfig)
-    risk:         RiskConfig        = field(default_factory=RiskConfig)
-    strategies:   StrategiesConfig  = field(default_factory=StrategiesConfig)
-    intelligence: IntelligenceConfig = field(default_factory=IntelligenceConfig)
+    system:                   SystemConfig                  = field(default_factory=SystemConfig)
+    data_feeds:               DataFeedsConfig               = field(default_factory=DataFeedsConfig)
+    capital:                  CapitalConfig                 = field(default_factory=CapitalConfig)
+    risk:                     RiskConfig                    = field(default_factory=RiskConfig)
+    strategies:               StrategiesConfig              = field(default_factory=StrategiesConfig)
+    intelligence:             IntelligenceConfig            = field(default_factory=IntelligenceConfig)
+    telegram:                 TelegramConfig                = field(default_factory=TelegramConfig)
+    regulatory_intelligence:  RegulatoryIntelligenceConfig = field(default_factory=RegulatoryIntelligenceConfig)
 
     # Regulatory compliance fields (set manually in config.yaml after reading guidance)
     regulatory_halt: bool = False
@@ -191,8 +223,53 @@ class KarbotConfig:
             log_level=raw.get("system", {}).get("log_level", "INFO"),
         )
 
+        tg_raw = raw.get("telegram", {})
+        telegram = TelegramConfig(
+            enabled=tg_raw.get("enabled", False),
+            notify_on_trade=tg_raw.get("notify_on_trade", True),
+            notify_on_rejection=tg_raw.get("notify_on_rejection", False),
+            permission_timeout_seconds=tg_raw.get("permission_timeout_seconds", 300),
+        )
+
+        ri_raw = raw.get("regulatory_intelligence", {})
+        default_ri = RegulatoryIntelligenceConfig()
+        regulatory_intelligence = RegulatoryIntelligenceConfig(
+            enabled=ri_raw.get("enabled", default_ri.enabled),
+            regulatory_ai_calls_per_cycle=ri_raw.get(
+                "regulatory_ai_calls_per_cycle", default_ri.regulatory_ai_calls_per_cycle
+            ),
+            regulatory_ai_daily_cap=ri_raw.get(
+                "regulatory_ai_daily_cap", default_ri.regulatory_ai_daily_cap
+            ),
+            regulatory_circuit_breaker_calls=ri_raw.get(
+                "regulatory_circuit_breaker_calls", default_ri.regulatory_circuit_breaker_calls
+            ),
+            regulatory_circuit_breaker_window_minutes=ri_raw.get(
+                "regulatory_circuit_breaker_window_minutes",
+                default_ri.regulatory_circuit_breaker_window_minutes,
+            ),
+            regulatory_cost_per_call_usd=ri_raw.get(
+                "regulatory_cost_per_call_usd", default_ri.regulatory_cost_per_call_usd
+            ),
+            regulatory_clear_phrase=ri_raw.get(
+                "regulatory_clear_phrase", default_ri.regulatory_clear_phrase
+            ),
+            regulatory_keywords=ri_raw.get(
+                "regulatory_keywords", default_ri.regulatory_keywords
+            ),
+            weekly_sweep_day=ri_raw.get("weekly_sweep_day", default_ri.weekly_sweep_day),
+            weekly_sweep_hour_utc=ri_raw.get(
+                "weekly_sweep_hour_utc", default_ri.weekly_sweep_hour_utc
+            ),
+            poll_interval_hours=ri_raw.get(
+                "poll_interval_hours", default_ri.poll_interval_hours
+            ),
+        )
+
         return cls(
             system=system,
+            telegram=telegram,
+            regulatory_intelligence=regulatory_intelligence,
             regulatory_halt=raw.get("regulatory_halt", False),
             regulatory_halt_reason=raw.get("regulatory_halt_reason", ""),
             regulatory_check_interval_hours=raw.get(

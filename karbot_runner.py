@@ -34,10 +34,14 @@ from agents.floor.position_tracker import PositionTracker
 
 # Phase 1 agents — Research Floor
 from agents.research.market_analyst import MarketAnalyst
+from agents.research.regulatory_intelligence import RegulatoryIntelligenceAgent
 
 # Phase 1 agents — Management (always-on)
 from agents.management.reflection import ReflectionAgent
 from agents.management.compliance import ComplianceOfficer
+
+# Notification layer — last in roster; all other agents must be running first
+from agents.notifications.telegram_agent import TelegramAgent
 
 # Phase 2 agents — DO NOT instantiate yet
 # from agents.floor.execution_agent import ExecutionAgent
@@ -116,9 +120,14 @@ async def run(args: argparse.Namespace = None):
             ArbScanner(bus=bus, config=config),
             RiskGate(bus=bus, config=config),
             PaperExecutor(bus=bus, config=config),
+            # Research Floor
             MarketAnalyst(bus=bus, config=config),
+            RegulatoryIntelligenceAgent(bus=bus, config=config),
+            # Management (always-on)
             ReflectionAgent(bus=bus, config=config),
             ComplianceOfficer(bus=bus, config=config),
+            # TelegramAgent last: notification layer, all other agents subscribe first
+            TelegramAgent(bus=bus, config=config),
         ]
         logger.info(f"Mock mode: MockPriceWatcher + PaperExecutor active | fixture={args.mock_prices}")
     else:
@@ -129,9 +138,14 @@ async def run(args: argparse.Namespace = None):
             PriceWatcher(bus=bus, config=config),
             ArbScanner(bus=bus, config=config),
             RiskGate(bus=bus, config=config),
+            # Research Floor
             MarketAnalyst(bus=bus, config=config),
+            RegulatoryIntelligenceAgent(bus=bus, config=config),
+            # Management (always-on)
             ReflectionAgent(bus=bus, config=config),
             ComplianceOfficer(bus=bus, config=config),   # always-on, cannot be disabled
+            # TelegramAgent last: notification layer, all other agents subscribe first
+            TelegramAgent(bus=bus, config=config),
         ]
 
     # --- 4. Register each agent's event subscriptions ---

@@ -43,3 +43,28 @@ regulatory_halt_reason: ""
 
 # How often to poll regulatory sources (hours)
 regulatory_check_interval_hours: 6
+
+# ── Regulatory Intelligence Agent ─────────────────────────────────────────────
+regulatory_intelligence:
+  enabled: true
+  regulatory_ai_calls_per_cycle: 10
+  regulatory_ai_daily_cap: 50
+  regulatory_circuit_breaker_calls: 20
+  regulatory_circuit_breaker_window_minutes: 10
+  regulatory_cost_per_call_usd: 0.003
+  regulatory_clear_phrase: "CLEAR REGULATORY HOLD"
+  regulatory_keywords:
+    - prediction market
+    - event contract
+    - CFTC
+    - enforcement
+    - insider trading
+    - manipulation
+    - wash trading
+    - DEATH BETS
+    - self-reporting
+    - declination
+    - Van Dyke
+  weekly_sweep_day: sunday
+  weekly_sweep_hour_utc: 6
+  poll_interval_hours: 6

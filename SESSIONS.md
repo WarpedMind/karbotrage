@@ -1,5 +1,36 @@
 # Karbot Rage! Session Summary
 
+## 2026-05-26 (Session 6)
+
+### What was built
+- agents/research/regulatory_intelligence.py — **COMPLETE** — RegulatoryIntelligenceAgentImpl (full impl) + RegulatoryIntelligenceAgent (BaseAgent stub); polls CFTC RSS + Federal Register every 6h; keyword pre-filter controls Claude API costs; Claude Sonnet (claude-sonnet-4-6) assesses urgency 1-5; urgency 3→Telegram FYI, 4→Telegram alert, 5→Telegram+trading pause; weekly sweep (Sunday 06:00 UTC) skips keyword filter; per-cycle cap, daily hard cap, circuit breaker, overflow queue, monthly spend estimator; operator clears urgency-5 pause by sending regulatory_clear_phrase via Telegram
+- core/events.py — RegulatoryAlertEvent extended with AI-assessment fields (urgency, summary, affected, recommended_action, raw_title, cycle_type); TelegramPermissionResponseEvent extended with response_text; EventBus priority queue fixed with 3-tuple (priority, seq, event) tiebreaker
+- karbot/core/config.py — RegulatoryIntelligenceConfig sub-dataclass added; wired into KarbotConfig + from_yaml()
+- config.yaml — regulatory_intelligence: block added with all 11 configurable parameters
+- agents/management/compliance.py — polling loop removed; subscribes to RegulatoryAlertEvent and logs to compliance_actions.jsonl; aiohttp import removed
+- agents/floor/risk_gate.py — subscribes to RegulatoryAlertEvent; _regulatory_pause state; urgency=5 blocks trade approvals with REGULATORY_PAUSE; urgency=0 clears pause
+- agents/notifications/telegram_agent.py — _handle_operator_reply publishes TelegramPermissionResponseEvent with response_text on every operator message (not just when pending request exists)
+- karbot_runner.py — RegulatoryIntelligenceAgent added to both agent lists (now 10 agents)
+- tests/test_regulatory_intelligence.py — 11 tests all passing; mocked Claude API; covers keyword filter, overflow queue, urgency 1-2/3/5, Risk Gate pause/resume, operator clear, deduplication, daily cap, circuit breaker, compliance logging, bad API response
+
+### What was decided
+- Claude Sonnet over Haiku for regulatory assessment — quality matters for compliance decisions
+- Circuit breaker requires runner restart — not clearable via Telegram by design
+- EventBus tiebreaker: (priority, seq, event) 3-tuple — pre-existing bug exposed by heavy same-priority event publishing; fixed globally
+
+### Verification
+- python -m pytest tests/ -v: 24/24 passed ✓
+- karbot_runner.py --exit-after-test: 10 agents start and exit cleanly ✓
+- ComplianceOfficer polling loop gone (confirmed via grep) ✓
+- test_urgency_5_pauses_risk_gate: PASSED ✓
+- test_operator_clear_resumes_risk_gate: PASSED ✓
+
+### What to do first next session
+1. Wire PositionTracker to subscribe to TradeExecutedEvent so deployed capital is tracked accurately across runs (Phase 2 of PositionTracker)
+2. Wire execution layer to emit LegFailureEvent on partial fill / API error so compliance audit trail captures failures
+
+---
+
 ## 2026-05-26 (Session 3)
 
 ### What was done

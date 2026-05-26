@@ -344,6 +344,57 @@ class ComplianceAlertEvent(Event):
     action_required: str = ""
 
 
+@dataclass
+class RegulatoryAlertEvent(Event):
+    """Published by RegulatoryIntelligenceAgent on AI-assessed regulatory items."""
+    priority:           Priority = Priority.HIGH
+    source_name:        str = ""
+    source_url:         str = ""
+    matched_keywords:   List[str] = field(default_factory=list)
+    alert_count:        int = 0
+    # Fields populated by RegulatoryIntelligenceAgent (AI-assessed)
+    urgency:            int = 0           # 0=cleared, 1=low … 5=critical
+    summary:            str = ""
+    affected:           str = ""          # "yes" | "no" | "unclear"
+    recommended_action: str = ""
+    raw_title:          str = ""
+    cycle_type:         str = ""          # "6h" | "weekly"
+
+
+# ── Notification / Operator Events ────────────────────────────────────────────
+
+@dataclass
+class TelegramNotificationEvent(Event):
+    """Published by any agent to request a Telegram message to the operator."""
+    message:      str = ""
+    tier:         int = 2        # 1=critical (always send), 2=trade-level, 3=digest
+    event_source: str = ""       # name of the publishing agent
+
+
+@dataclass
+class TelegramPermissionRequestEvent(Event):
+    """Published by any agent to request operator permission via Telegram."""
+    priority:          Priority = Priority.HIGH
+    request_id:        str = field(default_factory=lambda: str(uuid.uuid4()))
+    requesting_agent:  str = ""
+    question:          str = ""
+    timeout_seconds:   int = 300
+    default_on_timeout: str = "deny"   # "deny" or "approve"
+
+
+@dataclass
+class TelegramPermissionResponseEvent(Event):
+    """Published by TelegramAgent when operator replies or timeout fires.
+
+    Uses inherited `source` field (from Event) to carry "operator" or "timeout".
+    response_text carries the operator's raw Telegram message so subscribers
+    (e.g., RegulatoryIntelligenceAgent) can inspect it for specific phrases.
+    """
+    request_id:    str  = ""
+    approved:      bool = False
+    response_text: str  = ""
+
+
 # ── Event Bus ─────────────────────────────────────────────────────────────────
 
 Handler = Callable[[Event], Awaitable[None]]
@@ -372,6 +423,7 @@ class EventBus:
         self._dead_letters: List[Event] = []
         self._processed_count = 0
         self._error_count = 0
+        self._seq = 0   # Monotonic counter used as tiebreaker in priority queue.
 
     def subscribe(self, event_type: Type[T], handler: Handler) -> None:
         """Register a handler for a specific event type."""
@@ -396,7 +448,10 @@ class EventBus:
         if qsize > 1000:
             log.warning("event_queue_deep", depth=qsize, event_type=type(event).__name__)
 
-        await self._queue.put((event.priority.value, event))
+        self._seq += 1
+        # 3-tuple: (priority, seq, event). The sequence number breaks ties between
+        # same-priority events so heapq never has to compare event objects.
+        await self._queue.put((event.priority.value, self._seq, event))
 
         # Audit log every event
         if self._audit_logger:
@@ -417,7 +472,7 @@ class EventBus:
 
         while self._running:
             try:
-                _, event = await asyncio.wait_for(
+                _, _, event = await asyncio.wait_for(
                     self._queue.get(), timeout=1.0
                 )
                 await self._dispatch(event)

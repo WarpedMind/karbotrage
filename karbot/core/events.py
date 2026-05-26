@@ -33,6 +33,10 @@ from core.events import (
     StrategyWeightUpdateEvent,
     AgentHeartbeat,
     ComplianceAlertEvent,
+    RegulatoryAlertEvent,
+    TelegramNotificationEvent,
+    TelegramPermissionRequestEvent,
+    TelegramPermissionResponseEvent,
 )
 
 __all__ = [
@@ -63,4 +67,8 @@ __all__ = [
     "StrategyWeightUpdateEvent",
     "AgentHeartbeat",
     "ComplianceAlertEvent",
+    "RegulatoryAlertEvent",
+    "TelegramNotificationEvent",
+    "TelegramPermissionRequestEvent",
+    "TelegramPermissionResponseEvent",
 ]

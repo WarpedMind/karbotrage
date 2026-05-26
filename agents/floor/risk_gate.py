@@ -27,7 +27,7 @@ from karbot.core.events import (
     EventBus, OpportunityEvent, ApprovedOpportunityEvent,
     RejectedOpportunityEvent, PositionSnapshot, AnnouncementWarningEvent,
     GeopoliticalRiskEvent, ResolutionVerificationResult, KillSwitchEvent,
-    RiskLimitHitEvent, AgentHeartbeat, Priority
+    RiskLimitHitEvent, AgentHeartbeat, RegulatoryAlertEvent, Priority
 )
 
 log = structlog.get_logger(__name__)
@@ -81,6 +81,7 @@ class RiskGateAgent:
         self._trading_paused      = False    # True during announcement windows
         self._pause_reason        = ""
         self._geopolitical_risk   = "NORMAL"  # NORMAL | ELEVATED | HIGH | CRITICAL
+        self._regulatory_pause    = False    # True when urgency-5 alert is uncleared
 
         # Position tracking (updated by PositionSnapshot events)
         self._current_snapshot: Optional[PositionSnapshot] = None
@@ -105,6 +106,7 @@ class RiskGateAgent:
         self.bus.subscribe(GeopoliticalRiskEvent, self._on_geopolitical_risk)
         self.bus.subscribe(ResolutionVerificationResult, self._on_resolution_result)
         self.bus.subscribe(KillSwitchEvent, self._on_kill_switch)
+        self.bus.subscribe(RegulatoryAlertEvent, self._on_regulatory_alert)
 
     async def start(self) -> None:
         self.register_subscriptions()
@@ -126,6 +128,15 @@ class RiskGateAgent:
         if self._kill_switch_active:
             await self._reject(event, "KILL_SWITCH",
                                "Kill switch is active — all trading halted")
+            return
+
+        # Regulatory pause: urgency-5 alert requires operator clearance
+        if self._regulatory_pause:
+            await self._reject(
+                event,
+                "REGULATORY_PAUSE",
+                "Urgency 5 regulatory alert active — awaiting operator clearance",
+            )
             return
 
         # Run checks in order
@@ -522,6 +533,17 @@ class RiskGateAgent:
         log.critical("KILL_SWITCH_ACTIVATED",
                      triggered_by=event.triggered_by,
                      reason=event.reason)
+
+    async def _on_regulatory_alert(self, event: RegulatoryAlertEvent) -> None:
+        """Update regulatory pause state based on urgency level."""
+        if event.urgency == 5:
+            self._regulatory_pause = True
+            log.critical("REGULATORY_PAUSE_ACTIVATED",
+                         summary=event.summary,
+                         source_url=event.source_url)
+        elif event.urgency == 0:
+            self._regulatory_pause = False
+            log.info("REGULATORY_PAUSE_CLEARED")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
