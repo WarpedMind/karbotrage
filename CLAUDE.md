@@ -47,15 +47,20 @@ async def run(self): ...
 - agents/notifications/telegram_agent.py: **UPDATED** — response_text field populated on every operator message for clear phrase detection
 - agents/floor/paper_executor.py: **COMPLETE** — paper trading fill simulator; subscribes to ApprovedOpportunityEvent, emits TradeExecutedEvent(paper_mode=True)
 - agents/floor/mock_price_watcher.py: **COMPLETE** — fixture-driven price replay for end-to-end tests; signals done via asyncio.Event; 0.1s initial delay ensures PositionSnapshot is dispatched before first price
-- agents/floor/position_tracker.py: **COMPLETE** — publishes startup PositionSnapshot at top of run() so RiskGate can approve trades immediately; PAPER_DEFAULT_CAPITAL=10_000 when config.capital.total_deployed_usd not set
+- agents/floor/position_tracker.py: **Phase 2 COMPLETE** — subscribes to TradeExecutedEvent, TradeResolvedEvent, LegFailureEvent; deployed_capital_usd, open_positions, daily_trades, daily_pnl all update in real time; daily UTC reset; publishes snapshot on every state change; correlation_score=0.0 (Phase 3 item)
 - tests/test_paper_trading.py: **COMPLETE** — 3 scenarios passing (happy path, rejection, no-opportunity)
+- tests/test_position_tracker.py: **COMPLETE** — 9 tests passing; includes integration test confirming Risk Gate enforces capital limits against real deployed capital
 - tests/test_regulatory_intelligence.py: **COMPLETE** — 11 tests passing; all mocked (no real API calls)
 - tests/fixtures/paper_test_prices.json: **COMPLETE** — 3 price snapshots for test scenarios
 - All Phase 1 agent stubs: Conforming run() and register_subscriptions() on all 10 runner-facing classes
 - requirements.txt: aiohttp, pydantic, websockets, pyyaml, python-json-logger, structlog, tenacity, aiosqlite, anthropic, pytest, pytest-asyncio, black, flake8
 - execution/engine.py: INTENTIONALLY DEFERRED — do not refactor until paper tested end-to-end
 - Paper trading: End-to-end tested ✓ (kalshi_trades.csv confirmed populated)
-- Full test suite: 24/24 passing ✓
+- Full test suite: 33/33 passing ✓
+
+## KNOWN DEBT
+- TradeResolvedEvent is never emitted by the execution layer — positions never close, _total_capital never updates, _daily_pnl is never realised. Must fix before live trading.
+- correlation_score in PositionSnapshot is permanently 0.0 — Phase 3 item.
 
 ## REGULATORY CONTEXT (May 2026 — current)
 - CFTC Letter 26-15 (May 19 2026, EFFECTIVE NOW): New cooperation
@@ -73,8 +78,8 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. Wire PositionTracker to subscribe to TradeExecutedEvent so deployed capital is tracked accurately across runs (Phase 2 of PositionTracker)
-2. Wire execution layer to emit LegFailureEvent on partial fill / API error so compliance audit trail captures failures
+1. Wire execution layer to emit TradeExecutedEvent and LegFailureEvent on real fills so the live path mirrors the paper path
+2. Wire TradeResolvedEvent on market resolution so positions close and total_capital updates correctly (required before live trading)
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 

@@ -1,5 +1,28 @@
 # Karbot Rage! Session Summary
 
+## 2026-05-26 (Session 7)
+
+### What was built
+- agents/floor/position_tracker.py — **Phase 2 COMPLETE** — register_subscriptions() now wires TradeExecutedEvent, TradeResolvedEvent, LegFailureEvent; _on_trade_executed computes capital from filled_price×quantity across all legs, appends to _open_positions, increments _daily_trades, publishes snapshot; _on_trade_resolved frees capital (floored at 0), adds realized_pnl to _daily_pnl and _total_capital, removes position, publishes snapshot; _on_leg_failure unwinds position (floored at 0), logs WARNING, publishes snapshot; _maybe_daily_reset() helper resets _daily_pnl/_daily_trades at UTC midnight, called from 30s loop; _publish_snapshot() now computes unrealized_pnl_usd as sum of expected_pnl_usd across open positions
+- tests/test_position_tracker.py — **NEW** — 9 tests all passing; covers startup snapshot, executed/resolved/failed trade state transitions, double-trade stacking, capital floor, daily reset, graceful empty-legs handling; integration test (test_risk_gate_sees_accurate_capital) confirms Risk Gate enforces 40% capital limit against real deployed capital
+
+### What was verified
+- python -m pytest tests/ -v: 33/33 passed ✓
+- python -m pytest tests/test_position_tracker.py::test_risk_gate_sees_accurate_capital -v: PASSED ✓
+- karbot_runner.py --exit-after-test: starts cleanly, deployed capital updates live (87→174 USD after two paper trades), exits cleanly ✓
+- logs/kalshi_trades.csv: prior rows intact + 2 new rows written this session ✓
+
+### What was decided
+- _maybe_daily_reset() extracted as a separate (sync) method so tests can call it directly without running the 30s loop — cleaner than mocking datetime
+- capital_used computed as sum(filled_price × quantity) across all legs — matches paper executor's fill model
+- TradeResolvedEvent handler adds realized_pnl to both _daily_pnl and _total_capital — correct: total capital grows/shrinks as trades resolve
+
+### What to do first next session
+1. Wire execution layer to emit TradeExecutedEvent and LegFailureEvent on real fills so the live path mirrors the paper path
+2. Wire TradeResolvedEvent on market resolution so positions close and total_capital updates correctly (required before live trading)
+
+---
+
 ## 2026-05-26 (Session 6)
 
 ### What was built

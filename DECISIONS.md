@@ -1,5 +1,27 @@
 # Decision Log
 
+## 2026-05-26 — Session: PositionTracker Phase 2
+
+### What was wired
+- PositionTracker now subscribes to TradeExecutedEvent, TradeResolvedEvent, LegFailureEvent
+- deployed_capital_usd, open_positions, daily_trades, daily_pnl all update in real time
+- Risk Gate capital checks now enforce against real deployed capital, not permanent zero
+
+### EventBus tiebreaker fix (from prior session — adding to decisions log)
+- Pre-existing bug: same-priority events in PriorityQueue caused heapq to compare
+  event dataclasses, raising TypeError
+- Fixed with (priority, seq, event) 3-tuple in core/events.py
+- Production-critical: would have caused unpredictable crashes under live trading load
+- Caught by test suite before any live deployment
+
+### Known remaining gap
+- correlation_score in PositionSnapshot is permanently 0.0 — Phase 3 item
+- TradeResolvedEvent is never emitted yet (execution layer not wired) — paper trades
+  never resolve, so _total_capital never updates and positions never close
+- This is acceptable for paper trading validation; must be addressed before live trading
+
+---
+
 ## 2026-05-26 — Session: Regulatory Intelligence Agent
 
 ### Model selection

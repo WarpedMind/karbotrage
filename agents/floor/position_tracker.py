@@ -13,18 +13,37 @@ Phase 1 scope (minimal but correct):
   - Capital defaults to PAPER_DEFAULT_CAPITAL when config does not
     specify a non-zero total_deployed_usd (common in dev/test runs).
 
-Phase 2 todo (do not implement yet):
-  - Subscribe to TradeExecutedEvent and update deployed capital / open positions
-  - Subscribe to TradeResolvedEvent and realise P&L
-  - Track correlation across open positions
+Phase 2 (this implementation):
+  - Subscribes to TradeExecutedEvent → updates deployed capital and
+    open positions list; publishes updated snapshot immediately.
+  - Subscribes to TradeResolvedEvent → frees capital, realises P&L,
+    removes closed position; publishes updated snapshot.
+  - Subscribes to LegFailureEvent → unwinds position and frees capital;
+    publishes updated snapshot.
+  - Daily reset at UTC midnight: clears _daily_pnl and _daily_trades.
+    Checked on every 30s loop iteration — no separate task.
+
+Known remaining gap (Phase 3):
+  - correlation_score is permanently 0.0. Requires cross-position
+    correlation analysis which is out of scope for Phase 2.
+  - TradeResolvedEvent is never emitted yet (execution layer not wired).
+    Positions never close and _total_capital never updates until
+    the execution layer is fixed. Must address before live trading.
 """
 
 import asyncio
+from datetime import date, datetime, timezone
 
 import structlog
 
 from karbot.core.config import KarbotConfig
-from karbot.core.events import EventBus, PositionSnapshot
+from karbot.core.events import (
+    EventBus,
+    LegFailureEvent,
+    PositionSnapshot,
+    TradeExecutedEvent,
+    TradeResolvedEvent,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -73,11 +92,12 @@ class PositionTracker:
         self._daily_pnl        = 0.0
         self._daily_trades     = 0
         self._open_positions   = []
+        self._last_reset_date  = datetime.now(timezone.utc).date()
 
     def register_subscriptions(self) -> None:
-        # Phase 1: no subscriptions yet.
-        # Phase 2: subscribe to TradeExecutedEvent, TradeResolvedEvent.
-        pass
+        self.bus.subscribe(TradeExecutedEvent, self._on_trade_executed)
+        self.bus.subscribe(TradeResolvedEvent, self._on_trade_resolved)
+        self.bus.subscribe(LegFailureEvent,    self._on_leg_failure)
 
     async def run(self) -> None:
         # ── Startup snapshot — MUST be published before the main loop ──────────
@@ -97,17 +117,108 @@ class PositionTracker:
         # ── Periodic re-publish loop ────────────────────────────────────────────
         while True:
             await asyncio.sleep(SNAPSHOT_INTERVAL)
+            self._maybe_daily_reset()
             await self._publish_snapshot()
+
+    # ── Daily reset ───────────────────────────────────────────────────────────
+
+    def _maybe_daily_reset(self) -> None:
+        """Check if UTC date has rolled over; if so, reset daily counters."""
+        today = datetime.now(timezone.utc).date()
+        if today != self._last_reset_date:
+            self._daily_pnl    = 0.0
+            self._daily_trades = 0
+            self._last_reset_date = today
+            log.info(
+                "POSITION_TRACKER_DAILY_RESET",
+                total_capital=f"{self._total_capital:.2f}",
+                deployed=f"{self._deployed_capital:.2f}",
+                open_positions=len(self._open_positions),
+            )
+
+    # ── Event handlers ────────────────────────────────────────────────────────
+
+    async def _on_trade_executed(self, event: TradeExecutedEvent) -> None:
+        if not event.platform_legs:
+            log.warning(
+                "trade_executed_missing_platform_legs",
+                trade_id=event.trade_id,
+            )
+            return
+
+        try:
+            capital_used = sum(
+                leg["filled_price"] * leg["quantity"]
+                for leg in event.platform_legs
+            )
+        except (KeyError, TypeError) as exc:
+            log.warning(
+                "trade_executed_invalid_leg_fields",
+                trade_id=event.trade_id,
+                error=str(exc),
+            )
+            return
+
+        self._deployed_capital += capital_used
+        self._open_positions.append({
+            "trade_id":         event.trade_id,
+            "opportunity_id":   event.opportunity_id,
+            "strategy":         event.strategy,
+            "capital_deployed": capital_used,
+            "expected_pnl_usd": event.expected_pnl_usd,
+            "paper_mode":       event.paper_mode,
+            "opened_at":        event.timestamp.isoformat(),
+        })
+        self._daily_trades += 1
+        await self._publish_snapshot()
+
+    async def _on_trade_resolved(self, event: TradeResolvedEvent) -> None:
+        position = next(
+            (p for p in self._open_positions if p["trade_id"] == event.trade_id),
+            None,
+        )
+        if position is None:
+            log.warning("trade_resolved_unknown_trade_id", trade_id=event.trade_id)
+            return
+
+        self._deployed_capital = max(
+            0.0, self._deployed_capital - position["capital_deployed"]
+        )
+        self._daily_pnl     += event.realized_pnl
+        self._total_capital += event.realized_pnl
+        self._open_positions.remove(position)
+        await self._publish_snapshot()
+
+    async def _on_leg_failure(self, event: LegFailureEvent) -> None:
+        position = next(
+            (p for p in self._open_positions if p["trade_id"] == event.trade_id),
+            None,
+        )
+        if position is None:
+            log.warning("leg_failure_unknown_trade_id", trade_id=event.trade_id)
+            return
+
+        self._deployed_capital = max(
+            0.0, self._deployed_capital - position["capital_deployed"]
+        )
+        self._open_positions.remove(position)
+        log.warning("position_unwound_on_leg_failure", trade_id=event.trade_id)
+        await self._publish_snapshot()
+
+    # ── Snapshot builder ──────────────────────────────────────────────────────
 
     async def _publish_snapshot(self) -> None:
         free = self._total_capital - self._deployed_capital
+        unrealized_pnl = sum(
+            p.get("expected_pnl_usd", 0.0) for p in self._open_positions
+        )
         await self.bus.publish(PositionSnapshot(
             source               = self.AGENT_NAME,
             total_capital_usd    = self._total_capital,
             deployed_capital_usd = self._deployed_capital,
             free_capital_usd     = free,
             open_positions       = list(self._open_positions),
-            unrealized_pnl_usd   = 0.0,
+            unrealized_pnl_usd   = unrealized_pnl,
             correlation_score    = 0.0,
             daily_pnl_usd        = self._daily_pnl,
             daily_trades         = self._daily_trades,
