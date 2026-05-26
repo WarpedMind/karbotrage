@@ -97,3 +97,12 @@ Run: python -m pytest tests/
 - Run system: python main.py
 - Run with debug: python main.py --debug
 - Run with specific mode: python main.py --mode paper
+
+## KNOWN DEBT
+
+### Pre-existing test collection errors (non-blocking)
+- `tests/test_config.py` — fails to collect due to `Secrets` import error
+- `tests/test_core_config.py` — fails to collect due to `Secrets` import error
+- These were present before the paper trading session and are not caused by recent changes
+- Must be resolved before live trading; not blocking paper trading validation
+- Fix: locate where `Secrets` was removed or renamed in a prior session and update the imports
