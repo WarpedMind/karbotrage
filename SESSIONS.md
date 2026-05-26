@@ -47,3 +47,25 @@
 - Wire ComplianceOfficer subscriptions to TradeExecutedEvent
 - IRS dual-track logging (Kalshi = ordinary income, Polymarket = capital gains)
 - Paper trading end-to-end test via agent layer
+
+## 2026-05-25 (Session 2)
+
+### What was built
+- ComplianceOfficer v2 — full implementation replacing stub; all 7 verification steps passed
+- IRS dual-track trade logging: Kalshi trades logged as ordinary income, Polymarket as capital gains (Section 1256)
+- Append-only audit trail (logs/audit_trail.jsonl) — every trade, rejection, and leg failure recorded
+- Regulatory monitor — polls CFTC RSS feeds and Federal Register every 6h; keyword matching triggers REGULATORY_ALERT warning banner
+- compliance_actions.jsonl — operator-facing action log, serves as CFTC Letter 26-15 cooperation evidence
+- REGULATORY_HALT enforcement — if config.yaml sets regulatory_halt: true, bot refuses to start until operator clears and documents it
+- ComplianceOfficer subscriptions wired to TradeExecutedEvent, LegFailureEvent, RejectedOpportunityEvent
+- CLAUDE.md updated with full CFTC regulatory context (Letter 26-15, Van Dyke prosecution, DEATH BETS Act)
+
+### What was decided
+- ComplianceOfficer is the compliance-first layer; it runs live and verified at each startup
+- regulatory_halt is an operator-set gate — not automated — requiring documented human sign-off
+- CFTC Letter 26-15 (effective May 19 2026): compliance_actions.jsonl IS the cooperation evidence; treat it as a legal record
+- Karbot Rage! is clean: public data only, arbitrage only, no MNPI, Kalshi-only Phase 1, full audit trail from day one
+
+### What to do first next session
+- Paper trading end-to-end test via agent layer
+- Wire execution layer to emit TradeExecutedEvent / LegFailureEvent so ComplianceOfficer logs real trades
