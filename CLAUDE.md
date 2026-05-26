@@ -139,6 +139,15 @@ async def run(self): ...
 Run: python -m pytest tests/
 
 ## Bash commands
-- Run system: python main.py
-- Run with debug: python main.py --debug
-- Run with specific mode: python main.py --mode paper
+
+### Canonical entry point (use this)
+Run with mock prices and auto-exit (test mode):
+  karbotrage_env/bin/python karbot_runner.py --mode paper --mock-prices tests/fixtures/paper_test_prices.json --exit-after-test
+
+Run continuously (paper mode):
+  karbotrage_env/bin/python karbot_runner.py --mode paper
+
+### Legacy entry point (do not use — left untouched pending removal)
+Run legacy: python main.py
+Run legacy with debug: python main.py --debug
+Run legacy with specific mode: python main.py --mode paper

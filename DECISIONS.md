@@ -1,4 +1,5 @@
 # Decision Log
+# Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
 ## 2026-05-26 — Session: Security hardening + TradeResolvedEvent
 
@@ -38,9 +39,8 @@
 
 ### Known remaining gap
 - correlation_score in PositionSnapshot is permanently 0.0 — Phase 3 item
-- TradeResolvedEvent is never emitted yet (execution layer not wired) — paper trades
-  never resolve, so _total_capital never updates and positions never close
-- This is acceptable for paper trading validation; must be addressed before live trading
+- TradeResolvedEvent wiring completed in Session 9 (Security + TradeResolvedEvent)
+  via PaperExecutor asyncio.create_task() — full paper P&L cycle now closes
 
 ---
 
