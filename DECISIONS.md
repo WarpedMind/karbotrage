@@ -1,5 +1,24 @@
 # Decision Log
 
+## 2026-05-26 — Session: Paper trading verification, debt cleanup, next phase sequencing
+
+### Telegram architecture decision
+- Option A selected: build Telegram as a standalone notification layer (its own BaseAgent-conforming agent) before building the Regulatory Intelligence Agent
+- Rationale: Telegram will be needed system-wide (health alerts, trade notifications, operator permission requests); building it inline inside one agent creates rework
+- Do not build Telegram notification inline inside any agent
+
+### Project principles (standing, apply to all future sessions)
+- Always favor best practice and quality over speed
+- Spec here before anything goes to Claude Code
+- Lead on sequencing — don't ask what to do next, tell the operator what we're doing and why
+- Paper mode must behave identically to live mode — no paper mode bypasses in business logic
+
+### Next two items in sequence
+1. Standalone Telegram notification layer (BaseAgent-conforming, event-bus-driven)
+2. Regulatory Intelligence Agent (uses Telegram layer; Claude API for document interpretation; replaces keyword scanning in ComplianceOfficer)
+
+---
+
 ## 2026-05-25 — Session: Requirements, Config, Market Data, Agent Wiring
 
 ### What was fixed this session

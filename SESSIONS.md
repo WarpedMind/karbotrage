@@ -1,5 +1,25 @@
 # Karbot Rage! Session Summary
 
+## 2026-05-26 (Session 3)
+
+### What was done
+- Fixed pre-existing Secrets import collection errors in test_config.py and test_core_config.py
+- Root cause: Secrets dataclass and compliance/alerts sub-configs were removed in a prior session; test files not updated
+- Deleted test_secrets_creation() with explanatory comment; updated remaining tests to match current KarbotConfig structure
+- Full test suite now 13/13 green, zero collection errors, zero new failures
+- Cleared KNOWN DEBT section in CLAUDE.md
+- Decided next two roadmap items: Telegram standalone layer → Regulatory Intelligence Agent
+- Decided Telegram architecture: Option A (standalone agent, not inline)
+
+### What was decided
+- Telegram built as standalone BaseAgent before Regulatory Intelligence Agent
+- Project principle locked in: quality and best practice over speed, always
+- Spec in Claude.ai before every Claude Code session, no exceptions
+
+### What to do first next session
+- Spec the standalone Telegram notification layer in Claude.ai
+- Key design questions to resolve in spec: which event types trigger Telegram alerts, how operator permission requests work over Telegram, whether the agent subscribes to a dedicated TelegramNotificationEvent or handles multiple event types directly
+
 ## 2026-05-22
 
 ### What was built
