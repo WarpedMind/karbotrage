@@ -36,14 +36,18 @@ async def run(self): ...
 - data/market_data.py: Market data (Kalshi-first, Polymarket gated behind polymarket_ws_enabled)
 
 ## Current status
-- karbot_runner.py: **Written and verified** — all 3 spec verification steps pass; 6 agents start, run, and shut down cleanly
+- karbot_runner.py: **Written and verified** — supports --mock-prices and --exit-after-test flags; 7 agents (incl. PaperExecutor) start and exit cleanly
 - core/events.py: Full event bus with all typed events — production-ready
 - karbot/core/config.py: KarbotConfig Phase 1 invariants structural + from_yaml() + .phase + .paper_mode + regulatory_halt fields added
-- agents/management/compliance.py: **v2 COMPLETE** — IRS trade logging, audit trail, regulatory monitoring, REGULATORY_HALT — all 7 spec verification steps pass
+- agents/management/compliance.py: **v2 COMPLETE** — IRS trade logging, audit trail, regulatory monitoring, REGULATORY_HALT — all 7 spec verification steps pass; fixed datetime JSON serialization in _append_audit
+- agents/floor/paper_executor.py: **NEW** — paper trading fill simulator; subscribes to ApprovedOpportunityEvent, emits TradeExecutedEvent(paper_mode=True)
+- agents/floor/mock_price_watcher.py: **NEW** — fixture-driven price replay for end-to-end tests; signals done via asyncio.Event
+- tests/test_paper_trading.py: **NEW** — 3 scenarios passing (happy path, rejection, no-opportunity)
+- tests/fixtures/paper_test_prices.json: **NEW** — 3 price snapshots for test scenarios
 - All Phase 1 agent stubs: Conforming run() and register_subscriptions() on all 6 runner-facing classes
 - requirements.txt: aiohttp, pydantic, websockets, pyyaml, python-json-logger, structlog, tenacity, aiosqlite, anthropic, pytest, pytest-asyncio, black, flake8
 - execution/engine.py: INTENTIONALLY DEFERRED — do not refactor until paper tested end-to-end
-- Paper trading: Not yet end-to-end tested via agent layer
+- Paper trading: End-to-end tested ✓
 
 ## REGULATORY CONTEXT (May 2026 — current)
 - CFTC Letter 26-15 (May 19 2026, EFFECTIVE NOW): New cooperation
@@ -61,8 +65,8 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. Paper trading end-to-end test
-2. Wire execution layer to emit TradeExecutedEvent / LegFailureEvent so compliance logs real trades
+1. Wire execution layer to emit TradeExecutedEvent / LegFailureEvent so compliance logs real trades (PositionTracker → emit PositionSnapshot so RiskGate can approve live trades)
+2. Implement PositionTracker agent so runner can approve real (paper) trades end-to-end without injecting manual PositionSnapshot
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 

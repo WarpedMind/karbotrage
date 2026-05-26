@@ -1,0 +1,41 @@
+[
+  {
+    "_scenario": "1_happy_path",
+    "_note": "YES+NO = 0.80 — wide spread clears Kalshi fee model (14%+0.3% = 14.3% needed; gross here is 20%). Spec requested 0.47/0.51 but combined 0.98 is not profitable after Kalshi fees (~14% per round trip).",
+    "platform": "kalshi",
+    "market_id": "KALSHI-TEST-001",
+    "yes_bid": 0.40,
+    "yes_ask": 0.42,
+    "no_bid": 0.40,
+    "no_ask": 0.42,
+    "volume_24h": 50000.0,
+    "open_interest": 10000,
+    "sequence_num": 1
+  },
+  {
+    "_scenario": "2_rejection",
+    "_note": "Different market_id from scenario 1. Same profitable prices but test injects a saturated PositionSnapshot (90% deployed) so RiskGate rejects with MAX_CAPITAL_LOCKED.",
+    "platform": "kalshi",
+    "market_id": "KALSHI-TEST-002",
+    "yes_bid": 0.40,
+    "yes_ask": 0.42,
+    "no_bid": 0.40,
+    "no_ask": 0.42,
+    "volume_24h": 45000.0,
+    "open_interest": 9500,
+    "sequence_num": 1
+  },
+  {
+    "_scenario": "3_no_opportunity",
+    "_note": "YES+NO = 1.03 — sum exceeds 1.00 so gross profit is negative. ArbScanner must stay silent.",
+    "platform": "kalshi",
+    "market_id": "KALSHI-TEST-003",
+    "yes_bid": 0.52,
+    "yes_ask": 0.54,
+    "no_bid": 0.51,
+    "no_ask": 0.53,
+    "volume_24h": 30000.0,
+    "open_interest": 8000,
+    "sequence_num": 1
+  }
+]

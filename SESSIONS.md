@@ -69,3 +69,22 @@
 ### What to do first next session
 - Paper trading end-to-end test via agent layer
 - Wire execution layer to emit TradeExecutedEvent / LegFailureEvent so ComplianceOfficer logs real trades
+
+## 2026-05-25 (Session 3)
+
+### What was built
+- agents/floor/paper_executor.py — thin BaseAgent that closes the paper trading loop; subscribes to ApprovedOpportunityEvent, simulates full fill at opportunity leg prices, emits TradeExecutedEvent(paper_mode=True)
+- agents/floor/mock_price_watcher.py — fixture-driven price replay agent; reads a JSON file, emits PriceUpdateEvents, signals completion via asyncio.Event so --exit-after-test can wait on it
+- tests/fixtures/paper_test_prices.json — 3 price snapshots (happy path / rejection / no-opportunity); prices use YES=0.40, NO=0.40 (sum=0.80) to clear Kalshi's ~14% round-trip fee model; spec's 0.47/0.51 was noted as unprofitable after fees
+- tests/test_paper_trading.py — 3 pytest scenarios, all passing; each uses a fresh EventBus + agents in-process (no subprocess); monkeypatches LOGS_DIR for isolation
+- karbot_runner.py — added argparse with --mock-prices <path> and --exit-after-test flags; --mock-prices swaps in MockPriceWatcher + PaperExecutor; --exit-after-test waits on done_event, settles 2s, cancels cleanly
+- agents/management/compliance.py — fixed _append_audit datetime/Enum JSON serialization bug (added _audit_json_default encoder); this was a pre-existing bug triggered by the new TradeExecutedEvent and RejectedOpportunityEvent payloads
+
+### What was decided
+- Fixture prices deviate from spec's 0.47/0.51: Kalshi fee model (~14% round-trip) makes those prices unprofitable; 0.40/0.40 (sum=0.80, gross=20%, net≈5.7%) is used instead to make the pipeline fire correctly
+- Tests do NOT run agent.run() loops — only register_subscriptions() + bus.run(); this avoids the regulatory check making live HTTP calls during tests
+- Scenario 2 rejection is triggered by injecting a saturated PositionSnapshot (90% deployed > 40% limit) before the price event; this is more deterministic than relying on capital_required_usd
+
+### What to do first next session
+- Implement PositionTracker agent so runner mode can emit PositionSnapshot events (currently Risk Gate always rejects with NO_POSITION_DATA in runner mode)
+- Wire execution layer to emit TradeExecutedEvent / LegFailureEvent from real trade attempts

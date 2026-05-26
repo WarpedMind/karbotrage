@@ -6,8 +6,16 @@ This is the NEW entry point. It starts all agents as concurrent asyncio tasks
 and lets the event bus drive the system. It does NOT call agents directly.
 
 Legacy path: main.py + execution/engine.py (intentionally deferred)
+
+CLI flags:
+  --mode paper|live          Override trading mode (default: from config.yaml)
+  --mock-prices <path>       Swap in MockPriceWatcher + PaperExecutor for
+                             end-to-end paper trading tests
+  --exit-after-test          Exit cleanly after MockPriceWatcher signals done
+                             (2-second settling delay for in-flight events)
 """
 
+import argparse
 import asyncio
 import logging
 import signal
@@ -44,12 +52,41 @@ from agents.management.compliance import ComplianceOfficer
 logger = logging.getLogger(__name__)
 
 
-async def run():
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Karbot Rage! Agent Runner — WallStRobotics"
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["paper", "live"],
+        default=None,
+        help="Override trading mode (default: read from config.yaml)",
+    )
+    parser.add_argument(
+        "--mock-prices",
+        dest="mock_prices",
+        metavar="PATH",
+        default=None,
+        help="Path to JSON fixture. Swaps in MockPriceWatcher + PaperExecutor.",
+    )
+    parser.add_argument(
+        "--exit-after-test",
+        action="store_true",
+        default=False,
+        help="Exit cleanly after MockPriceWatcher signals done (2s settling delay).",
+    )
+    return parser.parse_args()
+
+
+async def run(args: argparse.Namespace = None):
     """
     Start all Phase 1 agents and run until shutdown signal.
     Agents communicate exclusively via the event bus.
     This function does not orchestrate agent logic — agents self-manage.
     """
+
+    if args is None:
+        args = argparse.Namespace(mock_prices=None, exit_after_test=False, mode=None)
 
     # --- 1. Load config ---
     config = KarbotConfig.from_yaml("config.yaml")
@@ -66,14 +103,29 @@ async def run():
     logger.info("Event bus initialized")
 
     # --- 3. Instantiate Phase 1 agents ---
-    agents = [
-        PriceWatcher(bus=bus, config=config),
-        ArbScanner(bus=bus, config=config),
-        RiskGate(bus=bus, config=config),
-        MarketAnalyst(bus=bus, config=config),
-        ReflectionAgent(bus=bus, config=config),
-        ComplianceOfficer(bus=bus, config=config),   # always-on, cannot be disabled
-    ]
+    if args.mock_prices:
+        from agents.floor.mock_price_watcher import MockPriceWatcher
+        from agents.floor.paper_executor import PaperExecutor
+        mock_watcher = MockPriceWatcher(bus=bus, config=config, fixture_path=args.mock_prices)
+        agents = [
+            mock_watcher,
+            ArbScanner(bus=bus, config=config),
+            RiskGate(bus=bus, config=config),
+            PaperExecutor(bus=bus, config=config),
+            MarketAnalyst(bus=bus, config=config),
+            ReflectionAgent(bus=bus, config=config),
+            ComplianceOfficer(bus=bus, config=config),
+        ]
+        logger.info(f"Mock mode: MockPriceWatcher + PaperExecutor active | fixture={args.mock_prices}")
+    else:
+        agents = [
+            PriceWatcher(bus=bus, config=config),
+            ArbScanner(bus=bus, config=config),
+            RiskGate(bus=bus, config=config),
+            MarketAnalyst(bus=bus, config=config),
+            ReflectionAgent(bus=bus, config=config),
+            ComplianceOfficer(bus=bus, config=config),   # always-on, cannot be disabled
+        ]
 
     # --- 4. Register each agent's event subscriptions ---
     for agent in agents:
@@ -87,16 +139,38 @@ async def run():
         tasks.append(task)
         logger.info(f"Started task: {agent.__class__.__name__}")
 
+    # Always run the bus dispatcher
+    bus_task = asyncio.create_task(bus.run(), name="EventBus")
+
     logger.info(f"Karbot Rage! running | {len(tasks)} agents active | Phase {config.phase}")
 
-    # --- 6. Wait for all tasks (runs indefinitely until shutdown) ---
-    try:
-        await asyncio.gather(*tasks)
-    except asyncio.CancelledError:
-        logger.info("Shutdown signal received — cancelling agent tasks")
+    # --- 6. Wait for all tasks (or test completion) ---
+    if args.mock_prices and args.exit_after_test:
+        # Wait for MockPriceWatcher to finish emitting, then settle and exit
+        try:
+            await asyncio.wait_for(mock_watcher.done_event.wait(), timeout=30.0)
+        except asyncio.TimeoutError:
+            logger.warning("MockPriceWatcher did not complete within 30s timeout")
+
+        logger.info("MockPriceWatcher done — waiting 2s for in-flight events to settle")
+        await asyncio.sleep(2.0)
+
+        logger.info("Settling complete — shutting down cleanly")
+        bus_task.cancel()
         for task in tasks:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(bus_task, *tasks, return_exceptions=True)
+        logger.info("All agents stopped cleanly (test mode exit)")
+        return
+
+    try:
+        await asyncio.gather(bus_task, *tasks)
+    except asyncio.CancelledError:
+        logger.info("Shutdown signal received — cancelling agent tasks")
+        bus_task.cancel()
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(bus_task, *tasks, return_exceptions=True)
         logger.info("All agents stopped cleanly")
 
 
@@ -130,6 +204,8 @@ if __name__ == "__main__":
     setup_logging()
     logger.info("Karbot Rage! starting up — WallStRobotics")
 
+    args = parse_args()
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
@@ -141,7 +217,7 @@ if __name__ == "__main__":
         )
 
     try:
-        loop.run_until_complete(run())
+        loop.run_until_complete(run(args))
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt — shutting down")
     finally:

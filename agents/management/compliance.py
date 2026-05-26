@@ -115,6 +115,19 @@ POLYMARKET_CSV_HEADERS = [
 ]
 
 
+def _audit_json_default(obj):
+    """Custom JSON serializer for audit trail entries.
+
+    Handles datetime (from event dataclasses) and Enum types (Priority).
+    Falls back to str() so we never silently drop data.
+    """
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if hasattr(obj, "name"):   # Enum (e.g. Priority.HIGH)
+        return obj.name
+    return str(obj)
+
+
 class ComplianceOfficer:
     """
     Always-on compliance agent. Cannot be disabled.
@@ -583,7 +596,7 @@ class ComplianceOfficer:
             "agent": "ComplianceOfficer",
         }
         with open(self._audit_trail, "a") as f:
-            f.write(json.dumps(entry) + "\n")
+            f.write(json.dumps(entry, default=_audit_json_default) + "\n")
 
     @staticmethod
     def _safe_dict(event) -> dict:
