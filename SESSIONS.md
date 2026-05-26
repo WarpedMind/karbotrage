@@ -92,6 +92,45 @@
 
 ---
 
+## 2026-05-26 (Session 6 — Telegram notification agent)
+
+### What was built
+- agents/notifications/__init__.py — new package
+- agents/notifications/telegram_agent.py — TelegramNotificationAgent (full impl) +
+  TelegramAgent (BaseAgent stub); subscribes to TelegramNotificationEvent,
+  TelegramPermissionRequestEvent, RegulatoryAlertEvent (Tier 1), LegFailureEvent
+  (Tier 1), TradeExecutedEvent (Tier 2), RejectedOpportunityEvent (Tier 2);
+  getUpdates polling every 3s; 1 msg/sec rate limit; single-operator FIFO permission
+  resolution; always publishes TelegramPermissionResponseEvent with response_text;
+  enabled=False → complete no-op (no HTTP calls, no polling)
+- core/events.py — 4 new event types added: RegulatoryAlertEvent,
+  TelegramNotificationEvent, TelegramPermissionRequestEvent,
+  TelegramPermissionResponseEvent
+- karbot/core/config.py — TelegramConfig sub-dataclass added; wired into KarbotConfig
+  and from_yaml(); credentials load from environment only (TELEGRAM_BOT_TOKEN,
+  TELEGRAM_CHAT_ID)
+- karbot_runner.py — TelegramAgent added last in both agent lists (now 9 agents at
+  end of this session)
+
+### What was decided
+- Polling over webhook: VPS does not expose public inbound ports; polling at 3s
+  intervals is sufficient for human response times; zero additional infrastructure
+- Single-operator FIFO permission resolution: any yes/no reply resolves oldest
+  pending request; revisit if concurrent permission requests become a real scenario
+- TelegramConfig credentials from environment only — never config.yaml
+- enabled=False is the default — must be explicitly opted in
+
+### Verification
+- python -m pytest tests/ -v: 13/13 passed (at time of this session) ✓
+- karbot_runner.py --exit-after-test: 9 agents start and exit cleanly ✓
+- TelegramAgent confirmed no-op when enabled=False ✓
+
+### What to do first next session
+- Spec and build Regulatory Intelligence Agent (uses Telegram layer)
+- Replace ComplianceOfficer keyword polling with Claude API interpretation
+
+---
+
 ## 2026-05-26 (Session 5 — Paper trading verification, debt cleanup, sequencing)
 
 ### What was done
