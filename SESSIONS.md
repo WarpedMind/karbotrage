@@ -112,3 +112,23 @@
 - Wire PositionTracker to subscribe to TradeExecutedEvent and update deployed capital across runs (Phase 2)
 - Wire execution layer to emit LegFailureEvent on partial fill / API error
 - Address pre-existing Secrets import collection errors in test_config.py and test_core_config.py
+
+## 2026-05-26 (Session 5)
+
+### What was fixed
+- tests/test_config.py — removed stale `Secrets` import; removed `assert Secrets is not None` from test_config_loading(); added comment explaining the removal
+- tests/test_core_config.py — removed stale `Secrets` import; removed assertions for `config.compliance` and `config.alerts` (these sub-configs do not exist in the current KarbotConfig dataclass); deleted `test_secrets_creation()` with an explanatory comment; added comment explaining the import removal
+- CLAUDE.md — removed KNOWN DEBT section (resolved) and removed item 3 from Next session priorities
+
+### What was decided
+- `Secrets` was deliberately removed from `karbot/core/config.py` in a prior session; no replacement exists; API credentials are not managed as a config dataclass in the current architecture
+- `config.compliance` and `config.alerts` were removed along with `Secrets`; current KarbotConfig has: system, data_feeds, capital, risk, strategies, intelligence
+- Both tests were preserved where the functionality they tested still exists; only the stale `Secrets`-dependent assertions and the `test_secrets_creation` test were removed
+
+### Verification
+- `python -m pytest tests/ -v`: 13/13 passed, 0 collection errors, 0 new failures ✓
+- Paper trading tests still pass (3/3) ✓
+
+### What to do first next session
+- Wire PositionTracker to subscribe to TradeExecutedEvent so deployed capital is tracked accurately across runs (Phase 2 of PositionTracker)
+- Wire execution layer to emit LegFailureEvent on partial fill / API error so compliance audit trail captures failures

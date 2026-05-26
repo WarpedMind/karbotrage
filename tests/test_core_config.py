@@ -1,6 +1,8 @@
 import pytest
 from pathlib import Path
-from karbot.core.config import KarbotConfig, Secrets
+from karbot.core.config import KarbotConfig
+# Secrets was removed from karbot/core/config.py in a prior session.
+# API credentials are no longer managed as a config dataclass.
 
 def test_config_creation():
     """Test that we can create a config object"""
@@ -13,12 +15,9 @@ def test_config_creation():
     assert config.strategies is not None
     assert config.intelligence is not None
     assert config.data_feeds is not None
-    assert config.compliance is not None
-    assert config.alerts is not None
+    # config.compliance and config.alerts were removed alongside Secrets in a
+    # prior session; they are not present in the current KarbotConfig dataclass.
 
-def test_secrets_creation():
-    """Test that we can create a secrets object"""
-    # This test is mostly to ensure the class structure works
-    # In a real system, we'd test with actual environment variables
-    secrets = Secrets()
-    assert secrets is not None
+# test_secrets_creation was removed: Secrets class was deliberately removed from
+# karbot/core/config.py in a prior session. No replacement exists — API credentials
+# are not managed as a config dataclass in the current architecture.

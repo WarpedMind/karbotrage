@@ -1,6 +1,8 @@
 import pytest
 from pathlib import Path
-from karbot.core.config import KarbotConfig, Secrets
+from karbot.core.config import KarbotConfig
+# Secrets was removed from karbot/core/config.py in a prior session.
+# API credentials are no longer managed as a config dataclass.
 
 def test_config_loading():
     """Test that configuration can be loaded properly"""
@@ -9,7 +11,6 @@ def test_config_loading():
 
     # Test that we can at least import the config
     assert KarbotConfig is not None
-    assert Secrets is not None
 
 def test_config_structure():
     """Test basic config structure"""

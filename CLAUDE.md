@@ -68,7 +68,6 @@ async def run(self): ...
 ## Next session priorities (in order)
 1. Wire PositionTracker to subscribe to TradeExecutedEvent so deployed capital is tracked accurately across runs (Phase 2 of PositionTracker)
 2. Wire execution layer to emit LegFailureEvent on partial fill / API error so compliance audit trail captures failures
-3. Address pre-existing Secrets import collection errors in test_config.py and test_core_config.py (tech debt — Secrets class was removed from karbot/core/config.py)
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 
@@ -98,11 +97,3 @@ Run: python -m pytest tests/
 - Run with debug: python main.py --debug
 - Run with specific mode: python main.py --mode paper
 
-## KNOWN DEBT
-
-### Pre-existing test collection errors (non-blocking)
-- `tests/test_config.py` — fails to collect due to `Secrets` import error
-- `tests/test_core_config.py` — fails to collect due to `Secrets` import error
-- These were present before the paper trading session and are not caused by recent changes
-- Must be resolved before live trading; not blocking paper trading validation
-- Fix: locate where `Secrets` was removed or renamed in a prior session and update the imports
