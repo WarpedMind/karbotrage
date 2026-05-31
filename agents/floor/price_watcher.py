@@ -17,6 +17,7 @@ A bug here silently corrupts ALL downstream pricing.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import time
 from collections import defaultdict
@@ -28,6 +29,8 @@ import aiohttp
 import structlog
 import websockets
 import websockets.exceptions
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding as crypto_padding
 from tenacity import (
     retry, stop_after_attempt, wait_exponential,
     retry_if_exception_type, before_sleep_log
@@ -40,6 +43,37 @@ from karbot.core.events import (
 )
 
 log = structlog.get_logger(__name__)
+
+
+# ── Kalshi RSA authentication ─────────────────────────────────────────────────
+
+def _load_kalshi_private_key(path: str):
+    """Load RSA private key from a PEM file. Raises if the file is missing or corrupt."""
+    with open(path, "rb") as fh:
+        return serialization.load_pem_private_key(fh.read(), password=None)
+
+
+def _build_kalshi_auth_headers(
+    key_id: str,
+    private_key,              # cryptography RSAPrivateKey object
+    method: str,
+    path: str,
+) -> Dict[str, str]:
+    """
+    Generate RSA-PKCS1v15/SHA-256 signed headers for the Kalshi API.
+
+    Signature covers: {timestamp_ms}{HTTP_METHOD}{url_path}
+    (no query string, no host, no body).
+    Docs: https://trading-api.kalshi.com/trade-api/v2
+    """
+    ts = str(int(time.time() * 1000))
+    msg = (ts + method + path).encode("utf-8")
+    sig = private_key.sign(msg, crypto_padding.PKCS1v15(), hashes.SHA256())
+    return {
+        "KALSHI-ACCESS-KEY":       key_id,
+        "KALSHI-ACCESS-SIGNATURE": base64.b64encode(sig).decode("utf-8"),
+        "KALSHI-ACCESS-TIMESTAMP": ts,
+    }
 
 
 # ── Order Book Reconstruction ─────────────────────────────────────────────────
@@ -150,55 +184,47 @@ class OrderBook:
 class KalshiWebSocketClient:
     """
     Connects to Kalshi WebSocket API.
-    Handles authentication, reconnection, and message routing.
+    Handles RSA authentication, reconnection, and message routing.
 
-    Kalshi Auth: HMAC-SHA256 signed requests.
+    Kalshi Auth: RSA-PKCS1v15 + SHA-256.  Private key is loaded once at
+    construction and reused for every signed request.
     Docs: https://trading-api.kalshi.com/trade-api/v2
     """
 
-    WS_URL = "wss://trading-api.kalshi.com/trade-api/ws/v2"
+    WS_URL  = "wss://trading-api.kalshi.com/trade-api/ws/v2"
+    WS_PATH = "/trade-api/ws/v2"
 
     def __init__(
         self,
-        api_key: str,
-        api_secret: str,
+        key_id: str,
+        private_key_path: str,
         on_price_update: Any,
         on_snapshot: Any,
         on_health: Any,
     ):
-        self.api_key       = api_key
-        self.api_secret    = api_secret
-        self._on_price     = on_price_update
-        self._on_snapshot  = on_snapshot
-        self._on_health    = on_health
-        self._ws           = None
-        self._connected    = False
+        self._key_id      = key_id
+        self._private_key = _load_kalshi_private_key(private_key_path)
+        self._on_price    = on_price_update
+        self._on_snapshot = on_snapshot
+        self._on_health   = on_health
+        self._ws          = None
+        self._connected   = False
         self._subscribed_markets: set = set()
-        self._msg_count    = 0
+        self._msg_count   = 0
         self._last_msg_time = time.monotonic()
 
     def _auth_headers(self) -> Dict[str, str]:
-        """Generate HMAC-SHA256 authentication headers for Kalshi."""
-        import hmac, hashlib, time as _time
-        ts = str(int(_time.time() * 1000))
-        msg = ts + "GET" + "/trade-api/ws/v2"
-        sig = hmac.new(
-            self.api_secret.encode(),
-            msg.encode(),
-            hashlib.sha256
-        ).hexdigest()
-        return {
-            "KALSHI-ACCESS-KEY":       self.api_key,
-            "KALSHI-ACCESS-SIGNATURE": sig,
-            "KALSHI-ACCESS-TIMESTAMP": ts,
-        }
+        """Generate RSA-signed auth headers for the WebSocket upgrade request."""
+        return _build_kalshi_auth_headers(
+            self._key_id, self._private_key, "GET", self.WS_PATH
+        )
 
     async def connect(self) -> None:
         """Connect and authenticate to Kalshi WebSocket."""
         headers = self._auth_headers()
         self._ws = await websockets.connect(
             self.WS_URL,
-            extra_headers=headers,
+            additional_headers=headers,
             ping_interval=30,
             ping_timeout=10,
             close_timeout=5,
@@ -208,19 +234,29 @@ class KalshiWebSocketClient:
         await self._on_health("kalshi", True, 0.0)
 
     async def subscribe_markets(self, market_ids: List[str]) -> None:
-        """Subscribe to orderbook updates for specific markets."""
-        for market_id in market_ids:
-            if market_id not in self._subscribed_markets:
-                msg = {
-                    "id": 1,
-                    "cmd": "subscribe",
-                    "params": {
-                        "channels": ["orderbook_delta"],
-                        "market_tickers": [market_id]
-                    }
-                }
-                await self._ws.send(json.dumps(msg))
-                self._subscribed_markets.add(market_id)
+        """
+        Subscribe to orderbook_delta for each market.
+        Sends in batches of 50 to keep individual WS messages small.
+        """
+        new_ids = [m for m in market_ids if m not in self._subscribed_markets]
+        if not new_ids:
+            return
+
+        chunk_size = 50
+        for batch_num, i in enumerate(range(0, len(new_ids), chunk_size)):
+            chunk = new_ids[i : i + chunk_size]
+            msg = {
+                "id":     batch_num + 1,
+                "cmd":    "subscribe",
+                "params": {
+                    "channels":       ["orderbook_delta"],
+                    "market_tickers": chunk,
+                },
+            }
+            await self._ws.send(json.dumps(msg))
+            self._subscribed_markets.update(chunk)
+
+        log.info("kalshi_markets_subscribed", total=len(new_ids))
 
     async def listen(self) -> None:
         """Process incoming messages indefinitely."""
@@ -341,11 +377,11 @@ class PriceWatcherAgent:
         """Connect to Kalshi WebSocket with automatic reconnection."""
         try:
             self._kalshi_client = KalshiWebSocketClient(
-                api_key    = self.secrets.kalshi_api_key,
-                api_secret = self.secrets.kalshi_api_secret,
-                on_price_update = self._handle_kalshi_delta,
-                on_snapshot     = self._handle_kalshi_snapshot,
-                on_health       = self._handle_health_change,
+                key_id           = self.secrets.kalshi_api_key_id,
+                private_key_path = self.secrets.kalshi_private_key_path,
+                on_price_update  = self._handle_kalshi_delta,
+                on_snapshot      = self._handle_kalshi_snapshot,
+                on_health        = self._handle_health_change,
             )
             await self._kalshi_client.connect()
 
@@ -362,32 +398,38 @@ class PriceWatcherAgent:
             raise
 
     async def _fetch_active_kalshi_markets(self) -> List[str]:
-        """Fetch list of active Kalshi markets via REST API."""
-        headers = {
-            "Authorization": f"Bearer {self.secrets.kalshi_api_key}",
-            "Content-Type": "application/json",
-        }
-        url = "https://trading-api.kalshi.com/trade-api/v2/markets"
-        params = {
-            "status": "open",
-            "limit": 200,
-        }
+        """
+        Fetch open Kalshi markets via REST API using RSA-signed headers.
+        Filters to markets with meaningful volume (>100 contracts or dollars).
+        """
+        rest_path = "/trade-api/v2/markets"
+        private_key = _load_kalshi_private_key(self.secrets.kalshi_private_key_path)
+        auth = _build_kalshi_auth_headers(
+            self.secrets.kalshi_api_key_id, private_key, "GET", rest_path
+        )
+        auth["Content-Type"] = "application/json"
+
+        url    = "https://trading-api.kalshi.com" + rest_path
+        params = {"status": "open", "limit": 200}
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, params=params) as resp:
+            async with session.get(url, headers=auth, params=params) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
+                    data    = await resp.json()
                     markets = data.get("markets", [])
-                    # Filter by minimum volume
+                    # Kalshi may use "volume" or "volume_24h" — accept either
                     active = [
                         m["ticker"]
                         for m in markets
-                        if m.get("volume_24h", 0) > 100
+                        if m.get("volume_24h", m.get("volume", 0)) > 100
                     ]
-                    log.info("kalshi_markets_fetched", count=len(active))
+                    log.info("kalshi_markets_fetched", count=len(active),
+                             total=len(markets))
                     return active
                 else:
-                    log.error("kalshi_markets_fetch_failed", status=resp.status)
+                    body = await resp.text()
+                    log.error("kalshi_markets_fetch_failed",
+                              status=resp.status, body=body[:300])
                     return []
 
     async def _handle_kalshi_snapshot(self, platform: str, msg: Dict) -> None:
@@ -521,28 +563,38 @@ class PriceWatcherAgent:
         return self._books
 
 
-# ── karbot_runner.py-compatible stub ─────────────────────────────────────────
+# ── karbot_runner.py-compatible agent ────────────────────────────────────────
 
-class PriceWatcher:
-    """Stub conforming to the BaseAgent interface for karbot_runner.py."""
+class PriceWatcher(PriceWatcherAgent):
+    """
+    BaseAgent-conforming class used by karbot_runner.py.
+    Inherits the full PriceWatcherAgent implementation.
+
+    run() behaviour:
+      - credentials present → connect to Kalshi WS and emit PriceUpdateEvents
+      - credentials absent  → idle and log once; no network calls
+    """
 
     def __init__(self, bus: EventBus, config: KarbotConfig):
-        self.bus = bus
-        self.config = config
+        super().__init__(config=config, secrets=config.secrets, event_bus=bus)
 
-    def register_subscriptions(self):
-        pass
+    def register_subscriptions(self) -> None:
+        pass   # PriceWatcher publishes; it does not subscribe to any event
 
-    async def run(self):
-        if self.config.paper_mode:
+    async def run(self) -> None:
+        key_id   = self.config.secrets.kalshi_api_key_id
+        key_path = self.config.secrets.kalshi_private_key_path
+
+        if not key_id or not key_path:
             log.info(
-                "PriceWatcher: paper mode active, no mock feed configured — idling. "
+                "PriceWatcher: no Kalshi credentials configured — idling. "
                 "No PriceUpdateEvents will be emitted."
             )
             while True:
                 await asyncio.sleep(60)
-                log.debug("PriceWatcher: paper idle heartbeat")
-        else:
-            log.info("PriceWatcher stub running (not yet implemented)")
-            while True:
-                await asyncio.sleep(60)
+                log.debug("PriceWatcher: idle heartbeat (no credentials)")
+            return
+
+        log.info("PriceWatcher: starting Kalshi WS connection",
+                 key_id=key_id, key_path=key_path)
+        await self.start()

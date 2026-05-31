@@ -553,17 +553,30 @@ Return ONLY valid JSON, no other text.
 
 # ── karbot_runner.py-compatible stub ─────────────────────────────────────────
 
-class MarketAnalyst:
-    """Stub conforming to the BaseAgent interface for karbot_runner.py."""
+class MarketAnalyst(MarketAnalystAgent):
+    """
+    BaseAgent-conforming class used by karbot_runner.py.
+    Inherits the full MarketAnalystAgent implementation.
+
+    run() starts the LLM analysis loop (every 5 min), heartbeat, and
+    cache-cleanup tasks.  If no Anthropic API key is configured the
+    analysis loop is a no-op and no API calls are made.
+    """
 
     def __init__(self, bus: EventBus, config: KarbotConfig):
-        self.bus = bus
-        self.config = config
+        super().__init__(config=config, secrets=config.secrets, event_bus=bus)
 
-    def register_subscriptions(self):
-        pass
+    def register_subscriptions(self) -> None:
+        pass   # MarketAnalyst publishes LogicalArbCandidateEvents; no subscriptions
 
-    async def run(self):
-        log.info("MarketAnalyst stub running (not yet implemented)")
+    async def run(self) -> None:
+        asyncio.create_task(self._analysis_loop(),      name="ma_analysis")
+        asyncio.create_task(self._heartbeat_loop(),     name="ma_heartbeat")
+        asyncio.create_task(self._cache_cleanup_loop(), name="ma_cache_cleanup")
+        log.info(
+            "market_analyst_started",
+            llm_enabled=self._client is not None,
+            model=self._intel.llm_model_analysis,
+        )
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(3600)

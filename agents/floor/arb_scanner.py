@@ -571,12 +571,20 @@ class ArbScannerAgent:
 # ── karbot_runner.py-compatible stub ─────────────────────────────────────────
 
 class ArbScanner(ArbScannerAgent):
-    """Stub conforming to the BaseAgent interface for karbot_runner.py."""
+    """
+    BaseAgent-conforming class used by karbot_runner.py.
+    Inherits the full ArbScannerAgent implementation.
+    register_subscriptions() (from superclass) wires PriceUpdateEvent etc.
+    run() starts the heartbeat and cache-cleanup background tasks.
+    """
 
     def __init__(self, bus: EventBus, config: KarbotConfig):
         super().__init__(config=config, event_bus=bus)
 
-    async def run(self):
-        log.info("ArbScanner stub running (not yet implemented)")
+    async def run(self) -> None:
+        asyncio.create_task(self._heartbeat_loop(),      name="arb_heartbeat")
+        asyncio.create_task(self._cache_cleanup_loop(),  name="arb_cache_cleanup")
+        log.info("arb_scanner_started", paper_mode=self.config.system.paper_mode)
+        # Subscriptions handle all incoming events; keep this task alive.
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(3600)

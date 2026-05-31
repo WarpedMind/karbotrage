@@ -46,12 +46,12 @@ Karbot Rage! is a multi-agent automated trading system designed for decentralize
 - karbot/core/: Package exists — agents import from here
   - karbot/core/config.py: KarbotConfig typed dataclass; Phase 1 invariants enforced structurally at `__init__` — `polymarket_ws_enabled=True` with `phase=1` raises `ValueError`, `s2_cross_platform_enabled=True` with `phase=1` raises `ValueError`; RiskConfig hard limits also enforced at instantiation. Now also has `from_yaml(path)` classmethod, `.phase` property (→ capital.phase), and `.paper_mode` property (→ system.paper_mode). TelegramConfig + RegulatoryIntelligenceConfig sub-dataclasses added.
   - karbot/core/events.py: Re-exports all event types from core/events.py
-- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (BaseAgent-conforming stub used by runner); stub checks config.paper_mode and idles with no network calls when True
-- agents/floor/arb_scanner.py: `ArbScannerAgent` (full impl, has register_subscriptions) + `ArbScanner` (inherits it, adds run() stub)
-- agents/floor/risk_gate.py: `RiskGateAgent` (full impl, has register_subscriptions) + `RiskGate` (inherits it, adds run() stub); subscribes to RegulatoryAlertEvent; _regulatory_pause=True blocks all trades when urgency=5; cleared by urgency=0 event from RegulatoryIntelligenceAgent
-- agents/research/market_analyst.py: `MarketAnalystAgent` (full impl) + `MarketAnalyst` (BaseAgent-conforming stub used by runner)
+- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PKCS1v15/SHA-256 auth via `cryptography`; `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message)
+- agents/floor/arb_scanner.py: `ArbScannerAgent` (full impl, has register_subscriptions) + `ArbScanner` (inherits it); `run()` starts heartbeat + cache-cleanup tasks then idles; S1 opportunity detection fully wired
+- agents/floor/risk_gate.py: `RiskGateAgent` (full impl, has register_subscriptions) + `RiskGate` (inherits it); `run()` starts heartbeat task then idles; subscribes to RegulatoryAlertEvent; _regulatory_pause=True blocks all trades when urgency=5; cleared by urgency=0 event from RegulatoryIntelligenceAgent
+- agents/research/market_analyst.py: `MarketAnalystAgent` (full impl) + `MarketAnalyst` (inherits it); `run()` starts LLM analysis loop (5-min), heartbeat, cache-cleanup; no-op when ANTHROPIC_API_KEY absent
 - agents/research/regulatory_intelligence.py: **NEW COMPLETE** — `RegulatoryIntelligenceAgentImpl` (full impl) + `RegulatoryIntelligenceAgent` (BaseAgent stub); polls CFTC RSS + Federal Register every 6h; keyword pre-filter controls API costs; Claude Sonnet assesses urgency 1-5; urgency 3→Telegram FYI, 4→Telegram alert, 5→Telegram + trading pause; operator sends clear phrase via Telegram to resume; weekly sweep skips keyword filter; daily/cycle caps + circuit breaker; overflow queue for items exceeding per-cycle cap
-- agents/management/reflection.py: `ReflectionAgentImpl` (full impl, renamed from ReflectionAgent) + `ReflectionAgent` (BaseAgent-conforming stub used by runner)
+- agents/management/reflection.py: `ReflectionAgentImpl` (full impl) + `ReflectionAgent` (inherits it); `run()` starts nightly scheduler (02:00 ET / 07:00 UTC) + heartbeat; nightly cycle fails gracefully until compliance.db schema exists (deferred)
 - agents/management/compliance.py: **v2 UPDATED** — IRS dual-track logging, append-only audit trail, compliance action log, REGULATORY_HALT enforcement; **polling loop removed** (now handled by RegulatoryIntelligenceAgent); subscribes to RegulatoryAlertEvent to log AI-assessed alerts to compliance_actions.jsonl; subscriptions wired to TradeExecutedEvent, LegFailureEvent, RejectedOpportunityEvent, RegulatoryAlertEvent
 - agents/notifications/telegram_agent.py: **UPDATED** — TelegramNotificationAgent (full impl) + TelegramAgent (BaseAgent stub); subscribes to TelegramNotificationEvent, TelegramPermissionRequestEvent, RegulatoryAlertEvent (Tier 1), LegFailureEvent (Tier 1), TradeExecutedEvent (Tier 2), RejectedOpportunityEvent (Tier 2); getUpdates polling every 3s; 1 msg/sec rate limit; single-operator FIFO permission resolution; always publishes TelegramPermissionResponseEvent with response_text so RegulatoryIntelligenceAgent can check for clear phrase; enabled=False → no-op (no HTTP calls, no polling)
 
@@ -68,7 +68,7 @@ async def run(self): ...
 - data/market_data.py: Market data (Kalshi-first, Polymarket gated behind polymarket_ws_enabled)
 
 ## Current status
-- karbot_runner.py: **Written and verified** — supports --mock-prices and --exit-after-test flags; 10 agents start and exit cleanly; `_run_supervised()` wrapper prevents single-agent crash from killing the runner; `return_exceptions=True` on main gather; continuous paper mode confirmed working (no credentials required)
+- karbot_runner.py: **Written and verified** — supports --mock-prices and --exit-after-test flags; 10 agents start and exit cleanly; `_run_supervised()` wrapper prevents single-agent crash from killing the runner; `return_exceptions=True` on main gather; continuous paper mode confirmed working (no credentials required); PaperExecutor now in continuous paper mode agent list; exit cleanup cancels all background sub-tasks (zero "Task was destroyed" warnings)
 - core/events.py: Full event bus with all typed events — production-ready; RegulatoryAlertEvent has full AI-assessment fields (urgency, summary, affected, recommended_action, raw_title, cycle_type); TelegramPermissionResponseEvent has response_text field; priority queue fixed with sequence tiebreaker
 - karbot/core/config.py: KarbotConfig Phase 1 invariants structural + from_yaml() + .phase + .paper_mode + regulatory_halt + TelegramConfig + RegulatoryIntelligenceConfig + SecretsConfig sub-dataclasses; SystemConfig.paper_resolution_delay_seconds added
 - agents/research/regulatory_intelligence.py: **COMPLETE** — full Regulatory Intelligence Agent; 11 tests passing; Claude Sonnet urgency assessment; cost controls (daily cap, circuit breaker, overflow queue, spend estimator); operator clear flow via Telegram
@@ -97,6 +97,12 @@ async def run(self): ...
 - correlation_score in PositionSnapshot is permanently 0.0 — Phase 3 item
 - execution/engine.py — legacy monolithic path, intentionally deferred,
   must be removed or replaced before live trading; do not extend
+- MarketAnalystAgent + ReflectionAgentImpl use synchronous `anthropic.Anthropic`
+  client — blocks event loop ~1-2 s per LLM call; acceptable for paper trading;
+  must be replaced with `AsyncAnthropic` before live trading
+- ReflectionAgent nightly cycle requires `compliance.db` with `trades` and
+  `rejections` tables (schema not yet created); cycle fails gracefully until
+  the schema is built — deferred to a future session
 
 ## REGULATORY CONTEXT (May 2026 — current)
 - CFTC Letter 26-15 (May 19 2026, EFFECTIVE NOW): New cooperation
@@ -114,9 +120,13 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. Monitor paper trading for 30 days — review daily summary logs weekly
-2. Provision Kalshi API credentials (RSA key generation and registration per .env.example)
-3. Begin live executor spec after 30-day paper run completes (2026-06-25)
+1. SSH to VPS, tail runner logs — confirm `kalshi_ws_connected` and
+   `kalshi_markets_fetched`; if auth fails see SESSIONS.md Session 11 for
+   debugging steps
+2. Once data flows: confirm S1 opportunities appear (or note they don't and why)
+   and verify paper trades land in logs/kalshi_trades.csv
+3. Build compliance.db schema so ReflectionAgent nightly cycle can run
+4. Begin live executor spec after 30-day paper run completes (2026-06-25)
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 

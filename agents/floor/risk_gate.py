@@ -609,12 +609,19 @@ class RiskGateAgent:
 # ── karbot_runner.py-compatible stub ─────────────────────────────────────────
 
 class RiskGate(RiskGateAgent):
-    """Stub conforming to the BaseAgent interface for karbot_runner.py."""
+    """
+    BaseAgent-conforming class used by karbot_runner.py.
+    Inherits the full RiskGateAgent implementation.
+    register_subscriptions() (from superclass) wires OpportunityEvent etc.
+    run() starts the heartbeat background task.
+    """
 
     def __init__(self, bus: EventBus, config: KarbotConfig):
         super().__init__(config=config, event_bus=bus)
 
-    async def run(self):
-        log.info("RiskGate stub running (not yet implemented)")
+    async def run(self) -> None:
+        asyncio.create_task(self._heartbeat_loop(), name="rg_heartbeat")
+        log.info("risk_gate_started", paper_mode=self.config.system.paper_mode)
+        # Subscriptions handle all incoming events; keep this task alive.
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(3600)

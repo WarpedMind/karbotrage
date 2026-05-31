@@ -1,6 +1,71 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-05-30 (Session 11 — Real paper trading: stub wiring + Kalshi auth)
+
+### What was built
+- **Kalshi RSA auth (price_watcher.py)**: replaced the incorrect HMAC-SHA256 implementation
+  with RSA-PKCS1v15/SHA-256.  New module-level `_load_kalshi_private_key()` and
+  `_build_kalshi_auth_headers()` helpers use `cryptography` to sign the request.
+  `KalshiWebSocketClient` now takes `key_id` + `private_key_path` (matching
+  `SecretsConfig.kalshi_api_key_id` / `kalshi_private_key_path`); private key is
+  loaded once at construction.  `additional_headers=` used for websockets 12+.
+  `subscribe_markets()` now sends all tickers in a single batched message
+  (chunked at 50) rather than one message per market.
+  `_fetch_active_kalshi_markets()` now uses RSA-signed headers and accepts both
+  `volume_24h` and `volume` field names from the Kalshi REST response.
+- **PriceWatcher** now inherits from `PriceWatcherAgent`.  `run()` checks for
+  credentials; if present, calls `self.start()` to open the real Kalshi WS
+  connection; if absent, idles with an informative log and zero network calls.
+- **ArbScanner.run()**: starts `_heartbeat_loop` + `_cache_cleanup_loop` tasks,
+  then idles.  Subscription handling (PriceUpdateEvent → S1 check → OpportunityEvent)
+  was already wired through the inherited `ArbScannerAgent` implementation.
+- **RiskGate.run()**: starts `_heartbeat_loop` task, then idles.  All eight
+  pre-trade checks were already in the inherited `RiskGateAgent` implementation.
+- **MarketAnalyst** now inherits from `MarketAnalystAgent`.  `run()` starts the
+  5-minute LLM analysis loop, heartbeat, and cache-cleanup tasks.  Analysis is
+  a no-op when `ANTHROPIC_API_KEY` is not set (no API calls made).
+- **ReflectionAgent** now inherits from `ReflectionAgentImpl`.  `run()` starts the
+  nightly scheduler (02:00 ET / 07:00 UTC) and heartbeat.  Nightly cycle will
+  fail gracefully (logged, not raised) until `compliance.db` exists with the
+  required schema — deferred to a future session.
+- **PaperExecutor** added to the continuous paper mode agent list in
+  `karbot_runner.py`.  Previously only present in the `--mock-prices` branch,
+  so approved opportunities in continuous mode had nowhere to go.
+  `PaperExecutor.register_subscriptions()` self-guards on `paper_mode`; safe
+  to include in live mode when that path is eventually enabled.
+- **`--exit-after-test` cleanup**: added a second cancellation pass over
+  `asyncio.all_tasks()` after the main tasks are cancelled, eliminating
+  "Task was destroyed but it is pending!" warnings from background sub-tasks.
+- **`cryptography>=41.0.0`** added to `requirements.txt`.
+
+### What was decided
+- All five stub agents now use inheritance over delegation — consistent with the
+  existing `ArbScanner`/`RiskGate` pattern.
+- Synchronous `anthropic.Anthropic` client in `MarketAnalystAgent` and
+  `ReflectionAgentImpl` blocks the event loop for ~1-2 s per LLM call.
+  Acceptable for paper trading; must be replaced with `AsyncAnthropic` before
+  live trading.  Added to KNOWN DEBT.
+- `ReflectionAgent` nightly DB dependency deferred: `compliance.db` schema
+  creation is a separate session item.
+
+### Verification
+- python -m pytest tests/ -v: 35/35 passed ✓
+- karbot_runner.py --exit-after-test: 10 agents start, 2 paper trades execute,
+  zero "Task was destroyed" warnings, exits cleanly ✓
+- Mock-prices path unaffected ✓
+
+### What to do first next session
+- SSH to VPS and tail the runner logs to confirm Kalshi WS connects with RSA
+  auth and PriceUpdateEvents start flowing
+- Watch for `kalshi_ws_connected` and `kalshi_markets_fetched` in the logs
+- If auth fails: check KALSHI_API_KEY_ID format and private key path in .env;
+  verify RSA key is registered at kalshi.com → Account → API Keys
+- Once data flows: observe S1 opportunities being found (or not) and confirm
+  PaperExecutor is logging paper trades to logs/kalshi_trades.csv
+
+---
+
 ## 2026-05-26 (Session 10 — Continuous paper mode fix)
 
 ### What was built

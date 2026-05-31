@@ -587,17 +587,39 @@ Include one specific observation about what the data suggests for tomorrow.
 
 # ── karbot_runner.py-compatible stub ─────────────────────────────────────────
 
-class ReflectionAgent:
-    """Stub conforming to the BaseAgent interface for karbot_runner.py."""
+class ReflectionAgent(ReflectionAgentImpl):
+    """
+    BaseAgent-conforming class used by karbot_runner.py.
+    Inherits the full ReflectionAgentImpl (9-step nightly learning cycle).
+
+    run() starts the nightly scheduler (fires at 2 AM ET / 07:00 UTC) and
+    the heartbeat task.  The nightly cycle requires a populated compliance.db
+    — it will log an error and skip gracefully until that DB exists.
+
+    NOTE: MarketAnalystAgent and ReflectionAgentImpl use the synchronous
+    anthropic.Anthropic client, which briefly blocks the asyncio event loop
+    during LLM calls.  This is acceptable for paper trading but must be
+    replaced with AsyncAnthropic before live trading.  (KNOWN DEBT)
+    """
 
     def __init__(self, bus: EventBus, config: KarbotConfig):
-        self.bus = bus
-        self.config = config
+        super().__init__(
+            config   = config,
+            secrets  = config.secrets,
+            event_bus= bus,
+            data_dir = Path("logs"),
+        )
 
-    def register_subscriptions(self):
-        pass
+    def register_subscriptions(self) -> None:
+        pass   # ReflectionAgent does not subscribe to any event
 
-    async def run(self):
-        log.info("ReflectionAgent stub running (not yet implemented)")
+    async def run(self) -> None:
+        asyncio.create_task(self._nightly_scheduler(), name="ref_nightly")
+        asyncio.create_task(self._heartbeat_loop(),    name="ref_heartbeat")
+        log.info(
+            "reflection_agent_started",
+            next_run="02:00 ET / 07:00 UTC",
+            semantic_rules=len(self._semantic_memory.get("rules", [])),
+        )
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(3600)

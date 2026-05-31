@@ -34,6 +34,7 @@ from agents.floor.price_watcher import PriceWatcher
 from agents.floor.arb_scanner import ArbScanner
 from agents.floor.risk_gate import RiskGate
 from agents.floor.position_tracker import PositionTracker
+from agents.floor.paper_executor import PaperExecutor
 
 # Phase 1 agents — Research Floor
 from agents.research.market_analyst import MarketAnalyst
@@ -122,7 +123,6 @@ async def run(args: argparse.Namespace = None):
     # --- 3. Instantiate Phase 1 agents ---
     if args.mock_prices:
         from agents.floor.mock_price_watcher import MockPriceWatcher
-        from agents.floor.paper_executor import PaperExecutor
         mock_watcher = MockPriceWatcher(bus=bus, config=config, fixture_path=args.mock_prices)
         agents = [
             # PositionTracker MUST be first: its run() publishes the startup
@@ -151,6 +151,8 @@ async def run(args: argparse.Namespace = None):
             PriceWatcher(bus=bus, config=config),
             ArbScanner(bus=bus, config=config),
             RiskGate(bus=bus, config=config),
+            # PaperExecutor: simulates fills in paper mode; self-disables in live mode
+            PaperExecutor(bus=bus, config=config),
             # Research Floor
             MarketAnalyst(bus=bus, config=config),
             RegulatoryIntelligenceAgent(bus=bus, config=config),
@@ -197,6 +199,15 @@ async def run(args: argparse.Namespace = None):
         for task in tasks:
             task.cancel()
         await asyncio.gather(bus_task, *tasks, return_exceptions=True)
+        # Also cancel any background sub-tasks spawned by agents
+        # (heartbeat loops, analysis loops, etc.) so the event loop
+        # closes cleanly without "Task was destroyed" warnings.
+        remaining = [t for t in asyncio.all_tasks()
+                     if not t.done() and t is not asyncio.current_task()]
+        if remaining:
+            for t in remaining:
+                t.cancel()
+            await asyncio.gather(*remaining, return_exceptions=True)
         logger.info("All agents stopped cleanly (test mode exit)")
         return
 
