@@ -136,7 +136,7 @@ async def run(self): ...
 - Portfolio Manager agent for cross-strategy capital allocation
 
 ## GitHub
-- Repo: https://github.com/WarpedMind/karbotrage_v1
+- Repo: https://github.com/WarpedMind/karbotrage
 - Branch strategy: main = stable, feature branches for new work
 
 ## Rules / Never do

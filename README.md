@@ -24,24 +24,28 @@ Version naming follows the theme: Rage → Fury → Wrath → Vengeance
 
 ## What it does
 
-Six specialized agents run concurrently over a shared async event bus, covering the full trading loop:
+Ten specialized agents run concurrently over a shared async event bus, covering the full trading loop:
 
 | Agent | Role |
 |---|---|
-| PriceWatcher | Watches Kalshi market prices in real time |
-| ArbScanner | Scans for arbitrage opportunities |
-| RiskGate | Enforces position and exposure limits |
-| MarketAnalyst | Analyzes market signals |
-| ReflectionAgent | Post-trade reflection and strategy tuning |
-| ComplianceOfficer | Always-on compliance monitoring (cannot be disabled) |
+| PositionTracker | Tracks deployed capital, open positions, daily P&L |
+| PriceWatcher | Connects to Kalshi WebSocket (RSA-authenticated), emits real-time price updates |
+| ArbScanner | Scans for arbitrage opportunities (S1 strategy) |
+| RiskGate | Enforces position/exposure limits; can pause trading on regulatory alerts |
+| PaperExecutor | Simulates fills and P&L resolution in paper mode |
+| MarketAnalyst | LLM-based market signal analysis (Claude) |
+| RegulatoryIntelligenceAgent | Monitors CFTC/Federal Register, assesses urgency via Claude |
+| ReflectionAgent | Nightly post-trade reflection and strategy tuning |
+| ComplianceOfficer | Always-on compliance + audit trail (cannot be disabled) |
+| TelegramAgent | Operator notifications and permission requests |
 
 ## Tech stack
 
 - Python 3.8+, asyncio
 - Pydantic typed config (`KarbotConfig`)
 - Custom `EventBus` with typed event dataclasses (`core/events.py`)
-- aiohttp, websockets, pyyaml, structlog, tenacity, aiosqlite
-- Anthropic SDK (for future intelligence layer)
+- aiohttp, websockets, pyyaml, structlog, tenacity, aiosqlite, cryptography
+- Anthropic SDK (LLM-based intelligence agents)
 - pytest / pytest-asyncio
 
 ## How to run
@@ -50,8 +54,12 @@ Six specialized agents run concurrently over a shared async event bus, covering 
 # Activate the project virtualenv
 source karbotrage_env/bin/activate
 
-# Start all 6 agents (canonical entry point)
-python karbot_runner.py
+# Run continuously in paper mode (canonical entry point)
+karbotrage_env/bin/python karbot_runner.py --mode paper
+
+# Run a mock-data end-to-end test and exit cleanly
+karbotrage_env/bin/python karbot_runner.py --mode paper \
+  --mock-prices tests/fixtures/paper_test_prices.json --exit-after-test
 ```
 
 The legacy `python main.py` path still works but is intentionally not extended — it bypasses the event bus.
@@ -60,35 +68,40 @@ The legacy `python main.py` path still works but is intentionally not extended �
 
 - Kalshi is the primary data source; Polymarket is gated behind `polymarket_ws_enabled` (disabled in Phase 1)
 - Phase 1 invariants are enforced structurally in `KarbotConfig.__init__` — enabling Polymarket WebSocket or cross-platform strategies while `phase=1` raises `ValueError` at startup
-- Paper trading mode only; live execution deferred until end-to-end paper test passes
+- Paper trading mode only; 30-day paper trading clock started 2026-05-26; live execution deferred until it completes and end-to-end results are reviewed
 
 ## Project layout
 
 ```
-karbot_runner.py          # Entry point — starts all 6 agents
+karbot_runner.py          # Entry point — starts all 10 Phase 1 agents
 core/events.py            # EventBus + all typed event dataclasses
 karbot/core/
-  config.py               # KarbotConfig (Phase 1 invariants, from_yaml, .phase, .paper_mode)
+  config.py               # KarbotConfig (Phase 1 invariants, from_yaml, .phase, .paper_mode, SecretsConfig)
   events.py               # Re-exports from core/events.py
 agents/
   floor/
-    price_watcher.py      # PriceWatcher
+    price_watcher.py      # PriceWatcher (Kalshi WS, RSA auth)
     arb_scanner.py        # ArbScanner
     risk_gate.py          # RiskGate
+    position_tracker.py   # PositionTracker
+    paper_executor.py      # PaperExecutor
   research/
     market_analyst.py     # MarketAnalyst
+    regulatory_intelligence.py  # RegulatoryIntelligenceAgent
   management/
     reflection.py         # ReflectionAgent
-    compliance.py         # ComplianceOfficer (always-on)
+    compliance.py          # ComplianceOfficer (always-on)
+  notifications/
+    telegram_agent.py      # TelegramAgent
 execution/engine.py       # Legacy monolith — do not extend until paper tested
 data/market_data.py       # Kalshi-first market data
 ```
 
 ## Next up
 
-1. Wire `ComplianceOfficer` subscriptions to `TradeExecutedEvent`
-2. IRS dual-track logging (Kalshi = ordinary income, Polymarket = capital gains)
-3. Paper trading end-to-end test
+1. Confirm Kalshi WS connection and S1 opportunities on the live VPS deployment
+2. Build `compliance.db` schema so `ReflectionAgent`'s nightly cycle can run
+3. Begin live executor spec after the 30-day paper run completes (2026-06-25)
 
 ## License
 

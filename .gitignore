@@ -51,6 +51,9 @@ secrets/
 .DS_Store
 Thumbs.db
 
+# Local working notes / session transcripts — not part of the codebase
+claudeconversations/
+
 # Logs
 *.log
 logs/

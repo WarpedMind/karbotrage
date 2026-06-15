@@ -595,6 +595,5 @@ class PriceWatcher(PriceWatcherAgent):
                 log.debug("PriceWatcher: idle heartbeat (no credentials)")
             return
 
-        log.info("PriceWatcher: starting Kalshi WS connection",
-                 key_id=key_id, key_path=key_path)
+        log.info("PriceWatcher: starting Kalshi WS connection")
         await self.start()

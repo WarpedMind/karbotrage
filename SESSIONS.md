@@ -1,6 +1,41 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-06-14 (Session 12 — Security fix: PriceWatcher startup log + repo rename)
+
+### What was built
+- **Fixed CLAUDE.md security violation introduced in Session 11**:
+  `PriceWatcher.run()` (agents/floor/price_watcher.py) logged
+  `key_id=key_id, key_path=key_path` at INFO level when starting the Kalshi
+  WS connection — both are `SecretsConfig` field values, and `key_path` is a
+  private key filesystem path. Removed both fields from the log call; the
+  message now just reads `"PriceWatcher: starting Kalshi WS connection"`
+  with no arguments.
+- Updated README.md to reflect the current 10-agent architecture (was stale
+  at "six agents"), correct run commands (`--mode paper`, `--mock-prices`,
+  `--exit-after-test`), updated project layout, and current "Next up" list.
+- Updated CLAUDE.md GitHub repo URL to the renamed repo (see below).
+
+### What was decided
+- GitHub repo renamed from `WarpedMind/karbotrage_v1` to
+  `WarpedMind/karbotrage` (the `_v1` suffix was unnecessary — GitHub handles
+  versioning via branches/tags/releases, not repo names). GitHub
+  automatically redirects the old URL, and the local `origin` remote was
+  updated to point at the new URL.
+
+### Verification
+- python -m pytest tests/ -v: 35/35 passed ✓
+- karbot_runner.py --exit-after-test: 10 agents start, 2 paper trades execute,
+  zero "Task was destroyed" warnings, exits cleanly ✓
+- Confirmed no other code/docs referenced the old `kalshi_api_key_id`/
+  `kalshi_private_key_path` values in log calls ✓
+
+### What to do first next session
+- SSH to VPS, `git remote set-url origin https://github.com/WarpedMind/karbotrage.git`
+  (or rely on GitHub's redirect), then `git pull` to get this fix
+- Continue with Session 11's "what to do first next session" items (Kalshi WS
+  connection verification, S1 opportunities, compliance.db schema)
+
 ## 2026-05-30 (Session 11 — Real paper trading: stub wiring + Kalshi auth)
 
 ### What was built
