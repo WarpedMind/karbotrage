@@ -31,6 +31,7 @@ import websockets
 import websockets.exceptions
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding as crypto_padding
+from cryptography.hazmat.primitives.asymmetric.padding import PSS, MGF1
 from tenacity import (
     retry, stop_after_attempt, wait_exponential,
     retry_if_exception_type, before_sleep_log
@@ -60,15 +61,17 @@ def _build_kalshi_auth_headers(
     path: str,
 ) -> Dict[str, str]:
     """
-    Generate RSA-PKCS1v15/SHA-256 signed headers for the Kalshi API.
+    Generate RSA-PSS/SHA-256 signed headers for the Kalshi API.
 
     Signature covers: {timestamp_ms}{HTTP_METHOD}{url_path}
     (no query string, no host, no body).
-    Docs: https://trading-api.kalshi.com/trade-api/v2
+    Docs: https://api.elections.kalshi.com/trade-api/v2
     """
     ts = str(int(time.time() * 1000))
     msg = (ts + method + path).encode("utf-8")
-    sig = private_key.sign(msg, crypto_padding.PKCS1v15(), hashes.SHA256())
+    sig = private_key.sign(
+        msg, PSS(mgf=MGF1(hashes.SHA256()), salt_length=PSS.MAX_LENGTH), hashes.SHA256()
+    )
     return {
         "KALSHI-ACCESS-KEY":       key_id,
         "KALSHI-ACCESS-SIGNATURE": base64.b64encode(sig).decode("utf-8"),
@@ -186,12 +189,12 @@ class KalshiWebSocketClient:
     Connects to Kalshi WebSocket API.
     Handles RSA authentication, reconnection, and message routing.
 
-    Kalshi Auth: RSA-PKCS1v15 + SHA-256.  Private key is loaded once at
+    Kalshi Auth: RSA-PSS + SHA-256.  Private key is loaded once at
     construction and reused for every signed request.
-    Docs: https://trading-api.kalshi.com/trade-api/v2
+    Docs: https://api.elections.kalshi.com/trade-api/v2
     """
 
-    WS_URL  = "wss://trading-api.kalshi.com/trade-api/ws/v2"
+    WS_URL  = "wss://api.elections.kalshi.com/trade-api/ws/v2"
     WS_PATH = "/trade-api/ws/v2"
 
     def __init__(
@@ -409,7 +412,7 @@ class PriceWatcherAgent:
         )
         auth["Content-Type"] = "application/json"
 
-        url    = "https://trading-api.kalshi.com" + rest_path
+        url    = "https://api.elections.kalshi.com" + rest_path
         params = {"status": "open", "limit": 200}
 
         async with aiohttp.ClientSession() as session:

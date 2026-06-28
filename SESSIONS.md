@@ -1,6 +1,58 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-06-27 (Session 13 — Kalshi API migration: domain + RSA-PSS signing)
+
+### What was built
+- **agents/floor/price_watcher.py**: Kalshi migrated their API to a new domain
+  (`api.elections.kalshi.com`, replacing `trading-api.kalshi.com`) and now
+  requires RSA-PSS signing instead of RSA-PKCS1v15. Both changes applied:
+  - `KalshiWebSocketClient.WS_URL` / `WS_PATH`, the REST base URL in
+    `_fetch_active_kalshi_markets()`, and docstring references all updated
+    to `api.elections.kalshi.com`.
+  - `_build_kalshi_auth_headers()` now signs with
+    `PSS(mgf=MGF1(hashes.SHA256()), salt_length=PSS.MAX_LENGTH)` instead of
+    `crypto_padding.PKCS1v15()`.
+
+### What was decided
+- Changed one variable at a time rather than applying both fixes blind:
+  first verified the domain-move claim against a live 401 error from
+  Kalshi's own server ("API has been moved to
+  https://api.elections.kalshi.com/"), applied the URL fix alone, then
+  live-tested PKCS1v15 against the new domain — got
+  `401 INCORRECT_API_KEY_SIGNATURE`, a signature-format rejection, not a
+  routing error. Only then tried RSA-PSS, confirmed `200 SUCCESS` against
+  `/trade-api/v2/portfolio/balance` using the real Kalshi credentials in
+  `.env` / `/Users/tom/kalshi-keys/kalshi_private.pem`, and applied the PSS
+  change to the actual source function (not just a throwaway test script).
+- The RSA-PSS requirement was initially surfaced via a third-party web
+  search with no independent confirmation — it was NOT applied until a live
+  401 from Kalshi's real API confirmed the PKCS1v15 signature was actually
+  being rejected post-migration.
+
+### Verification
+- Live auth test against `_build_kalshi_auth_headers()` in the actual
+  source file: `200 SUCCESS` against `api.elections.kalshi.com` ✓
+- `python -m pytest tests/ -v`: 35/35 passed ✓
+- VPS-side verification (real WS connection, `kalshi_ws_connected`,
+  `kalshi_markets_fetched`, live S1 opportunities) still blocked — SSH
+  access to the Oracle VPS (`karbot-rage-prod`, 147.224.209.18) is currently
+  lost; the authorized key's comment is `ssh-key-2026-05-27` and no local
+  file matches it. Serial console recovery was in progress as of this
+  session but not completed.
+
+### What to do first next session
+- Restore SSH access to the VPS (serial console recovery, or locate the
+  missing `ssh-key-2026-05-27` private key)
+- `git pull` on the VPS to get this fix, then confirm `kalshi_ws_connected`
+  and `kalshi_markets_fetched` in the logs with the new domain + RSA-PSS
+- Once data flows: confirm S1 opportunities and paper trades land in
+  logs/kalshi_trades.csv
+- Build compliance.db schema so ReflectionAgent's nightly cycle can run
+- Begin live executor spec (30-day paper run completed 2026-06-25)
+
+---
+
 ## 2026-06-14 (Session 12 — Security fix: PriceWatcher startup log + repo rename)
 
 ### What was built

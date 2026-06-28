@@ -46,7 +46,7 @@ Karbot Rage! is a multi-agent automated trading system designed for decentralize
 - karbot/core/: Package exists — agents import from here
   - karbot/core/config.py: KarbotConfig typed dataclass; Phase 1 invariants enforced structurally at `__init__` — `polymarket_ws_enabled=True` with `phase=1` raises `ValueError`, `s2_cross_platform_enabled=True` with `phase=1` raises `ValueError`; RiskConfig hard limits also enforced at instantiation. Now also has `from_yaml(path)` classmethod, `.phase` property (→ capital.phase), and `.paper_mode` property (→ system.paper_mode). TelegramConfig + RegulatoryIntelligenceConfig sub-dataclasses added.
   - karbot/core/events.py: Re-exports all event types from core/events.py
-- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PKCS1v15/SHA-256 auth via `cryptography`; `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message)
+- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PSS/SHA-256 auth via `cryptography` against `api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` + PKCS1v15 in Session 13); `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message)
 - agents/floor/arb_scanner.py: `ArbScannerAgent` (full impl, has register_subscriptions) + `ArbScanner` (inherits it); `run()` starts heartbeat + cache-cleanup tasks then idles; S1 opportunity detection fully wired
 - agents/floor/risk_gate.py: `RiskGateAgent` (full impl, has register_subscriptions) + `RiskGate` (inherits it); `run()` starts heartbeat task then idles; subscribes to RegulatoryAlertEvent; _regulatory_pause=True blocks all trades when urgency=5; cleared by urgency=0 event from RegulatoryIntelligenceAgent
 - agents/research/market_analyst.py: `MarketAnalystAgent` (full impl) + `MarketAnalyst` (inherits it); `run()` starts LLM analysis loop (5-min), heartbeat, cache-cleanup; no-op when ANTHROPIC_API_KEY absent
@@ -91,6 +91,16 @@ async def run(self): ...
 - TradeResolvedEvent: wired via PaperExecutor — full paper P&L cycle closes ✓
 - 30-day paper trading clock started: 2026-05-26
 - Full test suite: 35/35 passing ✓
+
+## KALSHI API NOTES (2026-06-27)
+- Kalshi migrated their API from `trading-api.kalshi.com` to
+  `api.elections.kalshi.com` and now requires RSA-PSS signing
+  (was RSA-PKCS1v15). Both changes are live in
+  agents/floor/price_watcher.py as of Session 13. If Kalshi auth ever
+  fails again, verify against the live API directly (e.g.
+  `/trade-api/v2/portfolio/balance`) before assuming which part broke —
+  do not assume domain and signing scheme change together without
+  confirming each independently.
 
 ## KNOWN DEBT
 
