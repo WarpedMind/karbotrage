@@ -109,9 +109,11 @@ async def run(self): ...
   YES asks at `1-p`; `delta_fp` is a RELATIVE size change, confirmed via
   a live matched +523.00/-523.00 pair). Passed local unit tests
   (tests/test_kalshi_orderbook.py) but NOT yet redeployed/reverified on
-  the VPS. Do not assume real order book data is flowing until verified
-  live — current logging has no INFO-level signal for "snapshot applied"
-  or "price update published" (see KNOWN DEBT).
+  the VPS. Added a permanent one-shot `kalshi_first_price_update` INFO
+  log (fires once per platform on the first successfully-applied delta)
+  so this and future sessions have a real live signal without ad-hoc
+  diagnostic logging. Do not assume real order book data is flowing
+  until that log (or equivalent) is confirmed in live logs.
 - VPS (`karbot-rage-prod`, 147.224.209.18): SSH access confirmed working;
   Session 13 Kalshi fix deployed and verified live — `kalshi_ws_connected`
   and `kalshi_markets_fetched` both confirmed in logs, zero auth errors ✓
@@ -139,13 +141,6 @@ async def run(self): ...
   on both local and VPS — should be updated to `WarpedMind/karbotrage`.
   GitHub's redirect handles it for now but update before it causes
   confusion: `git remote set-url origin https://github.com/WarpedMind/karbotrage.git`
-- price_watcher.py has no INFO-level signal for "order book snapshot
-  applied" or "PriceUpdateEvent published" — `book_snapshot_applied` is
-  debug-only (though unfiltered by this codebase's structlog setup) and
-  no log fires on the price-event publish path at all. This made the
-  Session 15 WS-schema bug hard to confirm/deny live; consider adding a
-  deliberate low-noise INFO log (e.g. periodic count, not per-message)
-  rather than relying on ad-hoc diagnostic logging again.
 - `AgentHeartbeat` events are being dead-lettered every ~30s in VPS logs
   (noticed incidentally during Session 15 investigation) — no agent
   currently subscribes to handle them; CLAUDE.md references a "Health
@@ -169,13 +164,11 @@ async def run(self): ...
 
 ## Next session priorities (in order)
 1. **Deploy and verify**: deploy the Session 15 WS-schema fix to the VPS
-   (`git pull origin main`, restart `karbot` service) and confirm real
-   order book data is flowing — the volume filter + subscription is
-   already confirmed live (785 markets), but the snapshot/delta handler
-   rewrite has only passed local unit tests, not a live check. No
-   INFO-level log currently confirms this directly; either add a
-   deliberate low-noise log first or temporarily re-add diagnostic
-   logging (same pattern used twice already this session) to confirm.
+   (`git pull origin main`, restart `karbot` service) and confirm
+   `kalshi_first_price_update` appears in live logs — the volume filter
+   + subscription is already confirmed live (785 markets), but the
+   snapshot/delta handler rewrite has only passed local unit tests, not
+   a live check.
 2. Confirm S1 arb opportunities appear in logs and paper trades land in
    `kalshi_trades.csv` now that PriceUpdateEvents should be flowing.
 3. Once paper trades are confirmed executing, start the 30-day paper

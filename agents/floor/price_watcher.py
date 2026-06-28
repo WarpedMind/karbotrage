@@ -338,6 +338,7 @@ class PriceWatcherAgent:
         self._kalshi_client: Optional[KalshiWebSocketClient] = None
         self._msg_counts: Dict[str, int] = defaultdict(int)
         self._last_msg_times: Dict[str, float] = defaultdict(float)
+        self._seen_first_delta: set = set()
 
     async def start(self) -> None:
         """Start all feed connections."""
@@ -549,6 +550,10 @@ class PriceWatcherAgent:
         else:
             log.warning("kalshi_delta_unknown_side", market=market_id, side=side)
             return
+
+        if platform not in self._seen_first_delta:
+            self._seen_first_delta.add(platform)
+            log.info("kalshi_first_price_update", market=market_id, side=side)
 
         # Publish price update — this is the hot path
         await self.bus.publish(book.to_price_event(platform))

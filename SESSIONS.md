@@ -67,21 +67,19 @@
 - `karbotrage_env/bin/python -m pytest tests/ -v`: 49/49 passed (39 prior
   + 10 new in test_kalshi_orderbook.py) ✓
 - No `.env`, `config.yaml`, or `*.pem` in staged changes ✓
+- Added a permanent one-shot `kalshi_first_price_update` INFO log (fires
+  once per platform on the first successfully-applied delta) so this and
+  future sessions have a real live confirmation signal instead of
+  needing ad-hoc diagnostic logging again — addresses the gap noted
+  above before this fix is even deployed.
 - NOT yet redeployed/reverified live on the VPS as of this entry — next
-  session's first job is deploying this and confirming real order book
-  data is now populating (`OrderBook.bids`/`asks` nonzero, or a new
-  lightweight live signal — current logging has no INFO-level signal
-  for this, see KNOWN DEBT)
+  session's first job is deploying this and confirming
+  `kalshi_first_price_update` appears in live logs.
 
 ### What to do first next session
 - Deploy this fix to the VPS (`git pull origin main`, restart `karbot`)
-  and verify real order book data is flowing — note current logging has
-  no INFO-level signal for "snapshot applied" or "price update published"
-  (`book_snapshot_applied` is debug-only but unfiltered; no log fires on
-  `bus.publish(PriceUpdateEvent)` at all), so confirming this live will
-  need either a temporary diagnostic again or a permanent low-noise
-  INFO log added deliberately — consider adding one rather than
-  repeating the ad-hoc diagnostic pattern a fourth time this session.
+  and confirm `kalshi_first_price_update` appears in live logs —
+  that's the real signal that order book data is now flowing end-to-end.
 - Confirm S1 arb opportunities appear in logs and paper trades land in
   `kalshi_trades.csv`
 - Once paper trades are confirmed executing, start the 30-day paper
