@@ -106,7 +106,7 @@ class ReflectionAgentImpl:
         self.bus      = event_bus
         self.data_dir = data_dir
 
-        self._client = anthropic.Anthropic(api_key=secrets.anthropic_api_key) \
+        self._client = anthropic.AsyncAnthropic(api_key=secrets.anthropic_api_key) \
             if secrets.anthropic_api_key else None
 
         self._db_path       = data_dir / "compliance.db"
@@ -369,7 +369,7 @@ Return ONLY valid JSON.
 """
 
         try:
-            response = self._client.messages.create(
+            response = await self._client.messages.create(
                 model      = self._intel_model,
                 max_tokens = 1000,
                 messages   = [{"role": "user", "content": prompt}],
@@ -511,7 +511,7 @@ Include one specific observation about what the data suggests for tomorrow.
 """
 
         try:
-            response = self._client.messages.create(
+            response = await self._client.messages.create(
                 model      = self._intel_model,
                 max_tokens = 300,
                 messages   = [{"role": "user", "content": prompt}],
@@ -595,11 +595,6 @@ class ReflectionAgent(ReflectionAgentImpl):
     run() starts the nightly scheduler (fires at 2 AM ET / 07:00 UTC) and
     the heartbeat task.  The nightly cycle requires a populated compliance.db
     — it will log an error and skip gracefully until that DB exists.
-
-    NOTE: MarketAnalystAgent and ReflectionAgentImpl use the synchronous
-    anthropic.Anthropic client, which briefly blocks the asyncio event loop
-    during LLM calls.  This is acceptable for paper trading but must be
-    replaced with AsyncAnthropic before live trading.  (KNOWN DEBT)
     """
 
     def __init__(self, bus: EventBus, config: KarbotConfig):

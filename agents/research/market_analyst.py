@@ -198,7 +198,7 @@ class MarketAnalystAgent:
         self.bus     = event_bus
         self._intel  = config.intelligence
 
-        self._client = anthropic.Anthropic(api_key=secrets.anthropic_api_key) \
+        self._client = anthropic.AsyncAnthropic(api_key=secrets.anthropic_api_key) \
             if secrets.anthropic_api_key else None
 
         self._cache = AnalysisCache(ttl_minutes=self._intel.llm_cache_ttl_minutes)
@@ -337,7 +337,7 @@ IMPORTANT:
 """
 
         try:
-            response = self._client.messages.create(
+            response = await self._client.messages.create(
                 model      = self._intel.llm_model_analysis,
                 max_tokens = 2000,
                 messages   = [{"role": "user", "content": prompt}],
@@ -451,7 +451,7 @@ Respond in this EXACT JSON format:
 Return ONLY valid JSON, no other text.
 """
             try:
-                response = self._client.messages.create(
+                response = await self._client.messages.create(
                     model      = self._intel.llm_model_analysis,
                     max_tokens = 500,
                     messages   = [{"role": "user", "content": prompt}],

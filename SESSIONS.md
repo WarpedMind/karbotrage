@@ -1,6 +1,74 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-06-27 (Session 14 — VPS deployment verification, compliance.db, AsyncAnthropic migration)
+
+### What was built
+- **VPS deployment**: SSH access to the Oracle VPS (`karbot-rage-prod`,
+  147.224.209.18) was confirmed working (the Session 13 lockout was
+  resolved before this session started). `git pull origin main` deployed
+  the Session 13 Kalshi fix (`a7dc0ae`); `sudo systemctl restart karbot`
+  restarted cleanly. Live logs confirmed `kalshi_ws_connected` and
+  `kalshi_markets_fetched` (HTTP 200) — the domain + RSA-PSS fix works
+  against the real production API, not just the local verification script.
+- **logs/compliance.db** (local + VPS): created with `trades`, `rejections`,
+  and `audit_trail` tables. The handoff brief proposed `data/compliance.db`
+  with `created_at`/`opened_at` columns and no `audit_trail` table — neither
+  matched what `ReflectionAgentImpl` actually reads. `ReflectionAgent.__init__`
+  hardcodes `data_dir = Path("logs")`, and the nightly cycle queries a
+  `status` column (filtered to `'RESOLVED'`), a generic `timestamp` column,
+  and a SQLite `audit_trail` table (`event_type`, `entry_json`, `timestamp`)
+  that nothing previously created. Built the schema to match the actual
+  queries in agents/management/reflection.py, keeping the handoff's useful
+  additive columns (trade_id, fee_paid, opportunity_id, etc.).
+- **AsyncAnthropic migration**: the task as briefed named
+  agents/research/regulatory_intelligence.py, but that file already used
+  `AsyncAnthropic` correctly. The actual synchronous `anthropic.Anthropic`
+  clients (matching CLAUDE.md's KNOWN DEBT wording) were in
+  agents/research/market_analyst.py and agents/management/reflection.py.
+  Both migrated to `AsyncAnthropic`; all four `.messages.create()` call
+  sites (`market_analyst.py` ×2, `reflection.py` ×2) now use `await`, all
+  within existing `async def` functions. Removed the now-stale KNOWN DEBT
+  docstring note from `ReflectionAgent`.
+
+### What was decided
+- Verified the handoff brief's claims against the actual code before acting
+  on them, twice: the compliance.db path/schema and the AsyncAnthropic
+  target file were both incorrect in the brief. Built to match what the
+  code actually does, not what the brief assumed — consistent with the
+  Session 13 precedent of verifying external claims against ground truth
+  before applying them.
+- Did not touch the Kalshi market volume filter (`volume_24h > 100` in
+  `_fetch_active_kalshi_markets()`) even though it currently returns 0
+  active markets out of 200 fetched — out of scope for this session, no
+  strategy/filter changes without explicit instruction. Logged as KNOWN
+  DEBT instead.
+
+### Verification
+- VPS: `kalshi_ws_connected` ✓, `kalshi_markets_fetched` (200, count=0) ✓,
+  zero 401/auth errors in logs ✓
+- VPS: `logs/kalshi_trades.csv` has header only, no trade rows yet —
+  expected, since 0 markets currently pass the volume filter so no
+  PriceUpdateEvents flow and ArbScanner has nothing to evaluate
+- `logs/compliance.db` created locally and on VPS; `trades`, `rejections`,
+  `audit_trail` tables confirmed present in both via `sqlite_master` query
+- `karbotrage_env/bin/python -m pytest tests/ -v`: 35/35 passed ✓
+- `karbot_runner.py --mock-prices ... --exit-after-test`: 10 agents start,
+  2 paper trades execute, exits cleanly — confirms AsyncAnthropic migration
+  did not break the runtime path ✓
+
+### What to do first next session
+- Investigate the Kalshi market volume filter — 0/200 markets currently
+  pass `volume_24h > 100` in `_fetch_active_kalshi_markets()`, so no
+  PriceUpdateEvents flow and no paper trades can execute despite working
+  auth and WS connection
+- Update git remote URL on local + VPS from `WarpedMind/karbotrage_v1` to
+  `WarpedMind/karbotrage` (old name still works via GitHub redirect, but
+  should be cleaned up)
+- Begin live executor spec (30-day paper run completed 2026-06-25)
+
+---
+
 ## 2026-06-27 (Session 13 — Kalshi API migration: domain + RSA-PSS signing)
 
 ### What was built

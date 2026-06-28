@@ -1,6 +1,36 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-06-27 — Session: VPS deployment verification, compliance.db, AsyncAnthropic migration
+
+### Verify the task brief against the code, not just against the world
+- The handoff brief for this session specified `data/compliance.db` with a
+  `created_at`/`opened_at`-based schema, and named
+  agents/research/regulatory_intelligence.py as needing the AsyncAnthropic
+  fix. Both were wrong: `ReflectionAgent` hardcodes `data_dir = Path("logs")`
+  and queries `status`/`timestamp`/`resolved_at` columns plus an
+  `audit_trail` table not in the proposed schema; `regulatory_intelligence.py`
+  already used `AsyncAnthropic` correctly, while the real synchronous-client
+  debt was in market_analyst.py and reflection.py.
+- Decision: read the actual consuming code (reflection.py's queries, the
+  grep for `anthropic.Anthropic`) before building to the brief's spec, and
+  built/fixed what the code actually needed instead.
+- Rationale: this is the same category of risk as Session 13's "verify
+  external claims against the live API" decision, just applied to an
+  internally-authored task brief instead of a web search — a wrong schema
+  or a fix applied to the wrong file is silently useless at best.
+
+### compliance.db schema (current, as of this session)
+- Location: `logs/compliance.db` (not `data/compliance.db` — matches
+  `ReflectionAgent.__init__`'s hardcoded `data_dir`)
+- Tables: `trades` (status, timestamp, resolved_at, realized_pnl, strategy,
+  market_id, platform, plus additive columns: trade_id, opportunity_id,
+  fee_paid, etc.), `rejections` (reason, timestamp), `audit_trail`
+  (event_type, entry_json, timestamp) — schema built to match exactly what
+  `ReflectionAgentImpl`'s nightly cycle queries
+
+---
+
 ## 2026-06-27 — Session: Kalshi API migration (domain + signing algorithm)
 
 ### Verify external claims against the live API before changing code
