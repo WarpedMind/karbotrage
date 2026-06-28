@@ -405,9 +405,11 @@ class PriceWatcherAgent:
     async def _fetch_active_kalshi_markets(self) -> List[str]:
         """
         Fetch open Kalshi markets via REST API using RSA-signed headers.
-        Follows the response `cursor` across pages — the unfiltered catalog
-        is dominated by zero-volume long-tail markets early in the listing,
-        so a single page is not representative.
+        Uses mve_filter=exclude to skip multi-variable event (combo) markets —
+        confirmed live that these dominate the unfiltered catalog (12,000+
+        consecutive KXMVE* results with zero volume) and bury every standard
+        market past any reasonable page depth. Follows the response `cursor`
+        across pages as a secondary safeguard.
         Filters to markets with meaningful volume (>100, field volume_24h_fp).
         """
         rest_path = "/trade-api/v2/markets"
@@ -424,7 +426,7 @@ class PriceWatcherAgent:
                 )
                 auth["Content-Type"] = "application/json"
 
-                params = {"status": "open", "limit": 200}
+                params = {"status": "open", "limit": 200, "mve_filter": "exclude"}
                 if cursor:
                     params["cursor"] = cursor
 

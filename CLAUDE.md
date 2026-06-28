@@ -46,7 +46,7 @@ Karbot Rage! is a multi-agent automated trading system designed for decentralize
 - karbot/core/: Package exists — agents import from here
   - karbot/core/config.py: KarbotConfig typed dataclass; Phase 1 invariants enforced structurally at `__init__` — `polymarket_ws_enabled=True` with `phase=1` raises `ValueError`, `s2_cross_platform_enabled=True` with `phase=1` raises `ValueError`; RiskConfig hard limits also enforced at instantiation. Now also has `from_yaml(path)` classmethod, `.phase` property (→ capital.phase), and `.paper_mode` property (→ system.paper_mode). TelegramConfig + RegulatoryIntelligenceConfig sub-dataclasses added.
   - karbot/core/events.py: Re-exports all event types from core/events.py
-- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PSS/SHA-256 auth via `cryptography` against `api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` + PKCS1v15 in Session 13); `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message); `_fetch_active_kalshi_markets()` paginates via `cursor` (20-page cap) and filters on `volume_24h_fp` (fixed Session 15 — was a single-page fetch checking a nonexistent `volume_24h` field)
+- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PSS/SHA-256 auth via `cryptography` against `api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` + PKCS1v15 in Session 13); `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message); `_fetch_active_kalshi_markets()` sends `mve_filter=exclude` (Kalshi's catalog is otherwise 12,000+ consecutive zero-volume multi-variable-event markets) and paginates via `cursor` (20-page cap) as a secondary safeguard, filtering on `volume_24h_fp` (Session 15 — see KNOWN DEBT, not yet reverified live after the mve_filter addition)
 - agents/floor/arb_scanner.py: `ArbScannerAgent` (full impl, has register_subscriptions) + `ArbScanner` (inherits it); `run()` starts heartbeat + cache-cleanup tasks then idles; S1 opportunity detection fully wired
 - agents/floor/risk_gate.py: `RiskGateAgent` (full impl, has register_subscriptions) + `RiskGate` (inherits it); `run()` starts heartbeat task then idles; subscribes to RegulatoryAlertEvent; _regulatory_pause=True blocks all trades when urgency=5; cleared by urgency=0 event from RegulatoryIntelligenceAgent
 - agents/research/market_analyst.py: `MarketAnalystAgent` (full impl) + `MarketAnalyst` (inherits it); `run()` starts LLM analysis loop (5-min), heartbeat, cache-cleanup; no-op when ANTHROPIC_API_KEY absent; uses `AsyncAnthropic` (migrated from synchronous client in Session 14)
@@ -91,13 +91,19 @@ async def run(self): ...
 - TradeResolvedEvent: wired via PaperExecutor — full paper P&L cycle closes ✓
 - 30-day paper trading clock: NOT YET STARTED — starts when real Kalshi
   markets are flowing and paper trades are executing
-- Full test suite: 38/38 passing ✓
-- Kalshi market volume filter: FIXED (Session 15) — `_fetch_active_kalshi_markets()`
-  now paginates via `cursor` and filters on the real `volume_24h_fp` field
-  (cast to float); was previously a single-page fetch checking a
-  nonexistent `volume_24h` field, so 0/200 markets ever passed. Not yet
-  confirmed live on the VPS — next session must deploy and verify
-  `kalshi_markets_fetched` reports nonzero count in production logs.
+- Full test suite: 39/39 passing ✓
+- Kalshi market volume filter: fix in progress (Session 15), NOT YET
+  CONFIRMED LIVE — `_fetch_active_kalshi_markets()` now sends
+  `mve_filter=exclude`, paginates via `cursor`, and filters on the real
+  `volume_24h_fp` field (cast to float). The first deploy attempt
+  (field name + pagination only, no mve_filter) was tested live on the
+  VPS and still returned `count=0 total=4000` — a live 12,000-market
+  scan found the unfiltered catalog is dominated entirely by
+  zero-volume multi-variable-event markets (`KXMVE*`), confirmed via
+  Kalshi's docs to require the `mve_filter` param. This second fix has
+  passed local unit tests but has NOT yet been redeployed/reverified on
+  the VPS — do not assume it works until `kalshi_markets_fetched`
+  shows a nonzero count in live logs.
 - VPS (`karbot-rage-prod`, 147.224.209.18): SSH access confirmed working;
   Session 13 Kalshi fix deployed and verified live — `kalshi_ws_connected`
   and `kalshi_markets_fetched` both confirmed in logs, zero auth errors ✓

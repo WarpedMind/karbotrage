@@ -1,13 +1,16 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
-## 2026-06-28 (Session 15 — Kalshi volume filter fix: pagination + field name)
+## 2026-06-28 (Session 15 — Kalshi volume filter fix: field name + pagination + mve_filter)
 
 ### What was built
 - **`_fetch_active_kalshi_markets()` fix** (agents/floor/price_watcher.py):
-  diagnosed via live API investigation from the VPS (real credentials,
-  RSA-PSS auth against `api.elections.kalshi.com`) rather than assumption.
-  Two independent bugs were confirmed, not one:
+  diagnosed entirely via live API investigation from the VPS (real
+  credentials, RSA-PSS auth against `api.elections.kalshi.com`) — three
+  independent, compounding bugs were found, not one. The first two were
+  caught and fixed before deploying; the third was only caught because
+  the fix was verified live on the VPS after deploy rather than assumed
+  fixed once tests passed locally.
   1. **Field name was wrong.** The code checked
      `m.get("volume_24h", m.get("volume", 0))`. Neither field exists on
      real Kalshi market objects. The actual field is `volume_24h_fp`,
@@ -16,46 +19,65 @@
      every market regardless of true volume.
   2. **Pagination was silently truncated to one page.** The function
      fetched exactly one page (`limit=200`, no cursor follow-up) and
-     ignored the `cursor` field present in every response. Kalshi's
-     unfiltered `markets?status=open` listing is dominated early on by
-     thousands of zero-volume `KXMVE*` (multi-variable event) markets —
-     a long-tail product type. Direct `series_ticker` queries against
-     known liquid markets (`KXHIGHNY`, `KXNBA`) confirmed real volume
-     exists (`volume_24h_fp` values like `1837.10`, `11222.29`,
-     `2298.15`) but those markets sit beyond page 1 of the unfiltered
-     listing.
-  Fix: loop over pages following `cursor` until exhausted or a 20-page
-  cap (`KALSHI_MARKETS_PAGE_CAP`) is hit; read `volume_24h_fp`, cast to
-  `float()` with missing/malformed values excluded rather than raising;
-  `kalshi_markets_fetched` log now reports the total across all pages.
-  Signing, padding, and the WS URL/path were not touched — confirmed
-  working as of Session 13/14 and out of scope for this fix.
-- **tests/test_price_watcher.py** (new): 3 tests — multi-page cursor
+     ignored the `cursor` field present in every response.
+  3. **Caught only after deploying fixes 1+2 to the VPS**: a live check
+     still showed `kalshi_markets_fetched count=0 total=4000` — the
+     20-page cursor cap was being fully consumed by zero-volume markets.
+     A deeper live probe (60 pages / 12,000 markets) found **every
+     single one** was `KXMVESPORTSMULTIGAMEEXTENDED` or
+     `KXMVECROSSCATEGORY` — multi-variable event (combo) markets. Pulled
+     Kalshi's official API docs (docs.kalshi.com/api-reference/market/
+     get-markets) for `GET /markets` and found a documented
+     `mve_filter` parameter (`exclude`/`only`) made exactly for this.
+     Verified live with `mve_filter=exclude`: page 1 alone returned real
+     sports markets (MLB, KBO, NPB, tennis, World Cup) with genuine
+     volume, 15/200 already nonzero, several clearing the >100 threshold
+     (e.g. `KXWCMENTION-26JUN30MEXECU-NQE` at `489.0`).
+  Fix: `mve_filter=exclude` added to every page's request params (primary
+  fix — without it, pagination alone would need to climb past 12,000+
+  dead markets with no guaranteed end); `cursor` pagination retained as a
+  secondary safeguard (20-page cap, `KALSHI_MARKETS_PAGE_CAP`); read
+  `volume_24h_fp`, cast to `float()`, missing/malformed values excluded
+  rather than raising; `kalshi_markets_fetched` log reports total across
+  all pages. Signing, padding, and the WS URL/path were not touched —
+  confirmed working as of Session 13/14 and out of scope for this fix.
+- **tests/test_price_watcher.py** (new): 4 tests — multi-page cursor
   following + volume_24h_fp filtering, exclusion of markets with
-  missing/malformed volume fields, and early stop on non-200 response.
+  missing/malformed volume fields, confirmation that `mve_filter=exclude`
+  is sent on every page request, and early stop on non-200 response.
 
 ### What was decided
-- Diagnosed via two rounds of live API investigation (small sample, then
-  full 200-market pull, then a targeted pagination/series-ticker probe)
-  before writing any fix — consistent with the Session 13/14 precedent of
-  verifying claims against ground truth rather than the field-name guess
-  already baked into the prior code's own comment ("Kalshi may use
-  volume or volume_24h").
-- Used a generic pagination fix rather than a `series_ticker` allowlist —
-  the bot must discover liquid markets generically, not via a hardcoded
-  list of known tickers.
+- Diagnosed via multiple rounds of live API investigation (small sample,
+  full single-page pull, deep 12,000-market scan, official docs lookup,
+  then a targeted `mve_filter` live verification) before each round of
+  fixes — consistent with the Session 13/14 precedent of verifying
+  claims against ground truth. Critically, also re-verified *after*
+  deploying the first fix instead of trusting "tests pass locally" as
+  sufficient — the test suite mocks the API shape we believe is correct,
+  so it cannot catch a wrong assumption about the live catalog's actual
+  composition. The mve_filter bug would have been invisible to any
+  unit test written from the first round's (incomplete) understanding.
+- Used the documented `mve_filter=exclude` param instead of a deeper
+  page cap or a `series_ticker` allowlist — confirmed via Kalshi's own
+  docs rather than guessing a workaround, and avoids hardcoding specific
+  tickers.
 
 ### Verification
-- `karbotrage_env/bin/python -m pytest tests/ -v`: 38/38 passed (35
-  baseline + 3 new in test_price_watcher.py) ✓
+- `karbotrage_env/bin/python -m pytest tests/ -v`: 39/39 passed (35
+  baseline + 4 in test_price_watcher.py) ✓
 - No `.env`, `config.yaml`, or `*.pem` in staged changes ✓
+- Live VPS deploy of fixes 1+2 confirmed the bug was deeper than
+  expected (`count=0 total=4000`) — this entry's fix (mve_filter) has
+  not yet been redeployed/reverified live; that is the first item for
+  next session.
 
 ### What to do first next session
-- Deploy this fix to the VPS (`git pull origin main`, restart `karbot`
-  service) and confirm `kalshi_markets_fetched` now reports a nonzero
-  `count` in live logs
+- Deploy this updated fix to the VPS (`git pull origin main`, restart
+  `karbot` service) and confirm `kalshi_markets_fetched` reports a
+  nonzero `count` in live logs — do not assume success without checking,
+  per this session's own lesson
 - Confirm S1 arb opportunities appear in logs and paper trades land in
-  `kalshi_trades.csv` now that PriceUpdateEvents are flowing
+  `kalshi_trades.csv` now that PriceUpdateEvents should be flowing
 - Once paper trades are confirmed executing, start the 30-day paper
   trading clock — record the exact start date in CLAUDE.md and
   SESSIONS.md

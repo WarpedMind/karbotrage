@@ -2,6 +2,10 @@
 tests/test_price_watcher.py — Kalshi market fetch + volume filter
 
 Covers _fetch_active_kalshi_markets() in agents/floor/price_watcher.py:
+  - sends mve_filter=exclude on every request — confirmed live that the
+    unfiltered catalog returns 12,000+ consecutive zero-volume KXMVE*
+    (multi-variable event/combo) markets before any standard market, so
+    mve_filter=exclude (documented Kalshi param) is required, not optional
   - follows the `cursor` field across pages instead of stopping at page 1
   - filters on the real `volume_24h_fp` field (string, needs float()), not
     the nonexistent `volume_24h`/`volume` fields
@@ -115,6 +119,45 @@ async def test_excludes_market_with_missing_or_malformed_volume():
         result = await agent._fetch_active_kalshi_markets()
 
     assert result == ["KXOK"]
+
+
+@pytest.mark.asyncio
+async def test_requests_mve_filter_exclude_on_every_page():
+    page1 = {
+        "cursor": "abc123",
+        "markets": [{"ticker": "KXOK-1", "volume_24h_fp": "150.00"}],
+    }
+    page2 = {
+        "cursor": "",
+        "markets": [{"ticker": "KXOK-2", "volume_24h_fp": "150.00"}],
+    }
+
+    agent = _make_agent()
+    captured_params = []
+    responses = [_FakeResponse(200, page1), _FakeResponse(200, page2)]
+
+    def get(*args, **kwargs):
+        captured_params.append(kwargs.get("params"))
+        return responses.pop(0)
+
+    session = MagicMock()
+    session.get = MagicMock(side_effect=get)
+
+    class _SessionCtx:
+        async def __aenter__(self):
+            return session
+
+        async def __aexit__(self, *exc):
+            return False
+
+    with patch("agents.floor.price_watcher._load_kalshi_private_key", return_value=MagicMock()), \
+         patch("agents.floor.price_watcher._build_kalshi_auth_headers", return_value={}), \
+         patch("aiohttp.ClientSession", return_value=_SessionCtx()):
+        await agent._fetch_active_kalshi_markets()
+
+    assert len(captured_params) == 2
+    for params in captured_params:
+        assert params["mve_filter"] == "exclude"
 
 
 @pytest.mark.asyncio
