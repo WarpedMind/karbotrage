@@ -89,7 +89,8 @@ async def run(self): ...
 - config.yaml: moved to .gitignore; config.yaml.example + .env.example committed ✓
 - Paper trading: End-to-end tested ✓ (kalshi_trades.csv confirmed populated)
 - TradeResolvedEvent: wired via PaperExecutor — full paper P&L cycle closes ✓
-- 30-day paper trading clock started: 2026-05-26
+- 30-day paper trading clock: NOT YET STARTED — starts when real Kalshi
+  markets are flowing and paper trades are executing
 - Full test suite: 35/35 passing ✓
 - VPS (`karbot-rage-prod`, 147.224.209.18): SSH access confirmed working;
   Session 13 Kalshi fix deployed and verified live — `kalshi_ws_connected`
@@ -151,7 +152,7 @@ async def run(self): ...
 2. Update git remote URL on local + VPS from `WarpedMind/karbotrage_v1` to
    `WarpedMind/karbotrage` (old name still works via GitHub redirect, but
    should be cleaned up)
-3. Begin live executor spec (30-day paper run completed 2026-06-25)
+3. Begin live executor spec after 30-day paper run completes
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 
