@@ -141,7 +141,17 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. Begin live executor spec (30-day paper run completed 2026-06-25)
+1. **Immediate blocker**: investigate the Kalshi market volume filter —
+   0/200 markets currently pass `volume_24h > 100` in
+   `_fetch_active_kalshi_markets()` (agents/floor/price_watcher.py), so no
+   PriceUpdateEvents flow and no paper trades can execute despite working
+   auth and WS connection. Check whether the threshold is too strict for
+   current market conditions or whether Kalshi's volume field name has
+   changed again.
+2. Update git remote URL on local + VPS from `WarpedMind/karbotrage_v1` to
+   `WarpedMind/karbotrage` (old name still works via GitHub redirect, but
+   should be cleaned up)
+3. Begin live executor spec (30-day paper run completed 2026-06-25)
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 
