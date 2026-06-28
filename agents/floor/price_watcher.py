@@ -400,40 +400,59 @@ class PriceWatcherAgent:
             await self._handle_health_change("kalshi", False, 0.0)
             raise
 
+    KALSHI_MARKETS_PAGE_CAP = 20  # safety bound on cursor-following, ~4000 markets
+
     async def _fetch_active_kalshi_markets(self) -> List[str]:
         """
         Fetch open Kalshi markets via REST API using RSA-signed headers.
-        Filters to markets with meaningful volume (>100 contracts or dollars).
+        Follows the response `cursor` across pages — the unfiltered catalog
+        is dominated by zero-volume long-tail markets early in the listing,
+        so a single page is not representative.
+        Filters to markets with meaningful volume (>100, field volume_24h_fp).
         """
         rest_path = "/trade-api/v2/markets"
         private_key = _load_kalshi_private_key(self.secrets.kalshi_private_key_path)
-        auth = _build_kalshi_auth_headers(
-            self.secrets.kalshi_api_key_id, private_key, "GET", rest_path
-        )
-        auth["Content-Type"] = "application/json"
+        url = "https://api.elections.kalshi.com" + rest_path
 
-        url    = "https://api.elections.kalshi.com" + rest_path
-        params = {"status": "open", "limit": 200}
+        all_markets: List[Dict] = []
+        cursor: Optional[str] = None
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=auth, params=params) as resp:
-                if resp.status == 200:
-                    data    = await resp.json()
-                    markets = data.get("markets", [])
-                    # Kalshi may use "volume" or "volume_24h" — accept either
-                    active = [
-                        m["ticker"]
-                        for m in markets
-                        if m.get("volume_24h", m.get("volume", 0)) > 100
-                    ]
-                    log.info("kalshi_markets_fetched", count=len(active),
-                             total=len(markets))
-                    return active
-                else:
-                    body = await resp.text()
-                    log.error("kalshi_markets_fetch_failed",
-                              status=resp.status, body=body[:300])
-                    return []
+            for _ in range(self.KALSHI_MARKETS_PAGE_CAP):
+                auth = _build_kalshi_auth_headers(
+                    self.secrets.kalshi_api_key_id, private_key, "GET", rest_path
+                )
+                auth["Content-Type"] = "application/json"
+
+                params = {"status": "open", "limit": 200}
+                if cursor:
+                    params["cursor"] = cursor
+
+                async with session.get(url, headers=auth, params=params) as resp:
+                    if resp.status != 200:
+                        body = await resp.text()
+                        log.error("kalshi_markets_fetch_failed",
+                                  status=resp.status, body=body[:300])
+                        break
+
+                    data = await resp.json()
+                    all_markets.extend(data.get("markets", []))
+                    cursor = data.get("cursor")
+                    if not cursor:
+                        break
+
+        active = []
+        for m in all_markets:
+            try:
+                volume = float(m.get("volume_24h_fp", 0))
+            except (TypeError, ValueError):
+                continue
+            if volume > 100:
+                active.append(m["ticker"])
+
+        log.info("kalshi_markets_fetched", count=len(active),
+                  total=len(all_markets))
+        return active
 
     async def _handle_kalshi_snapshot(self, platform: str, msg: Dict) -> None:
         """Process a full order book snapshot."""

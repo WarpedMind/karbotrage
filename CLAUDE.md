@@ -46,7 +46,7 @@ Karbot Rage! is a multi-agent automated trading system designed for decentralize
 - karbot/core/: Package exists — agents import from here
   - karbot/core/config.py: KarbotConfig typed dataclass; Phase 1 invariants enforced structurally at `__init__` — `polymarket_ws_enabled=True` with `phase=1` raises `ValueError`, `s2_cross_platform_enabled=True` with `phase=1` raises `ValueError`; RiskConfig hard limits also enforced at instantiation. Now also has `from_yaml(path)` classmethod, `.phase` property (→ capital.phase), and `.paper_mode` property (→ system.paper_mode). TelegramConfig + RegulatoryIntelligenceConfig sub-dataclasses added.
   - karbot/core/events.py: Re-exports all event types from core/events.py
-- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PSS/SHA-256 auth via `cryptography` against `api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` + PKCS1v15 in Session 13); `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message)
+- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PSS/SHA-256 auth via `cryptography` against `api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` + PKCS1v15 in Session 13); `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message); `_fetch_active_kalshi_markets()` paginates via `cursor` (20-page cap) and filters on `volume_24h_fp` (fixed Session 15 — was a single-page fetch checking a nonexistent `volume_24h` field)
 - agents/floor/arb_scanner.py: `ArbScannerAgent` (full impl, has register_subscriptions) + `ArbScanner` (inherits it); `run()` starts heartbeat + cache-cleanup tasks then idles; S1 opportunity detection fully wired
 - agents/floor/risk_gate.py: `RiskGateAgent` (full impl, has register_subscriptions) + `RiskGate` (inherits it); `run()` starts heartbeat task then idles; subscribes to RegulatoryAlertEvent; _regulatory_pause=True blocks all trades when urgency=5; cleared by urgency=0 event from RegulatoryIntelligenceAgent
 - agents/research/market_analyst.py: `MarketAnalystAgent` (full impl) + `MarketAnalyst` (inherits it); `run()` starts LLM analysis loop (5-min), heartbeat, cache-cleanup; no-op when ANTHROPIC_API_KEY absent; uses `AsyncAnthropic` (migrated from synchronous client in Session 14)
@@ -91,7 +91,13 @@ async def run(self): ...
 - TradeResolvedEvent: wired via PaperExecutor — full paper P&L cycle closes ✓
 - 30-day paper trading clock: NOT YET STARTED — starts when real Kalshi
   markets are flowing and paper trades are executing
-- Full test suite: 35/35 passing ✓
+- Full test suite: 38/38 passing ✓
+- Kalshi market volume filter: FIXED (Session 15) — `_fetch_active_kalshi_markets()`
+  now paginates via `cursor` and filters on the real `volume_24h_fp` field
+  (cast to float); was previously a single-page fetch checking a
+  nonexistent `volume_24h` field, so 0/200 markets ever passed. Not yet
+  confirmed live on the VPS — next session must deploy and verify
+  `kalshi_markets_fetched` reports nonzero count in production logs.
 - VPS (`karbot-rage-prod`, 147.224.209.18): SSH access confirmed working;
   Session 13 Kalshi fix deployed and verified live — `kalshi_ws_connected`
   and `kalshi_markets_fetched` both confirmed in logs, zero auth errors ✓
@@ -115,12 +121,6 @@ async def run(self): ...
 - correlation_score in PositionSnapshot is permanently 0.0 — Phase 3 item
 - execution/engine.py — legacy monolithic path, intentionally deferred,
   must be removed or replaced before live trading; do not extend
-- Kalshi market filter returns count=0 active markets (200 fetched, all
-  filtered out by `volume_24h > 100` in `_fetch_active_kalshi_markets()`)
-  as of Session 14. Bot connects and authenticates successfully but
-  subscribes to zero markets, so no PriceUpdateEvents flow and no paper
-  trades can execute. Investigate the volume filter/field name in
-  agents/floor/price_watcher.py before expecting any arb detection.
 - Git remote URL still points to `WarpedMind/karbotrage_v1` (old repo name)
   on both local and VPS — should be updated to `WarpedMind/karbotrage`.
   GitHub's redirect handles it for now but update before it causes
@@ -142,17 +142,20 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **Immediate blocker**: investigate the Kalshi market volume filter —
-   0/200 markets currently pass `volume_24h > 100` in
-   `_fetch_active_kalshi_markets()` (agents/floor/price_watcher.py), so no
-   PriceUpdateEvents flow and no paper trades can execute despite working
-   auth and WS connection. Check whether the threshold is too strict for
-   current market conditions or whether Kalshi's volume field name has
-   changed again.
-2. Update git remote URL on local + VPS from `WarpedMind/karbotrage_v1` to
+1. **Deploy and verify**: deploy the Session 15 volume filter fix to the
+   VPS (`git pull origin main`, restart `karbot` service) and confirm
+   `kalshi_markets_fetched` reports a nonzero `count` in live logs —
+   the fix is unit-tested locally but not yet confirmed against the
+   real production API/catalog.
+2. Confirm S1 arb opportunities appear in logs and paper trades land in
+   `kalshi_trades.csv` now that PriceUpdateEvents should be flowing.
+3. Once paper trades are confirmed executing, start the 30-day paper
+   trading clock — record the exact start date in CLAUDE.md and
+   SESSIONS.md.
+4. Update git remote URL on local + VPS from `WarpedMind/karbotrage_v1` to
    `WarpedMind/karbotrage` (old name still works via GitHub redirect, but
    should be cleaned up)
-3. Begin live executor spec after 30-day paper run completes
+5. Begin live executor spec after 30-day paper run completes
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 
