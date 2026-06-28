@@ -70,18 +70,17 @@
 - Added a permanent one-shot `kalshi_first_price_update` INFO log (fires
   once per platform on the first successfully-applied delta) so this and
   future sessions have a real live confirmation signal instead of
-  needing ad-hoc diagnostic logging again — addresses the gap noted
-  above before this fix is even deployed.
-- NOT yet redeployed/reverified live on the VPS as of this entry — next
-  session's first job is deploying this and confirming
-  `kalshi_first_price_update` appears in live logs.
+  needing ad-hoc diagnostic logging again.
+- **Deployed and confirmed live on the VPS**: `kalshi_ws_connected` ✓,
+  `kalshi_markets_fetched count=1217 total=4000` ✓, `kalshi_markets_subscribed
+  total=1217` ✓, `kalshi_first_price_update market=KXITFWMATCH-26JUN28MAQVAN-MAQ
+  side=no` fired ~2 seconds after subscribing ✓. The full Kalshi
+  price-flow chain (auth → fetch → subscribe → real order book deltas)
+  works end-to-end for the first time this session.
 
 ### What to do first next session
-- Deploy this fix to the VPS (`git pull origin main`, restart `karbot`)
-  and confirm `kalshi_first_price_update` appears in live logs —
-  that's the real signal that order book data is now flowing end-to-end.
 - Confirm S1 arb opportunities appear in logs and paper trades land in
-  `kalshi_trades.csv`
+  `kalshi_trades.csv` now that PriceUpdateEvents are genuinely flowing
 - Once paper trades are confirmed executing, start the 30-day paper
   trading clock — record the exact start date in CLAUDE.md and
   SESSIONS.md

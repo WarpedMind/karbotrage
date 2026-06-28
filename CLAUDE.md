@@ -95,25 +95,23 @@ async def run(self): ...
 - Kalshi market volume filter: FIXED AND CONFIRMED LIVE (Session 15) —
   `_fetch_active_kalshi_markets()` sends `mve_filter=exclude`, paginates
   via `cursor`, filters on `volume_24h_fp` (cast to float). Live VPS
-  confirmation: `kalshi_markets_fetched count=785 total=4000`, and
-  `kalshi_markets_subscribed total=785` with a successful Kalshi ack.
+  confirmation: `kalshi_markets_fetched count=1217 total=4000` (volume
+  fluctuates; an earlier check the same session showed count=785), and
+  `kalshi_markets_subscribed total=1217` with a successful Kalshi ack.
 - Kalshi WS message schema (snapshot/delta handlers + `OrderBook.apply_delta`):
-  FIXED, NOT YET CONFIRMED LIVE (Session 15) — even with subscription
-  working, zero order book activity was observed for 15+ minutes despite
-  a healthy TCP socket. Root cause: handlers assumed a schema
-  (`market_ticker` at top level, `yes.bids`/`yes.asks`) that doesn't
-  exist on the wire — every message was silently dropped before any log
-  fired. Rewrote against the real schema, confirmed via Kalshi's WS docs
-  plus live captured traffic (payload nested under `msg["msg"]`;
+  FIXED AND CONFIRMED LIVE (Session 15) — even with subscription
+  working, zero order book activity was initially observed for 15+
+  minutes despite a healthy TCP socket. Root cause: handlers assumed a
+  schema (`market_ticker` at top level, `yes.bids`/`yes.asks`) that
+  doesn't exist on the wire — every message was silently dropped before
+  any log fired. Rewrote against the real schema, confirmed via Kalshi's
+  WS docs plus live captured traffic (payload nested under `msg["msg"]`;
   `yes_dollars_fp`/`no_dollars_fp` are bid-only books, NO bids derive
   YES asks at `1-p`; `delta_fp` is a RELATIVE size change, confirmed via
-  a live matched +523.00/-523.00 pair). Passed local unit tests
-  (tests/test_kalshi_orderbook.py) but NOT yet redeployed/reverified on
-  the VPS. Added a permanent one-shot `kalshi_first_price_update` INFO
-  log (fires once per platform on the first successfully-applied delta)
-  so this and future sessions have a real live signal without ad-hoc
-  diagnostic logging. Do not assume real order book data is flowing
-  until that log (or equivalent) is confirmed in live logs.
+  a live matched +523.00/-523.00 pair). Live VPS confirmation:
+  `kalshi_first_price_update` fired ~2 seconds after subscribing
+  (`market=KXITFWMATCH-26JUN28MAQVAN-MAQ side=no`) — real order book
+  data is now flowing end-to-end for the first time.
 - VPS (`karbot-rage-prod`, 147.224.209.18): SSH access confirmed working;
   Session 13 Kalshi fix deployed and verified live — `kalshi_ws_connected`
   and `kalshi_markets_fetched` both confirmed in logs, zero auth errors ✓
@@ -163,21 +161,19 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **Deploy and verify**: deploy the Session 15 WS-schema fix to the VPS
-   (`git pull origin main`, restart `karbot` service) and confirm
-   `kalshi_first_price_update` appears in live logs — the volume filter
-   + subscription is already confirmed live (785 markets), but the
-   snapshot/delta handler rewrite has only passed local unit tests, not
-   a live check.
-2. Confirm S1 arb opportunities appear in logs and paper trades land in
-   `kalshi_trades.csv` now that PriceUpdateEvents should be flowing.
-3. Once paper trades are confirmed executing, start the 30-day paper
+1. **Confirm S1 arb opportunities and paper trades**: the full Kalshi
+   price-flow chain (auth → fetch → subscribe → real order book deltas)
+   is now confirmed live end-to-end as of Session 15
+   (`kalshi_first_price_update` fired live). Confirm S1 arb opportunities
+   appear in logs and paper trades land in `kalshi_trades.csv` now that
+   PriceUpdateEvents are genuinely flowing.
+2. Once paper trades are confirmed executing, start the 30-day paper
    trading clock — record the exact start date in CLAUDE.md and
    SESSIONS.md.
-4. Update git remote URL on local + VPS from `WarpedMind/karbotrage_v1` to
+3. Update git remote URL on local + VPS from `WarpedMind/karbotrage_v1` to
    `WarpedMind/karbotrage` (old name still works via GitHub redirect, but
    should be cleaned up)
-5. Begin live executor spec after 30-day paper run completes
+4. Begin live executor spec after 30-day paper run completes
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 
