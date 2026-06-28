@@ -1,6 +1,103 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-06-28 (Session 15 continued — Kalshi WS message schema rewrite)
+
+### What was built
+- **`agents/floor/price_watcher.py` — `_handle_kalshi_snapshot()`,
+  `_handle_kalshi_delta()`, `OrderBook.apply_delta()` rewritten.** After
+  the mve_filter fix got real markets subscribing (785/4000), live VPS
+  logs showed zero order book activity for 15+ minutes despite a healthy
+  TCP socket (`ss -tnp` confirmed `ESTAB`, 0 queued bytes) and a
+  successful `kalshi_subscribed` ack. Root cause: the WS message handlers
+  assumed a schema that doesn't exist — `msg.get("market_ticker")` at the
+  top level and `msg.get("yes", {}).get("bids"/"asks", [])` — so every
+  snapshot and delta hit an early `return` on the empty `market_id` check
+  before any log line fired, explaining the total silence.
+  Confirmed the real schema two ways: (1) Kalshi's official WS docs
+  (docs.kalshi.com/websockets/orderbook-updates), which clarified the
+  payload is nested under `msg["msg"]` and named the real fields
+  (`yes_dollars_fp`, `no_dollars_fp`, `price_dollars`, `delta_fp`, `side`)
+  but left two correctness-critical questions unanswered: whether
+  yes/no_dollars_fp are both bid-only books, and whether `delta_fp` is
+  absolute or relative; (2) added temporary raw-message logging
+  (`kalshi_raw_msg_diag`, committed and reverted within this session),
+  redeployed, and inspected real captured Kalshi traffic directly. That
+  resolved both open questions empirically: `yes_dollars_fp`/
+  `no_dollars_fp` are both resting-bid-only books (standard Kalshi binary
+  convention — YES ask = 1 − best NO bid, already implicit in
+  `to_price_event()`'s existing math), and `delta_fp` is a RELATIVE
+  change to the existing size (confirmed via a live matched +523.00/
+  -523.00 pair on `KXCS2GAME-...-AIM` when a resting order moved from
+  price 0.02 to 0.08 — only explicable as incremental deltas, not
+  absolute replacements).
+  `OrderBook.apply_delta()` signature changed from "set absolute size"
+  to "add relative delta, clamp at 0, remove level at/below 0." Both
+  handlers now read the nested `msg["msg"]` payload and route `side:
+  "no"` deltas to the derived YES-ask book at `1 - price_dollars`.
+- **tests/test_kalshi_orderbook.py** (new, 10 tests): `OrderBook.apply_delta`
+  relative-size semantics (add, remove-at-zero, clamp-negative, the
+  matched move-between-price-levels case mirroring the live KXCS2GAME
+  example), snapshot parsing with real nested payload shape + NO→ask
+  derivation, missing-ticker no-ops, and an unknown-`side` value handled
+  without raising.
+
+### What was decided
+- Did not trust Kalshi's WS docs alone for the two correctness-critical
+  questions (bid-only book structure, relative vs. absolute delta) —
+  the docs themselves were explicitly ambiguous on both. Added
+  temporary, clearly-marked diagnostic logging (`kalshi_raw_msg_diag`)
+  to capture and reason from real live traffic instead of guessing,
+  then removed it once both questions were resolved. This is the same
+  empirical-verification discipline that caught the volume field name,
+  pagination, and mve_filter bugs earlier in this session — applied here
+  to a deeper, higher-blast-radius piece of logic (CLAUDE.md flags
+  `OrderBook`/order book reconstruction as the most correctness-critical
+  code in the system: "A bug here silently corrupts ALL downstream
+  pricing").
+- This was the third independent, compounding bug found in the Kalshi
+  price-flow path this session (after the field-name/pagination bug and
+  the mve_filter catalog-composition bug) — each was invisible until the
+  prior layer was fixed and re-verified live. Reinforces: do not declare
+  a fix complete on "tests pass" or even "the immediately-visible log
+  line looks right" — verify the actual downstream effect (here, real
+  order book data arriving) before updating CLAUDE.md status.
+
+### Verification
+- `karbotrage_env/bin/python -m pytest tests/ -v`: 49/49 passed (39 prior
+  + 10 new in test_kalshi_orderbook.py) ✓
+- No `.env`, `config.yaml`, or `*.pem` in staged changes ✓
+- NOT yet redeployed/reverified live on the VPS as of this entry — next
+  session's first job is deploying this and confirming real order book
+  data is now populating (`OrderBook.bids`/`asks` nonzero, or a new
+  lightweight live signal — current logging has no INFO-level signal
+  for this, see KNOWN DEBT)
+
+### What to do first next session
+- Deploy this fix to the VPS (`git pull origin main`, restart `karbot`)
+  and verify real order book data is flowing — note current logging has
+  no INFO-level signal for "snapshot applied" or "price update published"
+  (`book_snapshot_applied` is debug-only but unfiltered; no log fires on
+  `bus.publish(PriceUpdateEvent)` at all), so confirming this live will
+  need either a temporary diagnostic again or a permanent low-noise
+  INFO log added deliberately — consider adding one rather than
+  repeating the ad-hoc diagnostic pattern a fourth time this session.
+- Confirm S1 arb opportunities appear in logs and paper trades land in
+  `kalshi_trades.csv`
+- Once paper trades are confirmed executing, start the 30-day paper
+  trading clock — record the exact start date in CLAUDE.md and
+  SESSIONS.md
+- Update git remote URL on local + VPS from `WarpedMind/karbotrage_v1` to
+  `WarpedMind/karbotrage`
+- Begin live executor spec after the 30-day paper run completes
+- Investigate `dead_letter` events for `AgentHeartbeat` firing every
+  ~30s in VPS logs (noticed incidentally during this session's
+  investigation) — likely a pre-existing gap (no Health Monitor agent
+  subscribed to heartbeats yet) rather than a regression, but worth
+  confirming it isn't masking a real event-bus wiring issue
+
+---
+
 ## 2026-06-28 (Session 15 — Kalshi volume filter fix: field name + pagination + mve_filter)
 
 ### What was built

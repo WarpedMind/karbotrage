@@ -118,10 +118,17 @@ class OrderBook:
                   bid_levels=len(self.bids),
                   ask_levels=len(self.asks))
 
-    def apply_delta(self, side: str, price: float, size: float, seq: int) -> bool:
+    def apply_delta(self, side: str, price: float, delta: float, seq: int) -> bool:
         """
-        Apply a single delta update.
-        Returns True if applied cleanly, False if sequence gap detected.
+        Apply a single incremental delta update.
+
+        `delta` is a RELATIVE change to the existing size at `price`, not an
+        absolute level (confirmed empirically against live Kalshi WS traffic —
+        e.g. a level moving from one price to another arrives as a matched
+        +N/-N pair, not as two absolute-size messages). The resulting size is
+        clamped at 0; a level that reaches zero is removed.
+
+        Returns True if applied cleanly, False if a sequence gap was detected.
         """
         # Check for sequence gaps
         if seq != self.sequence + 1 and self.sequence != 0:
@@ -133,11 +140,12 @@ class OrderBook:
             return False
 
         book = self.bids if side == "bid" else self.asks
+        new_size = book.get(price, 0.0) + delta
 
-        if size == 0:
+        if new_size <= 0:
             book.pop(price, None)    # Remove level
         else:
-            book[price] = size       # Add or update level
+            book[price] = new_size   # Add or update level
 
         self.sequence = seq
         self.last_update = time.monotonic()
@@ -277,10 +285,6 @@ class KalshiWebSocketClient:
     async def _route_message(self, msg: Dict) -> None:
         """Route incoming message to appropriate handler."""
         msg_type = msg.get("type", "")
-
-        # TEMP DIAGNOSTIC (Session 15) — remove after schema confirmed
-        if msg_type in ("orderbook_snapshot", "orderbook_delta"):
-            log.info("kalshi_raw_msg_diag", raw=json.dumps(msg))
 
         if msg_type == "orderbook_snapshot":
             await self._on_snapshot("kalshi", msg)
@@ -461,8 +465,18 @@ class PriceWatcherAgent:
         return active
 
     async def _handle_kalshi_snapshot(self, platform: str, msg: Dict) -> None:
-        """Process a full order book snapshot."""
-        market_id = msg.get("market_ticker", "")
+        """
+        Process a full order book snapshot.
+
+        Real Kalshi schema (confirmed live, 2026-06-28): the payload is
+        nested under `msg["msg"]`, not at the top level. `yes_dollars_fp`
+        and `no_dollars_fp` are each a flat list of [price, contracts]
+        resting BID orders — Kalshi's book only carries bids per side.
+        A resting NO bid at price p is equivalent to a YES ask at (1 - p),
+        consistent with to_price_event()'s existing no_bid/no_ask math.
+        """
+        payload = msg.get("msg", {})
+        market_id = payload.get("market_ticker", "")
         if not market_id:
             return
 
@@ -470,10 +484,10 @@ class PriceWatcherAgent:
             self._books[market_id] = OrderBook(market_id, platform)
 
         book = self._books[market_id]
-        bids = [(level["price"], level["quantity"])
-                for level in msg.get("yes", {}).get("bids", [])]
-        asks = [(level["price"], level["quantity"])
-                for level in msg.get("yes", {}).get("asks", [])]
+        bids = [(float(price), float(contracts))
+                for price, contracts in payload.get("yes_dollars_fp", [])]
+        asks = [(round(1.0 - float(price), 2), float(contracts))
+                for price, contracts in payload.get("no_dollars_fp", [])]
         seq  = msg.get("seq", 0)
 
         book.apply_snapshot(bids, asks, seq)
@@ -491,8 +505,19 @@ class PriceWatcherAgent:
         await self.bus.publish(book.to_price_event(platform))
 
     async def _handle_kalshi_delta(self, platform: str, msg: Dict) -> None:
-        """Process an incremental order book delta — hot path, must be fast."""
-        market_id = msg.get("market_ticker", "")
+        """
+        Process an incremental order book delta — hot path, must be fast.
+
+        Real Kalshi schema (confirmed live, 2026-06-28): one delta per
+        message, nested under msg["msg"]: price_dollars, delta_fp (a
+        RELATIVE change to apply, not an absolute size — confirmed via a
+        matched +N/-N pair when a resting order moved between price
+        levels), and side ("yes"/"no"). A "no" side delta updates the
+        derived YES ask book at price (1 - price_dollars); a "yes" side
+        delta updates the YES bid book directly.
+        """
+        payload = msg.get("msg", {})
+        market_id = payload.get("market_ticker", "")
         if not market_id:
             return
 
@@ -512,13 +537,18 @@ class PriceWatcherAgent:
             # For now: drop message and let reconnection handle it
             return
 
-        # Apply delta
-        for change in msg.get("yes", {}).get("bids", []):
-            book.apply_delta("bid", change["price"], change["quantity"],
-                             msg.get("seq", 0))
-        for change in msg.get("yes", {}).get("asks", []):
-            book.apply_delta("ask", change["price"], change["quantity"],
-                             msg.get("seq", 0))
+        seq    = msg.get("seq", 0)
+        price  = float(payload.get("price_dollars", 0))
+        delta  = float(payload.get("delta_fp", 0))
+        side   = payload.get("side", "")
+
+        if side == "yes":
+            book.apply_delta("bid", price, delta, seq)
+        elif side == "no":
+            book.apply_delta("ask", round(1.0 - price, 2), delta, seq)
+        else:
+            log.warning("kalshi_delta_unknown_side", market=market_id, side=side)
+            return
 
         # Publish price update — this is the hot path
         await self.bus.publish(book.to_price_event(platform))

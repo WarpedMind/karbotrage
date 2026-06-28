@@ -46,7 +46,7 @@ Karbot Rage! is a multi-agent automated trading system designed for decentralize
 - karbot/core/: Package exists — agents import from here
   - karbot/core/config.py: KarbotConfig typed dataclass; Phase 1 invariants enforced structurally at `__init__` — `polymarket_ws_enabled=True` with `phase=1` raises `ValueError`, `s2_cross_platform_enabled=True` with `phase=1` raises `ValueError`; RiskConfig hard limits also enforced at instantiation. Now also has `from_yaml(path)` classmethod, `.phase` property (→ capital.phase), and `.paper_mode` property (→ system.paper_mode). TelegramConfig + RegulatoryIntelligenceConfig sub-dataclasses added.
   - karbot/core/events.py: Re-exports all event types from core/events.py
-- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PSS/SHA-256 auth via `cryptography` against `api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` + PKCS1v15 in Session 13); `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message); `_fetch_active_kalshi_markets()` sends `mve_filter=exclude` (Kalshi's catalog is otherwise 12,000+ consecutive zero-volume multi-variable-event markets) and paginates via `cursor` (20-page cap) as a secondary safeguard, filtering on `volume_24h_fp` (Session 15 — see KNOWN DEBT, not yet reverified live after the mve_filter addition)
+- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PSS/SHA-256 auth via `cryptography` against `api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` + PKCS1v15 in Session 13); `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message); `_fetch_active_kalshi_markets()` sends `mve_filter=exclude` (Kalshi's catalog is otherwise 12,000+ consecutive zero-volume multi-variable-event markets) and paginates via `cursor` (20-page cap) as a secondary safeguard, filtering on `volume_24h_fp` — confirmed live (Session 15, count=785/4000); `_handle_kalshi_snapshot`/`_handle_kalshi_delta`/`OrderBook.apply_delta` rewritten for the real WS schema (Session 15 — payload nested under `msg["msg"]`, `yes_dollars_fp`/`no_dollars_fp` are bid-only books with NO bids deriving YES asks at `1-p`, `delta_fp` is a RELATIVE change not absolute) — NOT YET reverified live, see KNOWN DEBT
 - agents/floor/arb_scanner.py: `ArbScannerAgent` (full impl, has register_subscriptions) + `ArbScanner` (inherits it); `run()` starts heartbeat + cache-cleanup tasks then idles; S1 opportunity detection fully wired
 - agents/floor/risk_gate.py: `RiskGateAgent` (full impl, has register_subscriptions) + `RiskGate` (inherits it); `run()` starts heartbeat task then idles; subscribes to RegulatoryAlertEvent; _regulatory_pause=True blocks all trades when urgency=5; cleared by urgency=0 event from RegulatoryIntelligenceAgent
 - agents/research/market_analyst.py: `MarketAnalystAgent` (full impl) + `MarketAnalyst` (inherits it); `run()` starts LLM analysis loop (5-min), heartbeat, cache-cleanup; no-op when ANTHROPIC_API_KEY absent; uses `AsyncAnthropic` (migrated from synchronous client in Session 14)
@@ -91,19 +91,27 @@ async def run(self): ...
 - TradeResolvedEvent: wired via PaperExecutor — full paper P&L cycle closes ✓
 - 30-day paper trading clock: NOT YET STARTED — starts when real Kalshi
   markets are flowing and paper trades are executing
-- Full test suite: 39/39 passing ✓
-- Kalshi market volume filter: fix in progress (Session 15), NOT YET
-  CONFIRMED LIVE — `_fetch_active_kalshi_markets()` now sends
-  `mve_filter=exclude`, paginates via `cursor`, and filters on the real
-  `volume_24h_fp` field (cast to float). The first deploy attempt
-  (field name + pagination only, no mve_filter) was tested live on the
-  VPS and still returned `count=0 total=4000` — a live 12,000-market
-  scan found the unfiltered catalog is dominated entirely by
-  zero-volume multi-variable-event markets (`KXMVE*`), confirmed via
-  Kalshi's docs to require the `mve_filter` param. This second fix has
-  passed local unit tests but has NOT yet been redeployed/reverified on
-  the VPS — do not assume it works until `kalshi_markets_fetched`
-  shows a nonzero count in live logs.
+- Full test suite: 49/49 passing ✓
+- Kalshi market volume filter: FIXED AND CONFIRMED LIVE (Session 15) —
+  `_fetch_active_kalshi_markets()` sends `mve_filter=exclude`, paginates
+  via `cursor`, filters on `volume_24h_fp` (cast to float). Live VPS
+  confirmation: `kalshi_markets_fetched count=785 total=4000`, and
+  `kalshi_markets_subscribed total=785` with a successful Kalshi ack.
+- Kalshi WS message schema (snapshot/delta handlers + `OrderBook.apply_delta`):
+  FIXED, NOT YET CONFIRMED LIVE (Session 15) — even with subscription
+  working, zero order book activity was observed for 15+ minutes despite
+  a healthy TCP socket. Root cause: handlers assumed a schema
+  (`market_ticker` at top level, `yes.bids`/`yes.asks`) that doesn't
+  exist on the wire — every message was silently dropped before any log
+  fired. Rewrote against the real schema, confirmed via Kalshi's WS docs
+  plus live captured traffic (payload nested under `msg["msg"]`;
+  `yes_dollars_fp`/`no_dollars_fp` are bid-only books, NO bids derive
+  YES asks at `1-p`; `delta_fp` is a RELATIVE size change, confirmed via
+  a live matched +523.00/-523.00 pair). Passed local unit tests
+  (tests/test_kalshi_orderbook.py) but NOT yet redeployed/reverified on
+  the VPS. Do not assume real order book data is flowing until verified
+  live — current logging has no INFO-level signal for "snapshot applied"
+  or "price update published" (see KNOWN DEBT).
 - VPS (`karbot-rage-prod`, 147.224.209.18): SSH access confirmed working;
   Session 13 Kalshi fix deployed and verified live — `kalshi_ws_connected`
   and `kalshi_markets_fetched` both confirmed in logs, zero auth errors ✓
@@ -131,6 +139,18 @@ async def run(self): ...
   on both local and VPS — should be updated to `WarpedMind/karbotrage`.
   GitHub's redirect handles it for now but update before it causes
   confusion: `git remote set-url origin https://github.com/WarpedMind/karbotrage.git`
+- price_watcher.py has no INFO-level signal for "order book snapshot
+  applied" or "PriceUpdateEvent published" — `book_snapshot_applied` is
+  debug-only (though unfiltered by this codebase's structlog setup) and
+  no log fires on the price-event publish path at all. This made the
+  Session 15 WS-schema bug hard to confirm/deny live; consider adding a
+  deliberate low-noise INFO log (e.g. periodic count, not per-message)
+  rather than relying on ad-hoc diagnostic logging again.
+- `AgentHeartbeat` events are being dead-lettered every ~30s in VPS logs
+  (noticed incidentally during Session 15 investigation) — no agent
+  currently subscribes to handle them; CLAUDE.md references a "Health
+  Monitor Agent" conceptually but it isn't implemented. Likely
+  pre-existing, not a regression, but unconfirmed.
 
 ## REGULATORY CONTEXT (May 2026 — current)
 - CFTC Letter 26-15 (May 19 2026, EFFECTIVE NOW): New cooperation
@@ -148,11 +168,14 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **Deploy and verify**: deploy the Session 15 volume filter fix to the
-   VPS (`git pull origin main`, restart `karbot` service) and confirm
-   `kalshi_markets_fetched` reports a nonzero `count` in live logs —
-   the fix is unit-tested locally but not yet confirmed against the
-   real production API/catalog.
+1. **Deploy and verify**: deploy the Session 15 WS-schema fix to the VPS
+   (`git pull origin main`, restart `karbot` service) and confirm real
+   order book data is flowing — the volume filter + subscription is
+   already confirmed live (785 markets), but the snapshot/delta handler
+   rewrite has only passed local unit tests, not a live check. No
+   INFO-level log currently confirms this directly; either add a
+   deliberate low-noise log first or temporarily re-add diagnostic
+   logging (same pattern used twice already this session) to confirm.
 2. Confirm S1 arb opportunities appear in logs and paper trades land in
    `kalshi_trades.csv` now that PriceUpdateEvents should be flowing.
 3. Once paper trades are confirmed executing, start the 30-day paper
