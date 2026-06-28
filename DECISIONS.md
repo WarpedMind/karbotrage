@@ -1,6 +1,41 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-06-27 — Session: Kalshi API migration (domain + signing algorithm)
+
+### Verify external claims against the live API before changing code
+- A third-party (web-search-sourced, unconfirmed) suggestion proposed two
+  simultaneous changes to Kalshi auth: a domain move to
+  `api.elections.kalshi.com` and switching from RSA-PKCS1v15 to RSA-PSS
+  signing. Only the domain change had first-party evidence at the time
+  (a live 401 from Kalshi's own server stating the API had moved).
+- Decision: apply and verify one change at a time rather than trusting the
+  bundled claim wholesale.
+  1. Applied the URL fix alone, left signing untouched.
+  2. Live-tested PKCS1v15 against the new domain — got a real
+     `401 INCORRECT_API_KEY_SIGNATURE`, which is a signature-format
+     rejection (not a routing error), independently confirming something
+     about the signing scheme really had changed.
+  3. Only then tried RSA-PSS, and only trusted it after a live `200`
+     against `/trade-api/v2/portfolio/balance` using the actual function
+     in agents/floor/price_watcher.py (not a disposable test script).
+- Rationale: an AI-generated fix bundling two unverified claims together is
+  exactly the situation where, if you blindly apply both, you can't tell
+  afterward which change (if either) was actually necessary or correct —
+  and a wrong signing scheme on a real trading account's credentials is not
+  a place to guess. Treat URL/domain "moved" errors and signature rejection
+  errors as distinct failure modes requiring distinct evidence.
+- This pattern (isolate one variable, get first-party evidence, then act)
+  should apply to any future externally-sourced "fix" affecting auth,
+  credentials, or money movement.
+
+### Kalshi API endpoint + signing scheme (current, as of this session)
+- Base/WS domain: `api.elections.kalshi.com` (was `trading-api.kalshi.com`)
+- Signing: RSA-PSS + SHA-256, `salt_length=PSS.MAX_LENGTH` (was PKCS1v15)
+- See SESSIONS.md Session 13 for full verification trail
+
+---
+
 ## 2026-05-26 — Session: Security hardening + TradeResolvedEvent
 
 ### Secrets management pattern (project-wide, permanent)

@@ -130,10 +130,17 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. SSH to VPS, tail runner logs — confirm `kalshi_ws_connected` and
-   `kalshi_markets_fetched`; if auth fails see SESSIONS.md Session 11 for
-   debugging steps
-2. Once data flows: confirm S1 opportunities appear (or note they don't and why)
+1. Restore SSH access to the VPS (`karbot-rage-prod`, 147.224.209.18) —
+   currently locked out; the instance's authorized key (comment
+   `ssh-key-2026-05-27`) does not match any key file found locally. Serial
+   console recovery via `oci compute instance-console-connection` was in
+   progress as of Session 13 but not completed.
+2. Once SSH is back: `git pull` to deploy the Session 13 Kalshi fix
+   (`api.elections.kalshi.com` + RSA-PSS), then tail runner logs — confirm
+   `kalshi_ws_connected` and `kalshi_markets_fetched`; if auth fails again,
+   verify the domain and signing scheme independently against the live API
+   before assuming either one is the cause (see Session 13 in SESSIONS.md)
+3. Once data flows: confirm S1 opportunities appear (or note they don't and why)
    and verify paper trades land in logs/kalshi_trades.csv
 3. Build compliance.db schema so ReflectionAgent nightly cycle can run
 4. Begin live executor spec after 30-day paper run completes (2026-06-25)

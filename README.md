@@ -29,7 +29,7 @@ Ten specialized agents run concurrently over a shared async event bus, covering 
 | Agent | Role |
 |---|---|
 | PositionTracker | Tracks deployed capital, open positions, daily P&L |
-| PriceWatcher | Connects to Kalshi WebSocket (RSA-authenticated), emits real-time price updates |
+| PriceWatcher | Connects to Kalshi WebSocket (RSA-PSS authenticated), emits real-time price updates |
 | ArbScanner | Scans for arbitrage opportunities (S1 strategy) |
 | RiskGate | Enforces position/exposure limits; can pause trading on regulatory alerts |
 | PaperExecutor | Simulates fills and P&L resolution in paper mode |
@@ -80,7 +80,7 @@ karbot/core/
   events.py               # Re-exports from core/events.py
 agents/
   floor/
-    price_watcher.py      # PriceWatcher (Kalshi WS, RSA auth)
+    price_watcher.py      # PriceWatcher (Kalshi WS, RSA-PSS auth, api.elections.kalshi.com)
     arb_scanner.py        # ArbScanner
     risk_gate.py          # RiskGate
     position_tracker.py   # PositionTracker
@@ -99,9 +99,13 @@ data/market_data.py       # Kalshi-first market data
 
 ## Next up
 
-1. Confirm Kalshi WS connection and S1 opportunities on the live VPS deployment
-2. Build `compliance.db` schema so `ReflectionAgent`'s nightly cycle can run
-3. Begin live executor spec after the 30-day paper run completes (2026-06-25)
+1. Restore SSH access to the Oracle VPS (`karbot-rage-prod`) — currently locked
+   out; the instance's authorized key does not match any key found locally
+2. `git pull` on the VPS to deploy the Kalshi `api.elections.kalshi.com` +
+   RSA-PSS fix (Session 13), then confirm Kalshi WS connection and S1
+   opportunities on the live deployment
+3. Build `compliance.db` schema so `ReflectionAgent`'s nightly cycle can run
+4. Begin live executor spec — the 30-day paper run completed 2026-06-25
 
 ## License
 
