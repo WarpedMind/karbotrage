@@ -278,6 +278,10 @@ class KalshiWebSocketClient:
         """Route incoming message to appropriate handler."""
         msg_type = msg.get("type", "")
 
+        # TEMP DIAGNOSTIC (Session 15) — remove after schema confirmed
+        if msg_type in ("orderbook_snapshot", "orderbook_delta"):
+            log.info("kalshi_raw_msg_diag", raw=json.dumps(msg))
+
         if msg_type == "orderbook_snapshot":
             await self._on_snapshot("kalshi", msg)
         elif msg_type == "orderbook_delta":
