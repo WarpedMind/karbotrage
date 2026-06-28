@@ -1,6 +1,69 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-06-28 — Session 15: Kalshi price-flow chain (volume filter, mve_filter, WS schema)
+
+### Verify each layer against the live API/wire before declaring it fixed
+- Three independent, compounding bugs were found in the Kalshi price-flow
+  path this session, each invisible until the previous layer was fixed
+  AND re-verified live (not just locally tested): (1) a nonexistent
+  `volume_24h` field plus broken pagination in `_fetch_active_kalshi_markets()`;
+  (2) even after fixing (1), a live deploy showed `count=0` — Kalshi's
+  unfiltered catalog is dominated by 12,000+ consecutive zero-volume
+  multi-variable-event markets, requiring the documented `mve_filter=exclude`
+  param; (3) even after fixing (1) and (2), real markets were subscribing
+  but zero order book messages were ever processed — the WS snapshot/delta
+  handlers assumed a message schema that doesn't exist on the wire.
+- Decision: at each layer, verified against the actual live system
+  (direct REST queries with real credentials, a live 12,000-market scan,
+  captured raw WS traffic) rather than trusting the previous fix's local
+  test pass or the immediately-visible log line. Deployed and checked
+  live logs after each fix before moving to docs updates.
+- Rationale: same category of risk as the Session 13 (Kalshi domain/signing)
+  and Session 14 (task-brief schema) decisions below — local tests and
+  docs can both be wrong about the live system's actual current behavior,
+  and a wrong assumption here is high blast radius (CLAUDE.md flags order
+  book reconstruction as code where "a bug here silently corrupts ALL
+  downstream pricing").
+
+### Kalshi WS orderbook schema is ambiguous in official docs on two
+### correctness-critical points — resolved empirically, not by guessing
+- Kalshi's WS docs (docs.kalshi.com/websockets/orderbook-updates) name the
+  real fields (`yes_dollars_fp`, `no_dollars_fp`, `price_dollars`,
+  `delta_fp`, `side`) but do not state whether `yes/no_dollars_fp` are
+  both bid-only books or whether `delta_fp` is an absolute size vs. a
+  relative change to apply.
+- Decision: added temporary, clearly-labeled diagnostic logging
+  (`kalshi_raw_msg_diag`), deployed it, captured real live traffic, then
+  reverted the diagnostic once both questions were answered from the
+  actual data — rather than guessing from the ambiguous docs or from
+  general Kalshi market-microstructure assumptions.
+- Resolution: confirmed both `_dollars_fp` arrays are resting-bid-only
+  books (NO bid at price `p` ⇒ derived YES ask at `1-p`, consistent with
+  pre-existing `to_price_event()` math already in the codebase); confirmed
+  `delta_fp` is a RELATIVE change via a live matched `+523.00`/`-523.00`
+  pair on ticker `KXCS2GAME-...-AIM` when a resting order moved from
+  price 0.02 to 0.08 — only explicable as incremental deltas.
+- `OrderBook.apply_delta()`'s signature/semantics were changed accordingly
+  (from "set absolute size at price" to "add relative delta, clamp at 0,
+  remove level at/below 0") rather than working around the mismatch at
+  the call site — the discrepancy was in what the method itself assumed
+  about the data, not in how callers used it.
+
+### Added a permanent low-noise live-verification log instead of repeating
+### ad-hoc diagnostics a third time
+- After two rounds of temporary diagnostic logging (raw API dumps via
+  Bash probes, then raw WS message logging) to resolve this session's
+  bugs, added one permanent one-shot `kalshi_first_price_update` INFO log
+  (fires once per platform on the first successfully-applied delta).
+- Rationale: this and future sessions need a real, cheap, always-available
+  signal that the price pipeline is alive, rather than re-deriving
+  ad-hoc diagnostic logging from scratch each time something needs live
+  verification. Deliberately one-shot (not per-message) to stay low-noise
+  in production.
+
+---
+
 ## 2026-06-27 — Session: VPS deployment verification, compliance.db, AsyncAnthropic migration
 
 ### Verify the task brief against the code, not just against the world
