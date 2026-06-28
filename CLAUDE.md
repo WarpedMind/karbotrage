@@ -115,6 +115,14 @@ async def run(self): ...
 - VPS (`karbot-rage-prod`, 147.224.209.18): SSH access confirmed working;
   Session 13 Kalshi fix deployed and verified live — `kalshi_ws_connected`
   and `kalshi_markets_fetched` both confirmed in logs, zero auth errors ✓
+- Git remote URL: CONFIRMED CORRECT on local (`origin` =
+  `github.com/WarpedMind/karbotrage.git`) and FIXED on VPS this session
+  via `git remote set-url origin https://github.com/WarpedMind/karbotrage.git`
+  (VPS was still on the old `karbotrage_v1.git` URL, working only via
+  GitHub's redirect). Verified working on VPS with a live `git fetch`.
+  Local directory name `~/Projects/karbotrage/karbotrage_v1/` does NOT
+  need to match the GitHub repo name (`karbotrage`) — this is normal;
+  only `git remote -v` matters, and it's correct on both sides now.
 - compliance.db: created at `logs/compliance.db` (local + VPS) with
   `trades`, `rejections`, `audit_trail` tables — schema matches what
   `ReflectionAgentImpl` actually queries (status, timestamp, resolved_at
@@ -135,10 +143,6 @@ async def run(self): ...
 - correlation_score in PositionSnapshot is permanently 0.0 — Phase 3 item
 - execution/engine.py — legacy monolithic path, intentionally deferred,
   must be removed or replaced before live trading; do not extend
-- Git remote URL still points to `WarpedMind/karbotrage_v1` (old repo name)
-  on both local and VPS — should be updated to `WarpedMind/karbotrage`.
-  GitHub's redirect handles it for now but update before it causes
-  confusion: `git remote set-url origin https://github.com/WarpedMind/karbotrage.git`
 - `AgentHeartbeat` events are being dead-lettered every ~30s in VPS logs
   (noticed incidentally during Session 15 investigation) — no agent
   currently subscribes to handle them; CLAUDE.md references a "Health
@@ -170,10 +174,7 @@ async def run(self): ...
 2. Once paper trades are confirmed executing, start the 30-day paper
    trading clock — record the exact start date in CLAUDE.md and
    SESSIONS.md.
-3. Update git remote URL on local + VPS from `WarpedMind/karbotrage_v1` to
-   `WarpedMind/karbotrage` (old name still works via GitHub redirect, but
-   should be cleaned up)
-4. Begin live executor spec after 30-day paper run completes
+3. Begin live executor spec after 30-day paper run completes
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 
