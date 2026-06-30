@@ -32,10 +32,13 @@ import asyncio
 import csv
 import json
 import logging
+import os
 import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+
+import aiosqlite
 
 from core.events import (
     EventBus,
@@ -43,6 +46,7 @@ from core.events import (
     LegFailureEvent,
     RejectedOpportunityEvent,
     RegulatoryAlertEvent,
+    TradeResolvedEvent,
 )
 from karbot.core.config import KarbotConfig
 
@@ -186,6 +190,7 @@ class ComplianceOfficer:
     def register_subscriptions(self):
         """Subscribe to all compliance-relevant events."""
         self.bus.subscribe(TradeExecutedEvent, self.handle_trade_executed)
+        self.bus.subscribe(TradeResolvedEvent, self.handle_trade_resolved)
         self.bus.subscribe(LegFailureEvent, self.handle_leg_failure)
         self.bus.subscribe(RejectedOpportunityEvent, self.handle_rejected)
         self.bus.subscribe(RegulatoryAlertEvent, self.handle_regulatory_alert)
@@ -240,6 +245,103 @@ class ComplianceOfficer:
                 f"[COMPLIANCE] CRITICAL: Failed to log trade: {e}",
                 exc_info=True,
             )
+
+    async def handle_trade_resolved(self, event: TradeResolvedEvent):
+        """Update kalshi_trades.csv and compliance.db when a trade resolves.
+
+        CSV: read-modify-write (atomic) — split realized_pnl across matched
+        leg rows, set status=RESOLVED, set hold_duration_seconds.
+        DB: UPDATE trades SET status/resolved_at/realized_pnl/holding_period_hours
+        where trade_id matches.
+        """
+        try:
+            rows_updated = self._update_csv_trade_resolved(event)
+            if rows_updated == 0:
+                logger.warning(
+                    "trade_resolved_no_matching_rows",
+                    extra={"trade_id": event.trade_id},
+                )
+            else:
+                logger.info(
+                    "trade_resolved_csv_updated",
+                    extra={
+                        "trade_id": event.trade_id,
+                        "rows_updated": rows_updated,
+                        "realized_pnl": event.realized_pnl,
+                    },
+                )
+
+            await self._update_db_trade_resolved(event)
+
+            self._append_audit(
+                event_type="TradeResolvedEvent",
+                platform=event.platform or "KALSHI",
+                market_id=event.market_id or "",
+                payload=self._safe_dict(event),
+            )
+        except Exception as e:
+            logger.error(
+                f"[COMPLIANCE] CRITICAL: Failed to log trade resolution: {e}",
+                exc_info=True,
+            )
+
+    def _update_csv_trade_resolved(self, event: TradeResolvedEvent) -> int:
+        """Atomic read-modify-write of kalshi_trades.csv for a resolved trade.
+
+        Returns the number of rows updated.
+        """
+        if not self._kalshi_csv.exists():
+            return 0
+
+        with open(self._kalshi_csv, newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames or KALSHI_CSV_HEADERS
+            rows = list(reader)
+
+        matched = [r for r in rows if r.get("trade_id") == event.trade_id]
+        if not matched:
+            return 0
+
+        pnl_per_leg = event.realized_pnl / len(matched)
+        hold_secs = event.holding_period_hours * 3600
+
+        for row in rows:
+            if row.get("trade_id") == event.trade_id:
+                row["gain_loss"] = round(pnl_per_leg, 6)
+                row["hold_duration_seconds"] = round(hold_secs, 2)
+                row["status"] = "RESOLVED"
+
+        # Write atomically: temp file in same directory, then os.replace()
+        tmp_path = self._kalshi_csv.with_suffix(".csv.tmp")
+        with open(tmp_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        os.replace(tmp_path, self._kalshi_csv)
+
+        return len(matched)
+
+    async def _update_db_trade_resolved(self, event: TradeResolvedEvent):
+        """Update the trades row in compliance.db for a resolved trade."""
+        db_path = LOGS_DIR / "compliance.db"
+        if not db_path.exists():
+            logger.warning(
+                "[COMPLIANCE] compliance.db not found — skipping DB update for resolution",
+                extra={"trade_id": event.trade_id},
+            )
+            return
+        resolved_at = datetime.now(timezone.utc).isoformat()
+        async with aiosqlite.connect(str(db_path)) as db:
+            await db.execute(
+                """UPDATE trades
+                   SET status = 'RESOLVED',
+                       resolved_at = ?,
+                       realized_pnl = ?,
+                       holding_period_hours = ?
+                   WHERE trade_id = ?""",
+                (resolved_at, event.realized_pnl, event.holding_period_hours, event.trade_id),
+            )
+            await db.commit()
 
     async def handle_leg_failure(self, event: LegFailureEvent):
         """

@@ -1,6 +1,103 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-06-30 (Session 17 — TradeResolvedEvent wired into compliance.py)
+
+### What was built
+- **`agents/management/compliance.py` — `handle_trade_resolved` added.**
+  Root cause: nothing subscribed to `TradeResolvedEvent` in compliance.py,
+  so CSV rows written at fill time (with `gain_loss=0`, `status="FILLED"`)
+  were never updated when a trade resolved. The P&L calculation in
+  `PaperExecutor` was already correct — this was purely an event-wiring gap.
+  Fix: added `TradeResolvedEvent` import, wired subscription in
+  `register_subscriptions()`, implemented `handle_trade_resolved()` which:
+  1. **CSV atomic read-modify-write** — reads all rows from
+     `logs/kalshi_trades.csv`, updates every row matching the `trade_id`
+     (sets `gain_loss = realized_pnl / num_matched_legs`,
+     `hold_duration_seconds = holding_period_hours * 3600`,
+     `status = "RESOLVED"`), writes to a `.csv.tmp` in the same directory,
+     then `os.replace()` so a crash mid-write cannot corrupt the file.
+  2. **DB update** — `UPDATE trades SET status='RESOLVED', resolved_at=?,
+     realized_pnl=?, holding_period_hours=? WHERE trade_id=?` via
+     `aiosqlite` against `logs/compliance.db`.
+  3. **Audit trail** — appends `TradeResolvedEvent` entry to
+     `logs/audit_trail.jsonl` via the existing `_append_audit` path.
+  4. **Warning on unmatched** — if zero rows match `trade_id` (e.g. mock
+     data, or resolution arriving before fill row was written), logs
+     `trade_resolved_no_matching_rows` and does not raise.
+  P&L split: `realized_pnl / len(matched_rows)` — evenly across however
+  many leg rows exist for the trade (no hardcoded "2").
+  No Kalshi API calls added. `execution/engine.py` and `main.py` untouched.
+
+- **`tests/test_compliance_resolution.py`** — 4 new tests:
+  1. `test_trade_resolved_updates_csv_gain_loss` — full pipeline (arb →
+     gate → paper executor → compliance), 1s resolution delay, confirms
+     both leg rows get `gain_loss = realized_pnl/2` and `status=RESOLVED`
+  2. `test_trade_resolved_unmatched_trade_id` — unmatched trade_id logs
+     warning, does not raise, existing CSV rows untouched
+  3. `test_trade_resolved_updates_db` — pre-seeded DB row updated correctly
+     (status, realized_pnl, holding_period_hours, resolved_at)
+  4. `test_trade_resolved_written_to_audit_trail` — TradeResolvedEvent
+     appears in audit_trail.jsonl
+
+- **`CLAUDE.md`** — updated:
+  - compliance.py status → v3, TradeResolvedEvent subscription noted
+  - Test count → 53/53
+  - Next session priority 1 updated to mention resolved-row verification
+  - KNOWN DEBT: added Reconciliation subsection (future audit job against
+    Kalshi's resolution API for S1 edge cases — NOT built this session)
+  - FUTURE ROADMAP: added CSV→DB migration item (kalshi_trades.csv is
+    currently the live write target; compliance.db should become source of
+    truth in a future session); added clarifying note on S3/S4 settlement
+    arb vs. S1 deterministic-P&L distinction
+
+### What was decided
+- S1 P&L is fully deterministic at fill time — no Kalshi resolution polling
+  needed. `realized_pnl` on `TradeResolvedEvent` is computed by
+  `PaperExecutor` as `(opp.net_profit_pct / 100) * approved_size`, same
+  formula as `expected_pnl_usd`. Any future strategy that genuinely depends
+  on real Kalshi settlement should design its resolution-polling path from
+  scratch when that strategy is actually specced, not preemptively.
+- DB schema confirmed live: `trades` table has `realized_pnl`,
+  `holding_period_hours`, `status`, `resolved_at` columns — all present
+  from Session 14; no schema migration needed.
+- CSV schema confirmed: `gain_loss`, `hold_duration_seconds`, `status`
+  all present in `KALSHI_CSV_HEADERS` — no column addition needed.
+- Atomic write (`.csv.tmp` + `os.replace()`) used over direct in-place
+  overwrite to prevent a crash mid-write from corrupting the IRS tax record.
+
+### Verification
+- `karbotrage_env/bin/python -m pytest tests/ -v`: **53/53 passed** ✓
+  (49 baseline + 4 new in test_compliance_resolution.py)
+- No regressions in existing 49 tests ✓
+- `ComplianceOfficer.handle_trade_resolved` registered as handler for
+  `TradeResolvedEvent` confirmed in smoke test logs ✓
+- compliance.db schema verified live via `PRAGMA table_info(trades)` —
+  all target columns present ✓
+- No `.env`, `config.yaml`, or `*.pem` in staged files ✓
+- No credential values in any new log line ✓
+- `execution/engine.py` and `main.py` untouched ✓
+- Atomic temp-file + `os.replace()` confirmed in implementation ✓
+
+### DB query confirming resolution update path (test_trade_resolved_updates_db):
+```
+SELECT status, realized_pnl, holding_period_hours, resolved_at
+FROM trades WHERE trade_id = 'test-trade-db-001';
+-- Returns: ('RESOLVED', 42.75, 2.5, '<iso-timestamp>')
+```
+
+### What to do first next session
+1. Monitor `logs/kalshi_trades.csv` on VPS — deploy this fix (`git pull
+   origin main`, restart `karbot`), then after `paper_resolution_delay_seconds`
+   (default 300s) confirm rows show `gain_loss > 0` and `status=RESOLVED`.
+2. Query `logs/compliance.db` via sqlite3 to confirm DB rows are also
+   updating: `SELECT trade_id, status, realized_pnl FROM trades WHERE
+   status='RESOLVED';`
+3. Continue monitoring 30-day paper trading clock (started 2026-06-29,
+   target live date 2026-07-29).
+
+---
+
 ## 2026-06-29 (Session 16 — compliance CSV schema fix + Foundry hooks)
 
 ### What was built
