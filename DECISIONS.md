@@ -1,6 +1,64 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-06-30 — Session 17: TradeResolvedEvent wiring, real-time DB INSERT, book reset recovery
+
+### S1 P&L is deterministic at fill time — no Kalshi resolution polling needed
+- `TradeResolvedEvent.realized_pnl` is computed by `PaperExecutor` as
+  `(opp.net_profit_pct / 100) * approved_size` — the same formula as
+  `expected_pnl_usd`. For S1 (binary yes/no arb), P&L is locked at fill
+  time because both legs are purchased at prices that sum to less than $1,
+  and both pay out exactly $1 at settlement regardless of outcome.
+- Decision: `ComplianceOfficer.handle_trade_resolved` uses the P&L value from
+  the event directly rather than polling Kalshi's `/markets/{ticker}` resolution
+  API. No settlement polling added to the S1 path.
+- Rationale: polling adds API risk surface and complexity for zero correctness
+  benefit on S1. Any future strategy (e.g. S4 settlement arb) where P&L
+  genuinely depends on the Kalshi resolution outcome should design its own
+  polling path from scratch when that strategy is actually specced.
+
+### CSV atomic read-modify-write on trade resolution
+- `_update_csv_trade_resolved()` reads all rows, modifies matched rows in
+  memory, writes to `.csv.tmp`, then `os.replace()` atomically.
+- Decision: atomic temp-file + replace over in-place overwrite or append.
+- Rationale: `kalshi_trades.csv` is the IRS tax record — a crash mid-write
+  that corrupts it is a compliance problem. `os.replace()` is atomic at the
+  filesystem level; the worst case is the old file is unchanged (no partial
+  write). Append-only approaches don't work here because resolution updates
+  existing rows rather than adding new ones.
+
+### Real-time DB INSERT on TradeExecutedEvent (not nightly batch)
+- `_insert_db_trade_executed()` runs `INSERT OR IGNORE INTO trades` immediately
+  in `handle_trade_executed`, before the CSV write returns.
+- Decision: real-time INSERT over relying on `ReflectionAgent`'s nightly
+  cycle or a separate bootstrap script.
+- Rationale: the nightly cycle only reads; it never inserts. The DB was always
+  empty during the day because no INSERT path existed. Real-time INSERT ensures
+  `compliance.db` stays in sync with `kalshi_trades.csv` throughout the day and
+  makes intraday DB queries (e.g. operator status checks) return live data.
+- `INSERT OR IGNORE` provides idempotency: if `TradeExecutedEvent` is delivered
+  more than once (e.g. event replay), the duplicate is silently dropped rather
+  than erroring. Requires `UNIQUE` constraint on `trade_id` — added in
+  `_ensure_log_files()` bootstrap schema; live VPS DB (Session 14) needs a
+  one-time migration before live trading:
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_trade_id ON trades(trade_id);`
+
+### Book reset recovery via WS re-subscribe — deployed but NOT confirmed live
+- `_request_snapshot(market_id)` sends `{"cmd": "subscribe", "channels":
+  ["orderbook_delta"], "market_tickers": [market_id]}` over the existing WS
+  on sequence gap detection, throttled 10s/market.
+- Decision: WS re-subscribe over REST API snapshot call or forced reconnect.
+- Rationale: Kalshi's own WS docs imply a duplicate subscribe triggers a fresh
+  `orderbook_snapshot` response. No REST endpoint was needed, and a forced
+  reconnect would disrupt all ~1200 subscribed markets to recover one. The
+  re-subscribe approach is surgical and connection-preserving.
+- **Caveat**: `book_snapshot_applied` has NOT been observed in VPS logs after a
+  `book_snapshot_requested`. It is unknown whether Kalshi actually responds to
+  duplicate subscribes in practice. This must be verified live next session
+  before treating the corrupt-book / P&L-inflation problem as solved.
+
+---
+
 ## 2026-06-28 — Session 15: Kalshi price-flow chain (volume filter, mve_filter, WS schema)
 
 ### Verify each layer against the live API/wire before declaring it fixed

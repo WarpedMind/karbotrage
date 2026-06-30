@@ -1,6 +1,49 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-06-30 (Session 17 close-out — documentation only)
+
+### What was done
+- **CLAUDE.md** — three updates:
+  1. Added two KNOWN DEBT entries:
+     - `book_needs_reset` recovery deployed but `book_snapshot_applied` not yet
+       observed in VPS logs — books may still stay corrupt until full reconnect.
+     - Paper trading P&L figures ($58–$288/trade at ~$500 position, 11–57%
+       net margins) are likely inflated due to corrupt order books feeding
+       stale spreads to ArbScanner. Do not treat paper figures as live forecast.
+  2. Updated Next session priorities — snapshot recovery verification is now
+     #1 (gate on P&L validity), Telegram mute/unmute is #2, paper monitoring
+     moved to #3, live executor spec to #4.
+  3. Fixed stale Current status: compliance.py was still listed as "v2 UPDATED";
+     corrected to "v4 UPDATED" with pointer to Architecture section.
+- **DECISIONS.md** — new entry at top covering four Session 17 decisions:
+  S1 deterministic P&L (no polling), CSV atomic read-modify-write, real-time
+  DB INSERT, and book reset re-subscribe (deployed but unconfirmed).
+- **SESSIONS.md** — this entry.
+- No `.py` files touched this close-out.
+
+### Session 17 full summary (all four code tasks)
+Test count progression: 49 → 53 (S17 main) → 53 (S17-fu1, no change) → 55 (S17-fu2) → 59 (S17-fu3)
+
+| Task | What shipped | Key decision |
+|------|-------------|--------------|
+| S17 main | `handle_trade_resolved` in compliance.py — CSV atomic RMW, DB UPDATE, audit trail | S1 P&L deterministic; no Kalshi API call |
+| S17-fu1 | Import path check — `TradeResolvedEvent` already on `core.events`; no change | — |
+| S17-fu2 | `_insert_db_trade_executed` + `_ensure_log_files` DB bootstrap | Real-time INSERT over nightly batch |
+| S17-fu3 | `_request_snapshot` in price_watcher.py — WS re-subscribe on gap, 10s throttle | Re-subscribe > REST or forced reconnect |
+
+### Open questions going into next session
+1. Does Kalshi actually respond to a duplicate subscribe with an `orderbook_snapshot`?
+   Watch for `book_snapshot_requested` → `book_snapshot_applied` in VPS logs.
+2. If yes: does `book_needs_reset` rate drop and P&L figures normalize to <5% net?
+3. If no: design fallback (REST `/markets/{ticker}/orderbook` or forced reconnect).
+
+### Verification (close-out session)
+- No `.py` files modified (documentation only) ✓
+- All prior test passes (59/59) still stand — no new code to break them ✓
+
+---
+
 ## 2026-06-30 (Session 17 follow-up 3 — WS snapshot re-request on sequence gap)
 
 ### What was built

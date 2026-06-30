@@ -72,7 +72,7 @@ async def run(self): ...
 - core/events.py: Full event bus with all typed events — production-ready; RegulatoryAlertEvent has full AI-assessment fields (urgency, summary, affected, recommended_action, raw_title, cycle_type); TelegramPermissionResponseEvent has response_text field; priority queue fixed with sequence tiebreaker
 - karbot/core/config.py: KarbotConfig Phase 1 invariants structural + from_yaml() + .phase + .paper_mode + regulatory_halt + TelegramConfig + RegulatoryIntelligenceConfig + SecretsConfig sub-dataclasses; SystemConfig.paper_resolution_delay_seconds added
 - agents/research/regulatory_intelligence.py: **COMPLETE** — full Regulatory Intelligence Agent; 11 tests passing; Claude Sonnet urgency assessment; cost controls (daily cap, circuit breaker, overflow queue, spend estimator); operator clear flow via Telegram
-- agents/management/compliance.py: **v2 UPDATED** — polling loop removed; subscribes to RegulatoryAlertEvent; logs AI-assessed regulatory alerts to compliance_actions.jsonl
+- agents/management/compliance.py: **v4 UPDATED** — see Architecture section above for full feature list (TradeResolvedEvent wired, real-time DB INSERT, compliance.db bootstrap)
 - agents/floor/risk_gate.py: **UPDATED** — subscribes to RegulatoryAlertEvent; _regulatory_pause blocks trades on urgency=5; cleared on urgency=0
 - agents/notifications/telegram_agent.py: **UPDATED** — response_text field populated on every operator message for clear phrase detection
 - agents/floor/paper_executor.py: **UPDATED** — paper trading fill simulator; subscribes to ApprovedOpportunityEvent, emits TradeExecutedEvent(paper_mode=True); schedules TradeResolvedEvent via asyncio.create_task after paper_resolution_delay_seconds (default 300s)
@@ -158,6 +158,28 @@ async def run(self): ...
   Monitor Agent" conceptually but it isn't implemented. Likely
   pre-existing, not a regression, but unconfirmed.
 
+### book_needs_reset recovery — deployed but unconfirmed on VPS
+- `_request_snapshot(market_id)` sends a WS re-subscribe message on sequence
+  gap detection, throttled 10s/market (Session 17 follow-up 3). This is
+  deployed and unit-tested (4 tests). However, `book_snapshot_applied` has
+  NOT yet been observed in live VPS logs after a `book_snapshot_requested`
+  event — it is unknown whether Kalshi actually responds to a duplicate
+  subscribe with a fresh snapshot in practice. Books may still stay corrupt
+  until the next full WS reconnect. Verify next session: after deploy, watch
+  for `book_snapshot_requested` → `book_snapshot_applied` in VPS logs.
+  If `book_snapshot_applied` never follows, the re-subscribe approach does not
+  work and a REST snapshot endpoint or forced reconnect is needed instead.
+
+### P&L figures likely inflated during paper trading
+- VPS paper trades show $58–$288 realized P&L per trade at ~$500 position
+  size, implying 11–57% net margins. S1 arb on liquid Kalshi binary markets
+  should realistically yield 1–5% net after fees. The most probable cause is
+  corrupt order books (from unrecovered sequence gaps — see above) feeding
+  stale/wrong bid-ask spreads to ArbScanner, which then detects spuriously
+  large spreads as arb opportunities. Do not treat paper P&L figures as a
+  realistic live-trading forecast until `book_snapshot_applied` is confirmed
+  in VPS logs and `book_needs_reset` rate drops to near-zero.
+
 ### Reconciliation (NOT built — future session)
 - No periodic reconciliation job exists to cross-check resolved S1 trades
   against Kalshi's actual market resolution data. This is intentionally
@@ -187,14 +209,28 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **Monitor paper trading** — clock running since 2026-06-29, target
+1. **Verify book snapshot recovery on VPS** — deploy Session 17 follow-up 3
+   (`git pull origin main`, restart `karbot`), then tail logs and confirm
+   the sequence: `book_needs_reset` → `book_snapshot_requested` →
+   `book_snapshot_applied`. If `book_snapshot_applied` never follows a
+   `book_snapshot_requested`, the WS re-subscribe recovery does not work
+   and a fallback (REST snapshot or forced reconnect) must be designed.
+   Also check whether `book_needs_reset` rate drops significantly — if it
+   doesn't, investigate whether P&L inflation persists.
+2. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
+   so the bot can be silenced during high-volume paper trading without
+   disabling the agent entirely. Scope: `TelegramNotificationAgent`
+   command handler only; no changes to event bus or other agents.
+3. **Monitor paper trading** — clock running since 2026-06-29, target
    live date 2026-07-29. Review `logs/kalshi_trades.csv` and
    `logs/compliance_actions.jsonl` periodically. Confirm resolved rows
-   show nonzero `gain_loss` and `status=RESOLVED` after `paper_resolution_delay_seconds`.
-2. **Begin live executor spec** after 30-day paper run completes
+   show nonzero `gain_loss` and `status=RESOLVED` after
+   `paper_resolution_delay_seconds`. Hold off on treating P&L figures as
+   realistic until KNOWN DEBT snapshot recovery is confirmed (see above).
+4. **Begin live executor spec** after 30-day paper run completes
    (2026-07-29). Design `live_executor.py` to replace `paper_executor.py`
    on the real Kalshi trading path.
-3. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
+5. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
    in VPS logs — no Health Monitor agent subscribed yet; confirm this
    isn't masking a real event-bus wiring issue.
 
