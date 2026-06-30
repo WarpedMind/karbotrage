@@ -1,6 +1,68 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-06-30 (Session 17 follow-up 2 — real-time DB INSERT in handle_trade_executed)
+
+### What was built
+- **`agents/management/compliance.py` — `_insert_db_trade_executed` added;
+  `handle_trade_executed` now calls it after the CSV write.**
+  Root cause: compliance.db `trades` table was always empty — the INSERT path
+  never existed, so ReflectionAgent's nightly cycle had nothing to read.
+  Fix: `_insert_db_trade_executed` does `INSERT OR IGNORE INTO trades` with
+  all available fields from `TradeExecutedEvent` (trade_id, opportunity_id,
+  strategy, platform, market_id from first leg, fee_paid, expected_pnl_usd,
+  paper_mode, status='FILLED', timestamp/opened_at=now, realized_pnl=0.0,
+  resolved_at=None, holding_period_hours=0.0). `INSERT OR IGNORE` is idempotent
+  against duplicate events. Logs `trade_inserted_db` at INFO.
+  DB schema confirmed live via `PRAGMA table_info(trades)` before writing —
+  all target columns present; no migration needed.
+- **`_ensure_log_files` — compliance.db schema bootstrapped at agent startup.**
+  Previously the DB was created by a separate Session 14 script; if the file
+  was absent (e.g. fresh test environments), INSERT/UPDATE would silently skip.
+  Now `_ensure_log_files` runs `CREATE TABLE IF NOT EXISTS` for `trades`,
+  `rejections`, `audit_trail` synchronously via `sqlite3` (safe in `__init__`,
+  no event loop yet). Existing DBs are unaffected (`IF NOT EXISTS`). This also
+  means the DB is always available from the first trade onward without a
+  separate bootstrap step.
+- **`tests/test_compliance_resolution.py` — 2 new tests (55 total):**
+  5. `test_trade_executed_inserts_db_row` — full pipeline trade → DB row with
+     status='FILLED', realized_pnl=0.0 at fill time.
+  6. `test_trade_executed_then_resolved_db_lifecycle` — same row transitions
+     to status='RESOLVED', realized_pnl>0 after 1s paper resolution delay.
+
+### What was decided
+- DB schema bootstrap belongs in `_ensure_log_files` (always-on agent, startup
+  is the right time) rather than a separate script or lazy-create on first INSERT.
+  This removes the silent skip-on-missing-DB guard from the hot path and makes
+  the DB always-ready for real-time writes from the first trade.
+- `trade_id TEXT UNIQUE` constraint added in the bootstrapped schema — enforces
+  the one-row-per-trade invariant at the DB level and makes `INSERT OR IGNORE`
+  work correctly. The live DB (created Session 14) lacks this UNIQUE constraint;
+  it will be added via migration before live trading. Not a blocker for paper.
+
+### Verification
+- `karbotrage_env/bin/python -m pytest tests/ -v`: **55/55 passed** ✓
+  (53 baseline + 2 new in test_compliance_resolution.py)
+- `INSERT OR IGNORE` confirmed in source (line 326 of compliance.py) ✓
+- No `.env`, `config.yaml`, or `*.pem` in staged files ✓
+- `execution/engine.py` and `main.py` untouched ✓
+
+### DB schema note (live VPS)
+The live `compliance.db` was created in Session 14 without the `UNIQUE`
+constraint on `trade_id`. `CREATE TABLE IF NOT EXISTS` will not modify it.
+The INSERT OR IGNORE will still work (no error; if a duplicate arrives,
+the row is silently skipped). Add the UNIQUE constraint before live trading
+via: `CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_trade_id ON trades(trade_id)`.
+
+### What to do first next session
+1. Deploy to VPS (`git pull origin main`, restart `karbot`).
+2. After first trades execute, confirm:
+   `sqlite3 logs/compliance.db "SELECT trade_id, status, realized_pnl FROM trades LIMIT 5;"`
+   returns FILLED rows immediately (not waiting for nightly cycle).
+3. After `paper_resolution_delay_seconds`, confirm same rows show RESOLVED.
+
+---
+
 ## 2026-06-30 (Session 17 follow-up — import path check)
 Import path already consistent: `TradeResolvedEvent` was correctly placed in the
 existing `from core.events import (...)` block by Session 17; no `karbot.core.events`

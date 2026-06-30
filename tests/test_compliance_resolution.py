@@ -1,5 +1,5 @@
 """
-tests/test_compliance_resolution.py — ComplianceOfficer TradeResolvedEvent handling
+tests/test_compliance_resolution.py — ComplianceOfficer trade DB logging
 
 Tests:
   1. Two CSV leg-rows for a trade_id get gain_loss = realized_pnl/2,
@@ -24,6 +24,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.events import (
     EventBus,
+    PriceUpdateEvent,
     TradeExecutedEvent,
     TradeResolvedEvent,
     PositionSnapshot,
@@ -326,3 +327,163 @@ async def test_trade_resolved_written_to_audit_trail(tmp_path, monkeypatch):
     entries = _audit_entries(audit_trail, "TradeResolvedEvent")
     assert len(entries) == 1, f"Expected 1 TradeResolvedEvent audit entry, got {len(entries)}"
     assert entries[0]["payload"]["trade_id"] == "audit-trail-test-001"
+
+
+# ── Test 5: TradeExecutedEvent inserts a FILLED row in compliance.db ──────────
+
+@pytest.mark.asyncio
+async def test_trade_executed_inserts_db_row(tmp_path, monkeypatch):
+    """
+    After TradeExecutedEvent, compliance.db should contain a row with
+    status='FILLED' and the correct trade_id.
+    """
+    logs_dir = tmp_path / "logs"
+    monkeypatch.setattr("agents.management.compliance.LOGS_DIR", logs_dir)
+
+    config = KarbotConfig(system=SystemConfig(paper_mode=True, paper_resolution_delay_seconds=300))
+    bus = EventBus()
+
+    arb   = ArbScanner(bus=bus, config=config)
+    gate  = RiskGate(bus=bus, config=config)
+    exec_ = PaperExecutor(bus=bus, config=config)
+    comp  = ComplianceOfficer(bus=bus, config=config)
+
+    executed_events = []
+    async def _capture(ev):
+        executed_events.append(ev)
+    bus.subscribe(TradeExecutedEvent, _capture)
+
+    for agent in [arb, gate, exec_, comp]:
+        agent.register_subscriptions()
+    bus_task = asyncio.create_task(bus.run())
+
+    await bus.publish(PositionSnapshot(
+        source="test",
+        total_capital_usd=10_000.0,
+        deployed_capital_usd=1_000.0,
+        free_capital_usd=9_000.0,
+        correlation_score=0.1,
+        daily_pnl_usd=0.0,
+        daily_trades=0,
+    ))
+    await asyncio.sleep(0.05)
+
+    entry = _load_fixture(0)
+    await bus.publish(PriceUpdateEvent(
+        source="test",
+        platform=entry["platform"],
+        market_id=entry["market_id"],
+        yes_bid=float(entry["yes_bid"]),
+        yes_ask=float(entry["yes_ask"]),
+        no_bid=float(entry["no_bid"]),
+        no_ask=float(entry["no_ask"]),
+        volume_24h=float(entry.get("volume_24h", 0.0)),
+        open_interest=int(entry.get("open_interest", 0)),
+        sequence_num=int(entry.get("sequence_num", 0)),
+    ))
+    await asyncio.sleep(0.4)
+
+    bus_task.cancel()
+    await asyncio.gather(bus_task, return_exceptions=True)
+
+    assert len(executed_events) == 1, f"Expected 1 TradeExecutedEvent, got {len(executed_events)}"
+    trade_id = executed_events[0].trade_id
+
+    db_path = logs_dir / "compliance.db"
+    conn = sqlite3.connect(str(db_path))
+    row = conn.execute(
+        "SELECT trade_id, status, realized_pnl FROM trades WHERE trade_id = ?",
+        (trade_id,),
+    ).fetchone()
+    conn.close()
+
+    assert row is not None, f"Expected a DB row for trade_id={trade_id}"
+    assert row[0] == trade_id
+    assert row[1] == "FILLED", f"Expected status=FILLED, got {row[1]}"
+    assert row[2] == pytest.approx(0.0), f"Expected realized_pnl=0.0 at fill, got {row[2]}"
+
+
+# ── Test 6: TradeExecuted then TradeResolved — same DB row transitions ────────
+
+@pytest.mark.asyncio
+async def test_trade_executed_then_resolved_db_lifecycle(tmp_path, monkeypatch):
+    """
+    After TradeExecutedEvent + TradeResolvedEvent (1s delay), the same DB row
+    should show status='RESOLVED' and realized_pnl > 0.
+    """
+    logs_dir = tmp_path / "logs"
+    monkeypatch.setattr("agents.management.compliance.LOGS_DIR", logs_dir)
+
+    config = KarbotConfig(system=SystemConfig(paper_mode=True, paper_resolution_delay_seconds=1))
+    bus = EventBus()
+
+    arb   = ArbScanner(bus=bus, config=config)
+    gate  = RiskGate(bus=bus, config=config)
+    exec_ = PaperExecutor(bus=bus, config=config)
+    comp  = ComplianceOfficer(bus=bus, config=config)
+
+    executed_events = []
+    async def _capture(ev):
+        executed_events.append(ev)
+    bus.subscribe(TradeExecutedEvent, _capture)
+
+    for agent in [arb, gate, exec_, comp]:
+        agent.register_subscriptions()
+    bus_task = asyncio.create_task(bus.run())
+
+    await bus.publish(PositionSnapshot(
+        source="test",
+        total_capital_usd=10_000.0,
+        deployed_capital_usd=1_000.0,
+        free_capital_usd=9_000.0,
+        correlation_score=0.1,
+        daily_pnl_usd=0.0,
+        daily_trades=0,
+    ))
+    await asyncio.sleep(0.05)
+
+    entry = _load_fixture(0)
+    await bus.publish(PriceUpdateEvent(
+        source="test",
+        platform=entry["platform"],
+        market_id=entry["market_id"],
+        yes_bid=float(entry["yes_bid"]),
+        yes_ask=float(entry["yes_ask"]),
+        no_bid=float(entry["no_bid"]),
+        no_ask=float(entry["no_ask"]),
+        volume_24h=float(entry.get("volume_24h", 0.0)),
+        open_interest=int(entry.get("open_interest", 0)),
+        sequence_num=int(entry.get("sequence_num", 0)),
+    ))
+    await asyncio.sleep(0.4)
+
+    assert len(executed_events) == 1
+    trade_id = executed_events[0].trade_id
+
+    # Confirm FILLED row exists before resolution
+    db_path = logs_dir / "compliance.db"
+    conn = sqlite3.connect(str(db_path))
+    pre = conn.execute(
+        "SELECT status FROM trades WHERE trade_id = ?", (trade_id,)
+    ).fetchone()
+    conn.close()
+    assert pre is not None and pre[0] == "FILLED"
+
+    # Wait for 1s resolution delay + buffer
+    await asyncio.sleep(2.0)
+
+    bus_task.cancel()
+    await asyncio.gather(bus_task, return_exceptions=True)
+
+    conn = sqlite3.connect(str(db_path))
+    post = conn.execute(
+        "SELECT status, realized_pnl, resolved_at FROM trades WHERE trade_id = ?",
+        (trade_id,),
+    ).fetchone()
+    conn.close()
+
+    assert post is not None
+    status, realized_pnl, resolved_at = post
+    assert status == "RESOLVED", f"Expected RESOLVED, got {status}"
+    assert realized_pnl > 0, f"Expected realized_pnl > 0, got {realized_pnl}"
+    assert resolved_at is not None and resolved_at != "", "resolved_at should be set"

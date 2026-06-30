@@ -185,6 +185,52 @@ class ComplianceOfficer:
                 path.touch()
                 logger.info(f"Created {path}")
 
+        # compliance.db — ensure the trades table exists so real-time INSERT
+        # and UPDATE paths work from the first trade onward.
+        # Using a synchronous sqlite3 call here (we're in __init__, not an
+        # async context). This is safe: startup is single-threaded and the
+        # file is small (no contention at init time).
+        import sqlite3 as _sqlite3
+        db_path = LOGS_DIR / "compliance.db"
+        created = not db_path.exists()
+        with _sqlite3.connect(str(db_path)) as _conn:
+            _conn.execute("""CREATE TABLE IF NOT EXISTS trades (
+                id INTEGER PRIMARY KEY,
+                trade_id TEXT UNIQUE,
+                opportunity_id TEXT,
+                strategy TEXT,
+                platform TEXT,
+                market_id TEXT,
+                side TEXT,
+                ordered_price REAL,
+                filled_price REAL,
+                quantity REAL,
+                fee_paid REAL,
+                expected_pnl_usd REAL,
+                realized_pnl REAL,
+                paper_mode INTEGER DEFAULT 1,
+                status TEXT DEFAULT 'OPEN',
+                timestamp TEXT,
+                opened_at TEXT,
+                resolved_at TEXT,
+                holding_period_hours REAL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )""")
+            _conn.execute("""CREATE TABLE IF NOT EXISTS rejections (
+                id INTEGER PRIMARY KEY,
+                reason TEXT,
+                timestamp TEXT
+            )""")
+            _conn.execute("""CREATE TABLE IF NOT EXISTS audit_trail (
+                id INTEGER PRIMARY KEY,
+                event_type TEXT,
+                entry_json TEXT,
+                timestamp TEXT
+            )""")
+            _conn.commit()
+        if created:
+            logger.info(f"Created {db_path} with trades/rejections/audit_trail tables")
+
     # ── Registration and main loop ─────────────────────────────────────────
 
     def register_subscriptions(self):
@@ -211,9 +257,10 @@ class ComplianceOfficer:
     # ── Event handlers ─────────────────────────────────────────────────────
 
     async def handle_trade_executed(self, event: TradeExecutedEvent):
-        """Log completed trade to kalshi_trades.csv and audit trail.
+        """Log completed trade to kalshi_trades.csv, compliance.db, and audit trail.
 
-        Writes one row per leg so each YES/NO position is a discrete IRS record.
+        CSV: one row per leg (IRS record).
+        DB: one row per trade_id (INSERT OR IGNORE — idempotent).
         """
         try:
             legs = event.platform_legs or []
@@ -225,6 +272,8 @@ class ComplianceOfficer:
             for leg in legs:
                 row = self._build_trade_row(event, leg)
                 self._append_kalshi_csv(row)
+
+            await self._insert_db_trade_executed(event)
 
             first_market = legs[0].get("market_id", "?") if legs else "?"
             self._append_audit(
@@ -245,6 +294,67 @@ class ComplianceOfficer:
                 f"[COMPLIANCE] CRITICAL: Failed to log trade: {e}",
                 exc_info=True,
             )
+
+    async def _insert_db_trade_executed(self, event: TradeExecutedEvent):
+        """INSERT OR IGNORE one row into compliance.db trades for a new trade.
+
+        DB schema (from PRAGMA table_info, Session 17 follow-up):
+          trade_id, opportunity_id, strategy, platform, market_id, fee_paid,
+          expected_pnl_usd, realized_pnl, paper_mode, status, timestamp,
+          opened_at, resolved_at, holding_period_hours
+
+        One row per trade_id (not per leg). INSERT OR IGNORE is idempotent
+        in case the event is delivered more than once.
+        """
+        db_path = LOGS_DIR / "compliance.db"
+        if not db_path.exists():
+            logger.warning(
+                "[COMPLIANCE] compliance.db not found — skipping DB insert for trade",
+                extra={"trade_id": event.trade_id},
+            )
+            return
+
+        legs = event.platform_legs or []
+        first_leg = legs[0] if legs else {}
+        market_id = first_leg.get("market_id", "")
+        platform = first_leg.get("platform", "kalshi").upper()
+        now = datetime.now(timezone.utc).isoformat()
+        paper_mode_int = 1 if self.config.paper_mode else 0
+
+        async with aiosqlite.connect(str(db_path)) as db:
+            await db.execute(
+                """INSERT OR IGNORE INTO trades
+                   (trade_id, opportunity_id, strategy, platform, market_id,
+                    fee_paid, expected_pnl_usd, realized_pnl, paper_mode,
+                    status, timestamp, opened_at, resolved_at, holding_period_hours)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    event.trade_id,
+                    event.opportunity_id,
+                    event.strategy,
+                    platform,
+                    market_id,
+                    event.total_fee_paid,
+                    event.expected_pnl_usd,
+                    0.0,        # realized_pnl — set on resolution
+                    paper_mode_int,
+                    "FILLED",
+                    now,
+                    now,        # opened_at
+                    None,       # resolved_at — set on resolution
+                    0.0,        # holding_period_hours — set on resolution
+                ),
+            )
+            await db.commit()
+
+        logger.info(
+            "trade_inserted_db",
+            extra={
+                "trade_id": event.trade_id,
+                "strategy": event.strategy,
+                "market_id": market_id,
+            },
+        )
 
     async def handle_trade_resolved(self, event: TradeResolvedEvent):
         """Update kalshi_trades.csv and compliance.db when a trade resolves.
