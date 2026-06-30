@@ -1,6 +1,80 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-06-29 (Session 16 — compliance CSV schema fix + Foundry hooks)
+
+### What was built
+- **`agents/management/compliance.py` — `_build_trade_row` / `handle_trade_executed`
+  rewritten.** Root cause identified: `TradeExecutedEvent` stores all trade
+  data inside `platform_legs` (a list of dicts), but `_build_trade_row` was
+  reading nonexistent flat fields (`market_id`, `side`, `contracts`,
+  `price_paid`, `fees_paid`, etc.) via `getattr(event, field, default)` —
+  every field silently fell through to its default (empty string or 0), and
+  `status` hardcoded to `"FILLED"` via the getattr default literal. This
+  has been silently dropping all real trade data since Session 8 (when
+  PaperExecutor was first wired). `_build_failure_row` had the same bug
+  against `LegFailureEvent.failed_leg`.
+  Fix: `handle_trade_executed` now iterates `event.platform_legs` and calls
+  `_build_trade_row(event, leg)` once per leg (one CSV row per position —
+  YES and NO legs each get their own IRS record). `_build_trade_row` reads
+  real leg fields: `quantity`, `filled_price`, `fee_paid`, `market_id`,
+  `side`, `platform`. `_build_failure_row` reads from `event.failed_leg`
+  dict using the same field names. `gain_loss` and `hold_duration_seconds`
+  remain 0 at fill time — correct, they update on `TradeResolvedEvent`.
+  Confirmed live: VPS audit_trail.jsonl shows real Kalshi market trades
+  (PGA, World Cup, tennis, MLB) with full `platform_legs` data already
+  flowing correctly — this fix ensures that data now lands in the CSV.
+- **`tests/test_paper_trading.py`** — `test_scenario1_happy_path` assertion
+  updated from `rows == 1` to `rows == 2` (S1 arb produces 2 legs, 2 rows
+  is correct). 49/49 passing.
+- **`.gitignore`** — added 17 broader secret/credential filename patterns
+  (`*.pem*`, `*.key*`, `config*.yaml*`, `secret*.yaml`, `*credential*.json`,
+  `*.credentials*`, etc.) that catch suffixed variants the prior bare
+  `*.pem` / `*.key` / `config.yaml` patterns missed. Validated with a 21-
+  file adversarial fixture (9 dangerous caught, 9 legitimate not flagged).
+- **`.claude/settings.json`** — Foundry hooks wired:
+  - Hook 1 (SessionStart doc-loader): upgraded to bash-array form, safe
+    for filenames with spaces
+  - Hook 3 (Foundry status): shows "Active (scaffolded 2026-06-29)" at
+    session start
+  - Hook 2 (PreToolUse secrets-guard): blocks `git commit` when a
+    credential-like file is staged; validated against 21-file fixture
+- **`logs/kalshi_trades.csv`** — truncated to header-only locally (all prior
+  rows were test-fixture artifacts from `--mock-prices` dev runs, not real
+  paper trades). VPS truncation to be done as part of deploy sequence.
+
+### What was decided
+- Identified two separate bugs: (1) `_build_trade_row` schema mismatch
+  with `TradeExecutedEvent` (every field empty — the high-priority fix);
+  (2) the 50 "phantom" rows on the VPS are accumulated `--mock-prices`
+  test-run artifacts from multiple prior sessions, not a startup code path
+  firing unconditionally. No code path writes `TradeExecutedEvent`s at
+  startup — `PaperExecutor._on_approved` is the only constructor and it
+  only fires on `ApprovedOpportunityEvent`.
+- One row per leg is the correct IRS record structure (each YES/NO position
+  is a discrete $1-contract purchase at a specific price). A single
+  summary row per trade hid the leg-level detail a CPA needs.
+
+### Verification
+- `karbotrage_env/bin/python -m pytest tests/ -v`: 49/49 passed ✓
+- End-to-end smoke test: CSV rows now show `market=KALSHI-TEST-001
+  side=YES contracts=109.21 price_paid=0.4 fees=7.6447 status=FILLED` ✓
+- No `.env`, `config.yaml`, or `*.pem` in staged changes ✓
+
+### What to do first next session
+1. **VPS deploy**: `git pull origin main`, then truncate
+   `logs/kalshi_trades.csv` to header-only:
+   `head -1 logs/kalshi_trades.csv > /tmp/kt && mv /tmp/kt logs/kalshi_trades.csv`
+   Then `sudo systemctl restart karbot`.
+2. **Confirm paper trades landing**: tail VPS logs for
+   `[COMPLIANCE] Trade logged | legs=2 | market=<real-market-id>` —
+   this confirms the fix is live and real Kalshi trades are writing
+   correctly to the CSV.
+3. **Start 30-day paper trading clock** once confirmed: record exact
+   start date in CLAUDE.md and SESSIONS.md.
+
+---
+
 ## 2026-06-28 (Session 15 continued — Kalshi WS message schema rewrite)
 
 ### What was built

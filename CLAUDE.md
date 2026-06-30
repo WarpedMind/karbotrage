@@ -89,8 +89,13 @@ async def run(self): ...
 - config.yaml: moved to .gitignore; config.yaml.example + .env.example committed ✓
 - Paper trading: End-to-end tested ✓ (kalshi_trades.csv confirmed populated)
 - TradeResolvedEvent: wired via PaperExecutor — full paper P&L cycle closes ✓
-- 30-day paper trading clock: NOT YET STARTED — starts when real Kalshi
-  markets are flowing and paper trades are executing
+- compliance.py `_build_trade_row`: FIXED (Session 16) — was reading
+  nonexistent flat fields from `TradeExecutedEvent` (every CSV field was
+  empty/zero since Session 8). Now reads from `event.platform_legs`; writes
+  one row per leg with real market_id, side, quantity, price, fees. VPS
+  deploy + CSV truncation required before 30-day clock starts.
+- 30-day paper trading clock: NOT YET STARTED — pending VPS deploy of
+  Session 16 fix + confirmation that paper trades write real data to CSV
 - Full test suite: 49/49 passing ✓
 - Kalshi market volume filter: FIXED AND CONFIRMED LIVE (Session 15) —
   `_fetch_active_kalshi_markets()` sends `mve_filter=exclude`, paginates
@@ -165,15 +170,13 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **Confirm S1 arb opportunities and paper trades**: the full Kalshi
-   price-flow chain (auth → fetch → subscribe → real order book deltas)
-   is now confirmed live end-to-end as of Session 15
-   (`kalshi_first_price_update` fired live). Confirm S1 arb opportunities
-   appear in logs and paper trades land in `kalshi_trades.csv` now that
-   PriceUpdateEvents are genuinely flowing.
-2. Once paper trades are confirmed executing, start the 30-day paper
-   trading clock — record the exact start date in CLAUDE.md and
-   SESSIONS.md.
+1. **VPS deploy Session 16 fix**: `git pull origin main` on VPS, truncate
+   `logs/kalshi_trades.csv` to header-only (`head -1 logs/kalshi_trades.csv
+   > /tmp/kt && mv /tmp/kt logs/kalshi_trades.csv`), `sudo systemctl restart
+   karbot`. Confirm `[COMPLIANCE] Trade logged | legs=2 | market=<real-id>`
+   appears in VPS logs — this is the gate before the 30-day clock can start.
+2. **Start 30-day paper trading clock** once CSV writes confirmed: record
+   exact start date in CLAUDE.md and SESSIONS.md.
 3. Begin live executor spec after 30-day paper run completes
 
 ## FUTURE ROADMAP (do not build yet — design required first)
