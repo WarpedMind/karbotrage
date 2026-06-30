@@ -92,10 +92,10 @@ async def run(self): ...
 - compliance.py `_build_trade_row`: FIXED (Session 16) — was reading
   nonexistent flat fields from `TradeExecutedEvent` (every CSV field was
   empty/zero since Session 8). Now reads from `event.platform_legs`; writes
-  one row per leg with real market_id, side, quantity, price, fees. VPS
-  deploy + CSV truncation required before 30-day clock starts.
-- 30-day paper trading clock: NOT YET STARTED — pending VPS deploy of
-  Session 16 fix + confirmation that paper trades write real data to CSV
+  one row per leg with real market_id, side, quantity, price, fees.
+  Confirmed live on VPS: real Kalshi trades (PGA, World Cup, tennis, MLB)
+  writing correctly with full data to kalshi_trades.csv ✓
+- **30-day paper trading clock: STARTED 2026-06-29. Target live date: 2026-07-29.**
 - Full test suite: 49/49 passing ✓
 - Kalshi market volume filter: FIXED AND CONFIRMED LIVE (Session 15) —
   `_fetch_active_kalshi_markets()` sends `mve_filter=exclude`, paginates
@@ -170,14 +170,16 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **VPS deploy Session 16 fix**: `git pull origin main` on VPS, truncate
-   `logs/kalshi_trades.csv` to header-only (`head -1 logs/kalshi_trades.csv
-   > /tmp/kt && mv /tmp/kt logs/kalshi_trades.csv`), `sudo systemctl restart
-   karbot`. Confirm `[COMPLIANCE] Trade logged | legs=2 | market=<real-id>`
-   appears in VPS logs — this is the gate before the 30-day clock can start.
-2. **Start 30-day paper trading clock** once CSV writes confirmed: record
-   exact start date in CLAUDE.md and SESSIONS.md.
-3. Begin live executor spec after 30-day paper run completes
+1. **Monitor paper trading** — clock running since 2026-06-29, target
+   live date 2026-07-29. Review `logs/kalshi_trades.csv` and
+   `logs/compliance_actions.jsonl` periodically. Watch for any new bugs
+   in trade logging, position tracking, or compliance reporting.
+2. **Begin live executor spec** after 30-day paper run completes
+   (2026-07-29). Design `live_executor.py` to replace `paper_executor.py`
+   on the real Kalshi trading path.
+3. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
+   in VPS logs — no Health Monitor agent subscribed yet; confirm this
+   isn't masking a real event-bus wiring issue.
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 

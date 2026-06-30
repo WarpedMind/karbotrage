@@ -61,17 +61,20 @@
   side=YES contracts=109.21 price_paid=0.4 fees=7.6447 status=FILLED` ✓
 - No `.env`, `config.yaml`, or `*.pem` in staged changes ✓
 
+### VPS confirmation + clock start (same session, later)
+- VPS deployed: `git pull origin main`, CSV truncated, `karbot` restarted.
+- **Confirmed live**: `kalshi_trades.csv` now contains real trades with
+  real market IDs, sides, prices, and quantities (PGA, World Cup, tennis,
+  MLB markets). `[COMPLIANCE] Trade logged | legs=2 | market=<real-id>`
+  appearing in VPS logs. Fix fully verified end-to-end.
+- **30-day paper trading clock started: 2026-06-29.**
+  **Target live trading date: 2026-07-29.**
+
 ### What to do first next session
-1. **VPS deploy**: `git pull origin main`, then truncate
-   `logs/kalshi_trades.csv` to header-only:
-   `head -1 logs/kalshi_trades.csv > /tmp/kt && mv /tmp/kt logs/kalshi_trades.csv`
-   Then `sudo systemctl restart karbot`.
-2. **Confirm paper trades landing**: tail VPS logs for
-   `[COMPLIANCE] Trade logged | legs=2 | market=<real-market-id>` —
-   this confirms the fix is live and real Kalshi trades are writing
-   correctly to the CSV.
-3. **Start 30-day paper trading clock** once confirmed: record exact
-   start date in CLAUDE.md and SESSIONS.md.
+1. Monitor `logs/kalshi_trades.csv` and `logs/compliance_actions.jsonl` —
+   paper trading clock is running, review periodically for any new bugs.
+2. Begin live executor spec on 2026-07-29 when 30-day run completes.
+3. Investigate dead_letter `AgentHeartbeat` events in VPS logs.
 
 ---
 
