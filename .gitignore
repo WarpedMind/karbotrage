@@ -38,8 +38,29 @@ config/config.yaml
 
 # Kalshi RSA private key — never commit
 *.pem
+*.pem*
 *.key
+*.key*
 secrets/
+
+# Broader secret/credential filename patterns (catches suffixed variants like .bak, .txt)
+secret*.yaml
+secret*.yml
+secret*.env
+secret*.json
+*secret*.yaml
+*secret*.yml
+*secret*.json
+*_secret.*
+*-secret.*
+*credential*.yaml
+*credential*.yml
+*credential*.json
+*.credentials*
+
+# Config with secret values — broader pattern catches config.yaml.bak etc.
+config*.yaml*
+config*.yml*
 
 # IDE
 .vscode/

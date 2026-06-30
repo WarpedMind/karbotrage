@@ -206,21 +206,34 @@ class ComplianceOfficer:
     # ── Event handlers ─────────────────────────────────────────────────────
 
     async def handle_trade_executed(self, event: TradeExecutedEvent):
-        """Log completed trade to kalshi_trades.csv and audit trail."""
+        """Log completed trade to kalshi_trades.csv and audit trail.
+
+        Writes one row per leg so each YES/NO position is a discrete IRS record.
+        """
         try:
-            row = self._build_trade_row(event)
-            self._append_kalshi_csv(row)
+            legs = event.platform_legs or []
+            if not legs:
+                logger.warning(
+                    "[COMPLIANCE] TradeExecutedEvent has no platform_legs — skipping CSV write",
+                    extra={"trade_id": event.trade_id},
+                )
+            for leg in legs:
+                row = self._build_trade_row(event, leg)
+                self._append_kalshi_csv(row)
+
+            first_market = legs[0].get("market_id", "?") if legs else "?"
             self._append_audit(
                 event_type="TradeExecutedEvent",
-                platform=getattr(event, "platform", "KALSHI"),
-                market_id=getattr(event, "market_id", ""),
+                platform=(legs[0].get("platform", "KALSHI").upper() if legs else "KALSHI"),
+                market_id=first_market,
                 payload=self._safe_dict(event),
             )
             logger.info(
                 f"[COMPLIANCE] Trade logged | "
-                f"market={getattr(event, 'market_id', '?')} | "
+                f"legs={len(legs)} | "
+                f"market={first_market} | "
                 f"mode={self.trade_mode} | "
-                f"gain_loss={row.get('gain_loss', '?')}"
+                f"strategy={event.strategy}"
             )
         except Exception as e:
             logger.error(
@@ -382,55 +395,69 @@ class ComplianceOfficer:
 
     # ── CSV and audit trail ────────────────────────────────────────────────
 
-    def _build_trade_row(self, event) -> dict:
-        contracts = getattr(event, "contracts", 0)
-        price_paid = getattr(event, "price_paid", 0.0)
-        price_received = getattr(event, "price_received", 0.0)
-        fees = getattr(event, "fees_paid", 0.0)
-        cost_basis = round(contracts * price_paid, 6)
-        proceeds = round(contracts * price_received, 6)
-        gain_loss = round(proceeds - cost_basis - fees, 6)
+    def _build_trade_row(self, event, leg: dict) -> dict:
+        """Build one CSV row from a single platform_leg dict + the parent event.
+
+        TradeExecutedEvent carries trade data in platform_legs, not as flat
+        fields. Each leg: {platform, market_id, side, ordered_price,
+        filled_price, quantity, fee_paid, fill_time}.
+
+        IRS field mapping:
+          contracts    = leg quantity (number of $1 contracts)
+          price_paid   = filled_price (cost per contract, 0–1)
+          price_received = filled_price (paper: assume full fill at entry price;
+                           live executor will supply actual settlement price)
+          cost_basis   = quantity * filled_price
+          proceeds     = cost_basis (paper fill — no delta until resolution)
+          gain_loss    = 0 at fill time; realised on TradeResolvedEvent
+        """
+        quantity = float(leg.get("quantity", 0))
+        filled_price = float(leg.get("filled_price", 0.0))
+        fee_paid = float(leg.get("fee_paid", 0.0))
+        cost_basis = round(quantity * filled_price, 6)
         return {
-            "trade_id": getattr(event, "trade_id", str(uuid.uuid4())),
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-            "platform": getattr(event, "platform", "KALSHI"),
-            "market_id": getattr(event, "market_id", ""),
-            "market_description": getattr(event, "market_description", ""),
-            "side": getattr(event, "side", ""),
-            "contracts": contracts,
-            "price_paid": price_paid,
-            "price_received": price_received,
-            "fees_paid": fees,
-            "cost_basis": cost_basis,
-            "proceeds": proceeds,
-            "gain_loss": gain_loss,
-            "hold_duration_seconds": getattr(
-                event, "hold_duration_seconds", 0
-            ),
-            "trade_mode": self.trade_mode,
-            "status": getattr(event, "status", "FILLED"),
-            "notes": getattr(event, "notes", ""),
+            "trade_id":           event.trade_id,
+            "timestamp_utc":      datetime.now(timezone.utc).isoformat(),
+            "platform":           leg.get("platform", "kalshi").upper(),
+            "market_id":          leg.get("market_id", ""),
+            "market_description": leg.get("market_desc", ""),
+            "side":               leg.get("side", ""),
+            "contracts":          quantity,
+            "price_paid":         filled_price,
+            "price_received":     filled_price,   # updated on resolution
+            "fees_paid":          fee_paid,
+            "cost_basis":         cost_basis,
+            "proceeds":           cost_basis,      # updated on resolution
+            "gain_loss":          0.0,             # updated on resolution
+            "hold_duration_seconds": 0,            # updated on resolution
+            "trade_mode":         self.trade_mode,
+            "status":             "FILLED",
+            "notes":              f"strategy={event.strategy} opportunity={event.opportunity_id}",
         }
 
     def _build_failure_row(self, event) -> dict:
+        """Build a CSV row from a LegFailureEvent.failed_leg dict."""
+        leg = event.failed_leg or {}
+        quantity = float(leg.get("quantity", 0))
+        filled_price = float(leg.get("filled_price", 0.0))
         return {
-            "trade_id": getattr(event, "trade_id", str(uuid.uuid4())),
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-            "platform": getattr(event, "platform", "KALSHI"),
-            "market_id": getattr(event, "market_id", ""),
-            "market_description": getattr(event, "market_description", ""),
-            "side": getattr(event, "side", ""),
-            "contracts": getattr(event, "contracts", 0),
-            "price_paid": getattr(event, "price_paid", 0.0),
-            "price_received": 0.0,
-            "fees_paid": getattr(event, "fees_paid", 0.0),
-            "cost_basis": 0.0,
-            "proceeds": 0.0,
-            "gain_loss": 0.0,
+            "trade_id":           event.trade_id,
+            "timestamp_utc":      datetime.now(timezone.utc).isoformat(),
+            "platform":           leg.get("platform", "kalshi").upper(),
+            "market_id":          leg.get("market_id", ""),
+            "market_description": leg.get("market_desc", ""),
+            "side":               leg.get("side", ""),
+            "contracts":          quantity,
+            "price_paid":         filled_price,
+            "price_received":     0.0,
+            "fees_paid":          float(leg.get("fee_paid", 0.0)),
+            "cost_basis":         round(quantity * filled_price, 6),
+            "proceeds":           0.0,
+            "gain_loss":          0.0,
             "hold_duration_seconds": 0,
-            "trade_mode": self.trade_mode,
-            "status": "LEG_FAILURE",
-            "notes": getattr(event, "reason", "leg_failure"),
+            "trade_mode":         self.trade_mode,
+            "status":             "LEG_FAILURE",
+            "notes":              f"opportunity={event.opportunity_id}",
         }
 
     def _append_kalshi_csv(self, row: dict):

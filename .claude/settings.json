@@ -5,11 +5,38 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -n --arg content \"$(for f in CLAUDE.md DECISIONS.md SESSIONS.md; do [ -f \"$f\" ] && printf '\\n=== %s ===\\n' \"$f\" && cat \"$f\"; done)\" '{hookSpecificOutput: {hookEventName: \"SessionStart\", additionalContext: $content}}'",
+            "command": "DOC_FILES_ARR=(\"CLAUDE.md\" \"DECISIONS.md\" \"SESSIONS.md\"); jq -n --arg content \"$(for f in \"${DOC_FILES_ARR[@]}\"; do [ -f \"$f\" ] && printf '\\n=== %s ===\\n' \"$f\" && cat \"$f\"; done)\" '{hookSpecificOutput: {hookEventName: \"SessionStart\", additionalContext: $content}}'",
             "statusMessage": "Loading CLAUDE.md, DECISIONS.md, SESSIONS.md..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "SCAFFOLDED=$(jq -r '.foundry.scaffolded // false' .claude/settings.json 2>/dev/null || echo false); DISMISSED=$(jq -r '.foundry.dismissed // false' .claude/settings.json 2>/dev/null || echo false); DATE=$(jq -r '.foundry.scaffoldedDate // \"\"' .claude/settings.json 2>/dev/null || echo \"\"); if [ \"$SCAFFOLDED\" = \"true\" ]; then MSG=\"Foundry: Active (scaffolded $DATE)\"; elif [ \"$DISMISSED\" = \"true\" ]; then MSG=\"\"; else MSG='Foundry: not set up in this project. Run /foundry-init to scaffold it (docs, hooks, security baseline), or say \"skip foundry for this project\" to dismiss.'; fi; jq -n --arg msg \"$MSG\" '{hookSpecificOutput: {hookEventName: \"SessionStart\", additionalContext: $msg}}'",
+            "statusMessage": "Checking Foundry status..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "STAGED=$(git diff --cached --name-only 2>/dev/null); if [ -z \"$STAGED\" ]; then exit 0; fi; FORBIDDEN=$(echo \"$STAGED\" | grep -vE '(^|/)\\.env\\.example$' | grep -iE '(^|/)\\.env(\\.[^/]*)?$|\\.pem(\\.[^/]*)?$|\\.key(\\.[^/]*)?$|config[^/]*\\.ya?ml(\\.[^/]*)?$|(^|[/_.-])secrets?([_.-]|$)|(^|[/_.-])credentials?([_.-]|$)'); if [ -n \"$FORBIDDEN\" ]; then echo \"BLOCKED: potential secret files staged — review before committing: $FORBIDDEN\"; exit 1; fi",
+            "statusMessage": "Checking staged files for secrets..."
           }
         ]
       }
     ]
+  },
+  "foundry": {
+    "scaffolded": true,
+    "scaffoldedDate": "2026-06-29",
+    "scaffoldMode": "full",
+    "dismissed": false
   }
 }

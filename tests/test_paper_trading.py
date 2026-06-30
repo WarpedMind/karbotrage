@@ -148,7 +148,8 @@ async def test_scenario1_happy_path(tmp_path, monkeypatch):
     assert audit_trail.exists(), "audit_trail.jsonl was not created"
 
     rows = _count_csv_rows(kalshi_csv)
-    assert rows == 1, f"Expected exactly 1 trade row, got {rows}"
+    # S1 arb has 2 legs (YES + NO), so 2 rows — one per leg per IRS record
+    assert rows == 2, f"Expected 2 trade rows (one per leg), got {rows}"
 
     trade_entries = _audit_entries_of_type(audit_trail, "TradeExecutedEvent")
     assert len(trade_entries) == 1, (
