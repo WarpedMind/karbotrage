@@ -18,8 +18,9 @@ check before anything else ran):
 """
 
 import sys
+import time
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -201,3 +202,74 @@ async def test_delta_unknown_side_does_not_raise():
     book = agent._books["KXTEST-3"]
     assert book.bids == {}
     assert book.asks == {}
+
+
+# ── Sequence gap → needs_reset → apply_snapshot resets flag ─────────────────
+
+def test_sequence_gap_sets_needs_reset_and_snapshot_clears_it():
+    """apply_delta with a gap returns False and sets needs_reset; apply_snapshot clears it."""
+    book = OrderBook("KXTEST-GAP", "kalshi")
+    # Bootstrap sequence to 5
+    book.apply_delta("bid", 0.50, 100.0, seq=1)
+    book.sequence = 5
+
+    # Gap: deliver seq=7 instead of 6
+    result = book.apply_delta("bid", 0.50, 10.0, seq=7)
+    assert result is False
+    assert book.needs_reset is True
+
+    # Receiving a snapshot resets the flag
+    book.apply_snapshot(bids=[(0.50, 100.0)], asks=[], seq=8)
+    assert book.needs_reset is False
+
+
+# ── _request_snapshot throttling ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_request_snapshot_throttled_second_call_suppressed():
+    """Two _request_snapshot calls within 10s on the same market → only one WS send."""
+    agent = _make_agent()
+
+    mock_ws = AsyncMock()
+    mock_client = MagicMock()
+    mock_client._connected = True
+    mock_client._ws = mock_ws
+    agent._kalshi_client = mock_client
+
+    await agent._request_snapshot("KXTEST-THROTTLE")
+    await agent._request_snapshot("KXTEST-THROTTLE")   # within 10s → suppressed
+
+    assert mock_ws.send.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_request_snapshot_throttle_resets_after_window():
+    """A second call after >10s IS sent."""
+    agent = _make_agent()
+
+    mock_ws = AsyncMock()
+    mock_client = MagicMock()
+    mock_client._connected = True
+    mock_client._ws = mock_ws
+    agent._kalshi_client = mock_client
+
+    # Simulate the first call happening 11 seconds ago
+    agent._reset_requested["KXTEST-WINDOW"] = time.monotonic() - 11.0
+
+    await agent._request_snapshot("KXTEST-WINDOW")
+
+    assert mock_ws.send.call_count == 1
+
+
+# ── _request_snapshot no-ops when client is None ─────────────────────────────
+
+@pytest.mark.asyncio
+async def test_request_snapshot_noop_when_client_none():
+    """_request_snapshot returns silently when _kalshi_client is None."""
+    agent = _make_agent()
+    # _kalshi_client is None by default — should not raise
+
+    await agent._request_snapshot("KXTEST-NOCLIENT")   # must not raise
+
+    # No _reset_requested entry written (we returned before the throttle update)
+    assert "KXTEST-NOCLIENT" not in agent._reset_requested

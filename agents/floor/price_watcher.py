@@ -339,6 +339,7 @@ class PriceWatcherAgent:
         self._msg_counts: Dict[str, int] = defaultdict(int)
         self._last_msg_times: Dict[str, float] = defaultdict(float)
         self._seen_first_delta: set = set()
+        self._reset_requested: Dict[str, float] = {}  # market_id → monotonic time of last snapshot request
 
     async def start(self) -> None:
         """Start all feed connections."""
@@ -531,11 +532,10 @@ class PriceWatcherAgent:
 
         book = self._books[market_id]
 
-        # If book needs reset (sequence gap), request snapshot
+        # If book needs reset (sequence gap), request a fresh snapshot
         if book.needs_reset:
             log.warning("book_needs_reset", market=market_id)
-            # In production: request snapshot from REST API
-            # For now: drop message and let reconnection handle it
+            await self._request_snapshot(market_id)
             return
 
         seq    = msg.get("seq", 0)
@@ -557,6 +557,43 @@ class PriceWatcherAgent:
 
         # Publish price update — this is the hot path
         await self.bus.publish(book.to_price_event(platform))
+
+    async def _request_snapshot(self, market_id: str) -> None:
+        """Re-subscribe to a market over the existing WS to trigger a fresh snapshot.
+
+        Kalshi responds to a subscribe message with an orderbook_snapshot even for
+        already-subscribed markets, which calls _handle_kalshi_snapshot → apply_snapshot
+        → clears _gap_detected. This is the correct recovery path; no REST API call needed.
+
+        Throttled to one request per market per 10 seconds to avoid flooding the WS
+        when gap events fire repeatedly on the same market.
+        """
+        # Rate limit: skip if we requested a reset for this market within the last 10s
+        _THROTTLE_SECS = 10.0
+        last = self._reset_requested.get(market_id, 0.0)
+        if time.monotonic() - last < _THROTTLE_SECS:
+            log.debug("book_reset_throttled", market=market_id)
+            return
+
+        # Guard: client must exist and be connected
+        if self._kalshi_client is None or not self._kalshi_client._connected:
+            log.warning("book_reset_skipped_no_connection", market=market_id)
+            return
+
+        self._reset_requested[market_id] = time.monotonic()
+        try:
+            msg = {
+                "id": 99,
+                "cmd": "subscribe",
+                "params": {
+                    "channels": ["orderbook_delta"],
+                    "market_tickers": [market_id],
+                },
+            }
+            await self._kalshi_client._ws.send(json.dumps(msg))
+            log.info("book_snapshot_requested", market=market_id)
+        except Exception as e:
+            log.warning("book_reset_send_failed", market=market_id, error=str(e))
 
     async def _handle_health_change(
         self, platform: str, connected: bool, latency_ms: float

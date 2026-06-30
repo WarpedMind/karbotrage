@@ -1,6 +1,75 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-06-30 (Session 17 follow-up 3 — WS snapshot re-request on sequence gap)
+
+### What was built
+- **`agents/floor/price_watcher.py` — `_request_snapshot` added; `_handle_kalshi_delta`
+  reset block wired to call it.**
+  Root cause: `book.needs_reset` (set on sequence gap) caused the affected market's
+  order book to stay corrupt indefinitely — the `book_needs_reset` guard dropped every
+  subsequent delta, and the comment said "In production: request snapshot from REST API"
+  but nothing was ever sent. Live VPS logs showed this firing continuously on dozens of
+  markets, meaning ArbScanner ran S1 detection against stale books with no path to
+  recovery short of a full WS reconnect.
+  Fix: `_request_snapshot(market_id)` sends a `subscribe` message over the existing WS
+  (`cmd: "subscribe", channels: ["orderbook_delta"], market_tickers: [market_id]`) —
+  no REST API call needed. Kalshi responds with an `orderbook_snapshot` message which
+  routes through `_handle_kalshi_snapshot` → `book.apply_snapshot()` → clears
+  `_gap_detected = False`. Normal delta flow resumes.
+  Rate-limited: at most one re-subscribe per market per 10 seconds (checked via
+  `_reset_requested: Dict[str, float]`, market_id → `time.monotonic()` of last send).
+  Repeated gap events on the same market log `book_reset_throttled` at DEBUG instead
+  of spamming the WS.
+  Guards: no-ops if `_kalshi_client is None` or `_kalshi_client._connected is False`
+  (`book_reset_skipped_no_connection`); send errors are caught and logged as
+  `book_reset_send_failed`, never raised. Full WS reconnect via tenacity handles
+  catastrophic failure.
+
+- **`tests/test_kalshi_orderbook.py` — 4 new tests (59 total):**
+  - `test_sequence_gap_sets_needs_reset_and_snapshot_clears_it` — gap → needs_reset=True,
+    apply_snapshot → needs_reset=False. (Confirms existing `OrderBook` contract holds.)
+  - `test_request_snapshot_throttled_second_call_suppressed` — two calls within 10s → one WS send.
+  - `test_request_snapshot_throttle_resets_after_window` — call after >10s IS sent.
+  - `test_request_snapshot_noop_when_client_none` — returns silently, no entry written to
+    `_reset_requested`.
+
+### What was decided
+- WS re-subscribe is the correct recovery mechanism (not REST API snapshot): Kalshi
+  sends a fresh `orderbook_snapshot` in response to a duplicate subscribe message on an
+  already-subscribed market. `_handle_kalshi_snapshot` already handles these correctly.
+  No new code path needed beyond the send.
+- 10-second throttle per market chosen based on VPS log observation of gap events firing
+  dozens of times per second on the same market during a gap event window. One re-subscribe
+  is sufficient to trigger recovery; subsequent events before the snapshot arrives should
+  be dropped (the `book.needs_reset` guard already does this) rather than flood the WS.
+- `_subscribed_markets` tracking deliberately NOT modified on re-subscribe: we don't want
+  to remove+re-add the market ID since the market is still considered subscribed. The WS
+  send is a recovery signal, not a subscription state change.
+- `id: 99` used as the message correlation ID (arbitrary fixed value; Kalshi doesn't
+  enforce uniqueness, and this makes re-subscribe messages distinguishable in debug logs).
+
+### Verification
+- `karbotrage_env/bin/python -m pytest tests/ -v`: **59/59 passed** ✓
+  (55 baseline + 4 new in test_kalshi_orderbook.py)
+- All four log points confirmed in source:
+  `book_needs_reset` (line 537), `_request_snapshot` (line 561),
+  `book_snapshot_requested` (line 594), `book_reset_throttled` (line 575) ✓
+- `_reset_requested` initialized in `__init__` (line 342) ✓
+- No new `aiohttp` usage in `_request_snapshot` ✓
+- `execution/engine.py` and `main.py` untouched ✓
+- No `.env`, `config.yaml`, or `*.pem` in staged files ✓
+
+### After deploy to VPS, expect to see:
+- `book_needs_reset` warnings still appear (gap detected)
+- `book_snapshot_requested` INFO appears shortly after (new — recovery send)
+- `book_snapshot_applied` DEBUG appears (existing — snapshot received)
+- `book_needs_reset` rate drops significantly; markets recover instead of staying
+  corrupt indefinitely
+- `book_reset_throttled` DEBUG if gap events cluster (expected, not an error)
+
+---
+
 ## 2026-06-30 (Session 17 follow-up 2 — real-time DB INSERT in handle_trade_executed)
 
 ### What was built
