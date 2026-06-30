@@ -1,6 +1,13 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-06-30 (Session 17 follow-up — import path check)
+Import path already consistent: `TradeResolvedEvent` was correctly placed in the
+existing `from core.events import (...)` block by Session 17; no `karbot.core.events`
+import present. No file changes needed. 53/53 tests confirmed.
+
+---
+
 ## 2026-06-30 (Session 17 — TradeResolvedEvent wired into compliance.py)
 
 ### What was built
