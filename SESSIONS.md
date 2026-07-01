@@ -1,6 +1,151 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-07-01 (Session 25 — removed duplicate/broken regulatory Telegram alert; first live Telegram verification since Session 24's config fix)
+
+### Context: tonight was the first time Telegram alerting has actually been enabled and exercised
+- Following Session 24's `config.yaml`/`config_resolved` fix, the operator
+  enabled `telegram.enabled: true` on the VPS tonight and observed live
+  Telegram output for the first time since the notification layer was
+  built (Sessions 19-20). This immediately surfaced a real bug that unit
+  tests never would have caught, because no test exercised both
+  `RegulatoryIntelligenceAgent` and `TelegramNotificationAgent` together
+  against the same live event stream.
+
+### Bug found: every regulatory item produced two Telegram messages, one broken
+- `RegulatoryIntelligenceAgent._route_by_urgency` already correctly
+  publishes a well-formatted, urgency-branched `TelegramNotificationEvent`
+  (3=ℹ️ info, 4=⚠️ acknowledgment-required, 5=🚨 trading-paused) using real,
+  populated data (`summary`, `affected`, `source_url`, `recommended_action`).
+  It also **always** publishes `RegulatoryAlertEvent` for every item
+  regardless of urgency (per its own existing comment: "Always publish
+  RegulatoryAlertEvent so ComplianceOfficer logs it") — that event is
+  needed for `ComplianceOfficer.handle_regulatory_alert`'s audit logging.
+- `TelegramNotificationAgent` also subscribed to `RegulatoryAlertEvent`
+  directly (`_handle_regulatory_alert`), producing a **second**, separate
+  Telegram message for the same item. This second message was broken in
+  two ways: (1) it read `event.source_name` and `event.matched_keywords`,
+  fields `RegulatoryAlertEvent`'s publisher never populates (both default
+  empty and are never set in `_route_by_urgency`) — so every message
+  showed a blank source and "see logs"; (2) it instructed the operator to
+  "Review logs/regulatory_alerts.txt immediately" — a file that was
+  intentionally deleted in an earlier session (see DECISIONS.md,
+  "ComplianceOfficer polling loop removed" / "regulatory_alerts.txt
+  removed"), so the instruction was actively wrong, not just stale.
+- **This was actively harmful, not just noisy**: the broken message was
+  hardcoded to `"🚨 KARBOT RAGE! CRITICAL"` regardless of the actual
+  urgency level. A routine urgency-3 FYI item produced a message labeled
+  CRITICAL right alongside (or instead of) the correctly-tiered real
+  message — training the operator to associate "CRITICAL" with noise,
+  which directly undermines trust in the one alert that matters most
+  (urgency 5, trading-halt). Confirmed live tonight: every regulatory item
+  produced exactly this pattern (one useless, one genuinely useful message).
+
+### What was built
+- **`agents/notifications/telegram_agent.py`** — removed
+  `_handle_regulatory_alert` entirely, its subscription to
+  `RegulatoryAlertEvent` in `register_subscriptions()`, and the now-unused
+  `RegulatoryAlertEvent` import. Nothing else in the file changed —
+  `_handle_leg_failure`, `_handle_trade_executed`,
+  `_handle_rejected_opportunity`, `_handle_feed_health`, and all other
+  handlers/subscriptions are untouched.
+- **Did NOT touch** `RegulatoryAlertEvent` itself, its publication in
+  `regulatory_intelligence.py`, or the urgency-branching
+  `TelegramNotificationEvent` logic in `_route_by_urgency` — all confirmed
+  correct and left exactly as-is. `ComplianceOfficer.handle_regulatory_alert`'s
+  subscription to `RegulatoryAlertEvent` (for `compliance_actions.jsonl`
+  logging) is also untouched — confirmed via `git diff --stat` showing zero
+  changes to `agents/management/compliance.py` and
+  `agents/research/regulatory_intelligence.py`.
+- **`tests/test_telegram_no_duplicate_regulatory_alert.py`** (new, 3 tests):
+  - `test_telegram_agent_has_no_regulatory_alert_handler` — confirms the
+    method no longer exists on the class at all.
+  - `test_telegram_agent_does_not_subscribe_to_regulatory_alert_event` —
+    confirms `EventBus._handlers[RegulatoryAlertEvent]` is empty after
+    `register_subscriptions()`.
+  - `test_publishing_regulatory_alert_event_does_not_queue_telegram_message`
+    — publishes a `RegulatoryAlertEvent(urgency=5)` directly and confirms
+    `TelegramNotificationAgent._outbound_queue` stays empty.
+
+### What was decided
+- The now-sole source of regulatory Telegram messages is
+  `RegulatoryIntelligenceAgent._route_by_urgency`'s existing, already-correct
+  urgency-branched path — no new code was written for this, only dead/wrong
+  code was removed. `RegulatoryAlertEvent` remains a pure logging signal for
+  `ComplianceOfficer`, decoupled from Telegram entirely now, which is
+  arguably the correct event-bus design this should have had from the
+  start: one event, one well-defined consumer per concern, rather than two
+  consumers independently reinterpreting the same event for overlapping
+  purposes.
+
+### Verification
+- `karbotrage_env/bin/python -m pytest tests/ -v`: **83/83 passed** ✓
+  (80 baseline + 3 new)
+- `grep -n "regulatory_alerts.txt\|_handle_regulatory_alert\|RegulatoryAlertEvent" agents/notifications/telegram_agent.py`:
+  zero matches ✓
+- `git diff --stat agents/management/compliance.py
+  agents/research/regulatory_intelligence.py`: empty — both files
+  confirmed untouched; `ComplianceOfficer`'s `RegulatoryAlertEvent`
+  subscription (line 242, `handle_regulatory_alert`) still present and
+  unmodified ✓
+- No `.env`, `config.yaml`, or `*.pem` in staged files ✓
+- `execution/engine.py` and `main.py` untouched ✓
+- No Session 19-24 code touched — confirmed via diff scope: only
+  `agents/notifications/telegram_agent.py` modified plus one new test file ✓
+
+### NEW KNOWN DEBT / OPEN QUESTION — paper trade fee variance (not investigated this session)
+Operator observed live tonight via Telegram trade-executed messages that
+fee amounts show unexplained variance across trades: some show a flat
+$70.00 fee regardless of PnL size, others show $0.00, $42.78, $113.27,
+$56.64. Not investigated this session — flagged for next session to pull
+the fee calculation logic (`PaperExecutor` or wherever fees are computed)
+and cross-reference against `compliance.db` to determine whether this is
+expected (fee scaling with position size or trade type in a way simply not
+obvious from the Telegram summary text) or a real bug. Do not assume either
+way without checking the actual numbers.
+
+### NEW KNOWN DEBT / OPEN QUESTION — HIGH PRIORITY NEXT SESSION: P&L magnitude not yet re-verified post book-reset-recovery fix
+The original P&L inflation concern (see DECISIONS.md: $58-$288 realized PnL
+per trade at ~$500 position size, 11-57% net margins, vs. a realistic 1-5%
+benchmark for S1 arb) was hypothesized to be caused by corrupt order books
+from unresolved sequence gaps feeding stale spreads to ArbScanner. That
+mechanism was fixed and confirmed live in Session 23 (REST-based book-reset
+recovery, live-confirmed working from ~16:31 UTC 2026-07-01 onward) — but
+the actual resulting P&L distribution has NOT been checked against the
+1-5% benchmark since. Operator observed via live Telegram messages tonight
+that PnL figures ($338.50, $343.50, $383.50, $323.50, etc.) appear
+comparable to or larger than the originally-flagged inflated range — **NOT
+yet confirmed improved**, and by eyeball may not have improved at all.
+**This must be the first priority next session**: pull a clean sample of
+RESOLVED trades from `compliance.db` with timestamps AFTER 2026-07-01
+16:31 UTC, compute PnL as a percentage of position size for each, and
+determine whether the distribution is now realistic (1-5%) or still
+inflated. Do not continue treating paper trading data as validated until
+this is checked — the 30-day clock continues to run, but confidence in
+what it's measuring is not yet restored. If P&L is still inflated after
+the book-reset fix, the original hypothesis (corrupt books → bad spreads →
+spurious S1 opportunities) was incomplete or wrong, and a fresh
+investigation is needed rather than assuming the Session 23 fix also fixed
+this.
+
+### What to do first next session
+1. **HIGH PRIORITY**: verify P&L magnitude against the 1-5% benchmark using
+   RESOLVED trades from `compliance.db` timestamped after 2026-07-01 16:31
+   UTC (see KNOWN DEBT above). Do not skip this or assume the book-reset
+   fix also fixed P&L realism.
+2. Investigate the paper-trade fee variance (KNOWN DEBT above) if time
+   permits after priority 1.
+3. Continue the Session 24 Telegram-alerting live-verification checklist
+   now that the duplicate/broken regulatory message is removed — with that
+   noise gone, confirm the feed-down/recovered and restart-exhaustion
+   alerts (Session 19/20) are visible and correctly tiered in the live
+   Telegram stream.
+4. Continue monitoring 30-day paper trading clock (started 2026-06-29,
+   target live date 2026-07-29) — with the caveat above about P&L
+   confidence not yet restored.
+
+---
+
 ## 2026-07-01 (Session 24 — Telegram alerting has NEVER fired live: telegram.enabled=False, no config.yaml on VPS)
 
 ### Root cause: Telegram alerting was never actually running in production, across three live deploys

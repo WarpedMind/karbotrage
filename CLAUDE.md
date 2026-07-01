@@ -53,7 +53,7 @@ Karbot Rage! is a multi-agent automated trading system designed for decentralize
 - agents/research/regulatory_intelligence.py: **NEW COMPLETE** — `RegulatoryIntelligenceAgentImpl` (full impl) + `RegulatoryIntelligenceAgent` (BaseAgent stub); polls CFTC RSS + Federal Register every 6h; keyword pre-filter controls API costs; Claude Sonnet assesses urgency 1-5; urgency 3→Telegram FYI, 4→Telegram alert, 5→Telegram + trading pause; operator sends clear phrase via Telegram to resume; weekly sweep skips keyword filter; daily/cycle caps + circuit breaker; overflow queue for items exceeding per-cycle cap
 - agents/management/reflection.py: `ReflectionAgentImpl` (full impl) + `ReflectionAgent` (inherits it); `run()` starts nightly scheduler (02:00 ET / 07:00 UTC) + heartbeat; uses `AsyncAnthropic` (migrated from synchronous client in Session 14); reads/writes `logs/compliance.db` (trades, rejections, audit_trail tables — created Session 14)
 - agents/management/compliance.py: **v4 UPDATED** — IRS dual-track logging, append-only audit trail, compliance action log, REGULATORY_HALT enforcement; **polling loop removed** (now handled by RegulatoryIntelligenceAgent); subscribes to RegulatoryAlertEvent to log AI-assessed alerts to compliance_actions.jsonl; subscriptions wired to TradeExecutedEvent, TradeResolvedEvent, LegFailureEvent, RejectedOpportunityEvent, RegulatoryAlertEvent; TradeExecutedEvent handler INSERTs per-trade row into compliance.db (INSERT OR IGNORE, real-time); TradeResolvedEvent handler updates kalshi_trades.csv (atomic read-modify-write, gain_loss split across legs, status=RESOLVED) and UPDATEs compliance.db row; _ensure_log_files bootstraps compliance.db schema (trades/rejections/audit_trail) at startup so DB is always ready
-- agents/notifications/telegram_agent.py: **UPDATED** — TelegramNotificationAgent (full impl) + TelegramAgent (BaseAgent stub); subscribes to TelegramNotificationEvent, TelegramPermissionRequestEvent, RegulatoryAlertEvent (Tier 1), LegFailureEvent (Tier 1), TradeExecutedEvent (Tier 2), RejectedOpportunityEvent (Tier 2), FeedHealthEvent (Tier 1, Session 20); getUpdates polling every 3s; 1 msg/sec rate limit; single-operator FIFO permission resolution; always publishes TelegramPermissionResponseEvent with response_text so RegulatoryIntelligenceAgent can check for clear phrase; enabled=False → no-op (no HTTP calls, no polling); `_handle_feed_health` (Session 20) tracks last-known connected state per platform and alerts only on connected→disconnected/disconnected→connected transition for platform="kalshi", ignoring other platforms — **Session 24 root cause: `telegram.enabled` has been `False` in production the entire time (no `config.yaml` existed on the VPS) — every Telegram feature since Session 19 has NEVER ACTUALLY FIRED live, not "pending verification." See KNOWN DEBT.**
+- agents/notifications/telegram_agent.py: **UPDATED** — TelegramNotificationAgent (full impl) + TelegramAgent (BaseAgent stub); subscribes to TelegramNotificationEvent, TelegramPermissionRequestEvent, LegFailureEvent (Tier 1), TradeExecutedEvent (Tier 2), RejectedOpportunityEvent (Tier 2), FeedHealthEvent (Tier 1, Session 20); getUpdates polling every 3s; 1 msg/sec rate limit; single-operator FIFO permission resolution; always publishes TelegramPermissionResponseEvent with response_text so RegulatoryIntelligenceAgent can check for clear phrase; enabled=False → no-op (no HTTP calls, no polling); `_handle_feed_health` (Session 20) tracks last-known connected state per platform and alerts only on connected→disconnected/disconnected→connected transition for platform="kalshi", ignoring other platforms — **Session 24 root cause: `telegram.enabled` has been `False` in production the entire time (no `config.yaml` existed on the VPS) — every Telegram feature since Session 19 has NEVER ACTUALLY FIRED live, not "pending verification."** **Session 25: RegulatoryAlertEvent subscription + `_handle_regulatory_alert` REMOVED** — was producing a second, broken, duplicate Telegram message for every regulatory item (blank `source_name`/`matched_keywords`, referenced a deleted `logs/regulatory_alerts.txt`, hardcoded "CRITICAL" regardless of actual urgency) alongside `RegulatoryIntelligenceAgent`'s already-correct urgency-branched message; found via tonight's first-ever live Telegram run. `RegulatoryAlertEvent` still publishes for `ComplianceOfficer`'s logging — only the Telegram consumer was removed.
 
 ### BaseAgent interface (all runner-facing classes implement this)
 ```python
@@ -96,7 +96,7 @@ async def run(self): ...
   Confirmed live on VPS: real Kalshi trades (PGA, World Cup, tennis, MLB)
   writing correctly with full data to kalshi_trades.csv ✓
 - **30-day paper trading clock: STARTED 2026-06-29. Target live date: 2026-07-29.**
-- Full test suite: 80/80 passing ✓ (49 baseline + 4 S17 + 2 S17-fu2 + 4 S17-fu3 + 4 S18 + 2 S19 + 4 S20-telegram + 3 S20-restart + 2 S22-net + 4 S22-new + 4 S23 + 1 S24)
+- Full test suite: 83/83 passing ✓ (49 baseline + 4 S17 + 2 S17-fu2 + 4 S17-fu3 + 4 S18 + 2 S19 + 4 S20-telegram + 3 S20-restart + 2 S22-net + 4 S22-new + 4 S23 + 1 S24 + 3 S25)
 - Kalshi market volume filter: FIXED AND CONFIRMED LIVE (Session 15) —
   `_fetch_active_kalshi_markets()` sends `mve_filter=exclude`, paginates
   via `cursor`, filters on `volume_24h_fp` (cast to float). Live VPS
@@ -200,7 +200,7 @@ async def run(self): ...
   "Telegram feed-down alert + capped runner-level auto-restart" entry below
   and SESSIONS.md Session 20 / DECISIONS.md for full framing.
 
-### Telegram feed-down alert + capped runner-level auto-restart — DEPLOYED BUT NOT YET CONFIRMED LIVE
+### Telegram feed-down alert + capped runner-level auto-restart — enabled live Session 24/25, feed-down/restart-cap events themselves still unconfirmed
 - **Feed-down/recovery Telegram alert (Session 20)**: `FeedHealthEvent`
   gained an additive `error: str = ""` field; `TelegramNotificationAgent`
   subscribes to `FeedHealthEvent` and alerts (Tier 1, bypasses
@@ -240,6 +240,30 @@ async def run(self): ...
   no duplicate alerts mid-outage; (2) if `PriceWatcher`'s internal retry is
   ever exhausted, both the runner-restart behavior AND the CRITICAL
   "AUTO-RECOVERY EXHAUSTED" Telegram alert actually fire.
+
+### Duplicate/broken regulatory Telegram alert — REMOVED (Session 25)
+- `TelegramNotificationAgent` had its own subscription to
+  `RegulatoryAlertEvent` (`_handle_regulatory_alert`), separate from
+  `RegulatoryIntelligenceAgent._route_by_urgency`'s already-correct
+  urgency-branched `TelegramNotificationEvent` messages. Since
+  `RegulatoryAlertEvent` publishes unconditionally for every item (by
+  design, for `ComplianceOfficer`'s logging), every regulatory item
+  produced two Telegram messages — found live tonight (2026-07-01), the
+  first time Telegram alerting has actually been enabled/exercised (see
+  Session 24 above). The second message was broken:
+  `event.source_name`/`event.matched_keywords` are never populated by the
+  publisher (always empty/blank), and it told the operator to check
+  `logs/regulatory_alerts.txt`, a file deleted in an earlier session. Worse
+  than just noise: it was hardcoded `"🚨 KARBOT RAGE! CRITICAL"` regardless
+  of actual urgency, so a routine urgency-3 FYI showed up labeled CRITICAL
+  — degrading trust in the one alert that matters most (urgency 5,
+  trading-halt).
+  Fixed: removed the subscription and handler entirely.
+  `RegulatoryAlertEvent` still publishes unconditionally for
+  `ComplianceOfficer`'s audit logging (untouched); `_route_by_urgency`'s
+  urgency-branched Telegram path (untouched, already correct) is now the
+  sole source of regulatory Telegram messages. Unit-tested (3 new tests,
+  83 total).
 
 ### KarbotConfig.from_yaml() does not parse a `data_feeds:` YAML section — discovered Session 24
 - `kalshi_ws_enabled`/`polymarket_ws_enabled` always come from
@@ -319,17 +343,37 @@ async def run(self): ...
   books are simultaneously stale. Not implemented — explicitly deferred,
   not urgent.
 
-### P&L figures likely inflated during paper trading
+### P&L figures likely inflated during paper trading — HIGH PRIORITY, NOT YET RE-VERIFIED (Session 25)
 - VPS paper trades show $58–$288 realized P&L per trade at ~$500 position
   size, implying 11–57% net margins. S1 arb on liquid Kalshi binary markets
   should realistically yield 1–5% net after fees. The most probable cause is
   corrupt order books (from unrecovered sequence gaps) feeding stale/wrong
   bid-ask spreads to ArbScanner, which then detects spuriously large spreads
-  as arb opportunities. The book-reset recovery mechanism is now confirmed
-  working live (Session 23, see above) — re-check whether P&L figures
-  normalize toward the expected 1–5% net range now that books can actually
-  recover from sequence gaps. Do not yet treat paper P&L as a realistic
-  live-trading forecast until this normalization is directly observed.
+  as arb opportunities. The book-reset recovery mechanism is confirmed
+  working live (Session 23) — but the resulting P&L distribution has NOT
+  been checked against the 1–5% benchmark since. **Live Telegram PnL
+  figures observed by the operator on 2026-07-01 evening ($338.50, $343.50,
+  $383.50, $323.50, etc.) appear comparable to or larger than the
+  originally-flagged inflated range — NOT confirmed improved.**
+  **First priority next session**: pull RESOLVED trades from
+  `compliance.db` timestamped after 2026-07-01 16:31 UTC (when the Session
+  23 fix went live), compute PnL as a percentage of position size, and
+  determine whether the distribution is now realistic or still inflated.
+  Do not treat paper trading data as validated until this is checked — if
+  still inflated, the original hypothesis (corrupt books → bad spreads →
+  spurious S1 opportunities) was incomplete or wrong and needs a fresh
+  investigation, not an assumption that the book-reset fix also fixed this.
+
+### Paper trade fee variance — flagged, NOT investigated (Session 25)
+- Operator observed live via Telegram trade-executed messages on
+  2026-07-01 evening that fee amounts vary in an unexplained way across
+  trades: some show a flat $70.00 fee regardless of PnL size, others show
+  $0.00, $42.78, $113.27, $56.64. Not investigated this session. Next
+  session should pull the fee calculation logic (`PaperExecutor` or
+  wherever fees are computed) and cross-reference against `compliance.db`
+  to determine whether this is expected (e.g. fee scales with position
+  size or trade type in a way not obvious from the Telegram summary) or a
+  real bug. Do not assume either way without checking the actual numbers.
 
 ### Reconciliation (NOT built — future session)
 - No periodic reconciliation job exists to cross-check resolved S1 trades
@@ -360,50 +404,55 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **Confirm `config.yaml` exists on the VPS with `telegram.enabled: true`,
-   and confirm `config_resolved` logs it correctly** (Session 24) — this
-   is a precondition for verifying anything Telegram-related below; without
-   it, Telegram alerting silently does nothing, as it has for every deploy
-   since Session 19.
-2. **First-ever live verification of Telegram alerting** (Session 19/20,
-   only actually testable now that config.yaml exists) — confirm no
-   `TypeError` appears on any real Kalshi WS disconnect and
-   `kalshi_reconnect_retry` logs appear with increasing `attempt` numbers
-   (Session 19); a real "FEED DOWN" Telegram message arrives promptly on
-   any real disconnect and a distinct "FEED RECOVERED" message arrives on
-   reconnect with no duplicate alerts mid-outage (Session 20); if internal
-   retry is ever exhausted, the runner restarts `PriceWatcher` after ~30s
-   AND a real CRITICAL "AUTO-RECOVERY EXHAUSTED" Telegram message arrives
-   if the restart budget is ever exceeded (Session 20).
-3. **Monitor the now-confirmed-live book-reset recovery (Session 22/23)**
-   — watch that `book_snapshot_applied` keeps firing at a healthy rate and
-   the 429 rate (currently ~5.5% right after restart, KNOWN DEBT) stays a
-   one-time post-restart surge rather than a sustained pattern. Re-check
-   whether the P&L inflation KNOWN DEBT item resolves now that books can
-   reliably recover from sequence gaps.
-4. **Add a concurrency limiter on `_request_snapshot` REST calls** (KNOWN
+1. **HIGHEST PRIORITY: re-verify P&L magnitude against the 1–5% benchmark**
+   (KNOWN DEBT, Session 25) — pull RESOLVED trades from `compliance.db`
+   timestamped after 2026-07-01 16:31 UTC (when the Session 23 book-reset
+   fix went live), compute PnL as a percentage of position size, and
+   determine whether the distribution is now realistic or still inflated.
+   Live Telegram figures observed tonight ($338.50, $343.50, $383.50,
+   $323.50) look comparable to or larger than the original inflated range —
+   do not assume the book-reset fix also fixed this. Do not continue
+   treating paper trading data as validated until checked.
+2. **Investigate paper-trade fee variance** (KNOWN DEBT, Session 25) — fee
+   amounts observed live via Telegram vary unexplainably ($70.00 flat,
+   $0.00, $42.78, $113.27, $56.64). Pull the fee calculation logic
+   (`PaperExecutor` or wherever fees are computed) and cross-reference
+   against `compliance.db` to determine if expected or a bug.
+3. **Continue live-verifying Telegram alerting** (Session 19/20/24/25) —
+   with tonight's duplicate/broken regulatory alert removed (Session 25),
+   confirm: no `TypeError` on any real Kalshi WS disconnect with
+   `kalshi_reconnect_retry` logs increasing (Session 19); a real "FEED
+   DOWN"/"FEED RECOVERED" Telegram pair on any real disconnect/reconnect
+   with no duplicates mid-outage (Session 20); the runner-restart AND
+   CRITICAL "AUTO-RECOVERY EXHAUSTED" Telegram alert both fire if the
+   restart budget is ever exceeded (Session 20).
+4. **Monitor the book-reset recovery (Session 22/23)** — watch that
+   `book_snapshot_applied` keeps firing at a healthy rate and the 429 rate
+   (currently ~5.5% right after restart, KNOWN DEBT) stays a one-time
+   post-restart surge rather than a sustained pattern.
+5. **Add a concurrency limiter on `_request_snapshot` REST calls** (KNOWN
    DEBT from Session 23, not urgent) — an `asyncio.Semaphore` or similar
    bounding in-flight REST snapshot fetches, to smooth the post-restart
    burst that produced the 429s. Only worth prioritizing if 429s become a
    recurring pattern rather than a one-time restart surge.
-5. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
+6. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
    so the bot can be silenced during high-volume paper trading without
    disabling the agent entirely. Scope: `TelegramNotificationAgent`
    command handler only; no changes to event bus or other agents. Note: the
    Session 20 feed-down alert is explicitly designed to keep bypassing mute
    once this is built — do not let it get silenced.
-6. **Monitor paper trading** — clock running since 2026-06-29, target
+7. **Monitor paper trading** — clock running since 2026-06-29, target
    live date 2026-07-29. Review `logs/kalshi_trades.csv` and
    `logs/compliance_actions.jsonl` periodically. Confirm resolved rows
    show nonzero `gain_loss` and `status=RESOLVED` after
    `paper_resolution_delay_seconds`.
-7. **Begin live executor spec** after 30-day paper run completes
+8. **Begin live executor spec** after 30-day paper run completes
    (2026-07-29). Design `live_executor.py` to replace `paper_executor.py`
    on the real Kalshi trading path.
-8. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
+9. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
    in VPS logs — no Health Monitor agent subscribed yet; confirm this
    isn't masking a real event-bus wiring issue.
-9. **Consider fixing the `data_feeds:` YAML-parsing gap** (KNOWN DEBT,
+10. **Consider fixing the `data_feeds:` YAML-parsing gap** (KNOWN DEBT,
    Session 24) if it becomes relevant to a near-term task.
 
 ## FUTURE ROADMAP (do not build yet — design required first)

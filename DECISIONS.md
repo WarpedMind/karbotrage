@@ -1,6 +1,69 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-07-01 — Session 25: one event, one Telegram consumer — removed a duplicate/broken regulatory alert path
+
+### RegulatoryAlertEvent stays a pure ComplianceOfficer logging signal; Telegram gets it only via the urgency-branched path
+- `TelegramNotificationAgent` had its own direct subscription to
+  `RegulatoryAlertEvent` (`_handle_regulatory_alert`), independent of
+  `RegulatoryIntelligenceAgent._route_by_urgency`'s already-correct,
+  urgency-branched `TelegramNotificationEvent` publications. Both fired for
+  every regulatory item, since `RegulatoryAlertEvent` is published
+  unconditionally (by design, for `ComplianceOfficer`'s audit trail) —
+  producing two Telegram messages per item. The direct-subscription path
+  was leftover from before `RegulatoryIntelligenceAgent` existed
+  (`RegulatoryAlertEvent`'s `source_name`/`matched_keywords` fields and the
+  `logs/regulatory_alerts.txt` reference are artifacts of the old
+  keyword-scanning `ComplianceOfficer` polling loop, removed in an earlier
+  session — see "ComplianceOfficer polling loop removed" decision) and was
+  never updated or removed when the new agent took over regulatory Telegram
+  messaging.
+- Decision: removed `TelegramNotificationAgent`'s `RegulatoryAlertEvent`
+  subscription and handler entirely, rather than fixing the broken
+  field references or updating the dead file path. The event already has a
+  correct, complete Telegram-messaging consumer
+  (`RegulatoryIntelligenceAgent._route_by_urgency`) — the fix is
+  subtraction, not repair. `RegulatoryAlertEvent` keeps publishing
+  unconditionally for `ComplianceOfficer`'s benefit; only the redundant
+  Telegram subscriber was removed.
+- **Rationale, beyond just noise**: the broken duplicate message was
+  hardcoded to `"🚨 KARBOT RAGE! CRITICAL"` regardless of actual urgency.
+  A routine urgency-3 FYI produced a message labeled CRITICAL — this
+  actively degrades operator trust in that label, which matters most for
+  urgency 5 (trading-halt). A wrong or redundant alert is not neutral; it
+  has a real cost against the one alert the system most needs to be taken
+  seriously. This is the first live evidence (from tonight's first-ever
+  enabled Telegram run, following Session 24's config fix) that two
+  independent consumers of the same event, each built at different times
+  with different assumptions about what the event means, is itself a
+  design smell worth watching for elsewhere in the event bus — one event
+  should have one clearly-owned interpretation per concern (here:
+  ComplianceOfficer owns "log it," RegulatoryIntelligenceAgent owns "tell
+  the operator, tiered by urgency" — not two agents both deciding
+  independently how to tell the operator).
+- **This is also a direct consequence of Session 24's finding that Telegram
+  alerting had never actually been exercised in production** — this bug
+  existed in the codebase through every prior session that touched
+  Telegram or Regulatory Intelligence, but was invisible until tonight's
+  first live run with `telegram.enabled=True` actually produced Telegram
+  output an operator could read.
+
+### Known open items flagged, not resolved this session (see SESSIONS.md for full detail)
+- Paper trade fee variance ($70.00 flat / $0.00 / $42.78 / $113.27 / $56.64
+  observed across trades) — not investigated, needs a fee-calculation-logic
+  vs. `compliance.db` cross-reference next session.
+- **P&L magnitude not yet re-verified since the Session 23 REST-based
+  book-reset recovery fix went live** (~16:31 UTC 2026-07-01). The original
+  inflation hypothesis (corrupt books → bad spreads → spurious S1
+  opportunities) had its proposed root cause fixed, but the resulting P&L
+  distribution has not been checked against the realistic 1-5% benchmark.
+  Live Telegram PnL figures observed tonight ($338.50, $343.50, $383.50,
+  $323.50) look comparable to or larger than the original inflated range —
+  not confirmed improved. Flagged as the first priority for next session;
+  do not treat paper trading data as validated until checked.
+
+---
+
 ## 2026-07-01 — Session 24: "verify live" extends to config state, not just API/code behavior — Telegram alerting never actually ran
 
 ### A feature can pass every test, deploy cleanly three times, and still never run — if a gating flag defaults off and nothing confirms its resolved value in production

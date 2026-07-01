@@ -29,7 +29,6 @@ from core.events import (
     EventBus,
     FeedHealthEvent,
     LegFailureEvent,
-    RegulatoryAlertEvent,
     RejectedOpportunityEvent,
     TelegramNotificationEvent,
     TelegramPermissionRequestEvent,
@@ -81,7 +80,6 @@ class TelegramNotificationAgent:
     def register_subscriptions(self):
         self.bus.subscribe(TelegramNotificationEvent, self._handle_notification)
         self.bus.subscribe(TelegramPermissionRequestEvent, self._handle_permission_request)
-        self.bus.subscribe(RegulatoryAlertEvent, self._handle_regulatory_alert)
         self.bus.subscribe(LegFailureEvent, self._handle_leg_failure)
         self.bus.subscribe(TradeExecutedEvent, self._handle_trade_executed)
         self.bus.subscribe(RejectedOpportunityEvent, self._handle_rejected_opportunity)
@@ -246,21 +244,6 @@ class TelegramNotificationAgent:
             f"Question: {event.question}\n"
             f"Reply 'yes' to approve or 'no' to deny.\n"
             f"Timeout: {event.timeout_seconds}s (default: {event.default_on_timeout})\n"
-            f"{self._et_timestamp()}"
-        )
-        await self._outbound_queue.put(text)
-
-    async def _handle_regulatory_alert(self, event: RegulatoryAlertEvent):
-        """Tier 1 — always sends regardless of tier config (belt and suspenders)."""
-        if not self.config.telegram.enabled:
-            return
-        kw = ", ".join(event.matched_keywords) if event.matched_keywords else "see logs"
-        text = (
-            f"🚨 KARBOT RAGE! CRITICAL\n"
-            f"REGULATORY ALERT\n"
-            f"Source: {event.source_name}\n"
-            f"Keywords: {kw}\n"
-            f"Review logs/regulatory_alerts.txt immediately.\n"
             f"{self._et_timestamp()}"
         )
         await self._outbound_queue.put(text)

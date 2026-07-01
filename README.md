@@ -143,17 +143,39 @@ logs going forward instead of requiring source-code archaeology to notice.
 A real `config.yaml` with `telegram.enabled: true` is being created directly
 on the VPS (never committed — gitignored, environment-specific).
 
+**First live Telegram run immediately found a real bug**: every regulatory
+item was producing two Telegram messages — the correct, urgency-branched
+one from `RegulatoryIntelligenceAgent`, and a second, broken one from a
+leftover direct subscription in `TelegramNotificationAgent` that referenced
+blank fields and a deleted log file, hardcoded to display as "CRITICAL"
+regardless of actual urgency. Removed; the urgency-branched message is now
+the sole source of regulatory Telegram alerts.
+
 See DECISIONS.md and SESSIONS.md for full session-by-session detail.
+
+## Open questions (flagged live, not yet resolved)
+
+- **P&L magnitude, high priority**: the book-reset recovery fix is
+  confirmed live, but the resulting P&L distribution hasn't been checked
+  against the realistic 1–5% benchmark since. Live figures observed
+  tonight look comparable to or larger than the originally-flagged
+  inflated range — not yet confirmed improved.
+- **Paper trade fee variance**: fee amounts shown in Telegram trade
+  messages vary in a way that hasn't been explained yet (flat $70, or
+  $0–$113 depending on the trade) — needs a cross-check against the fee
+  calculation logic and `compliance.db` before assuming it's correct.
 
 ## Next up
 
-1. Confirm `config.yaml` exists on the VPS with `telegram.enabled: true`,
-   then get the first-ever live confirmation of Telegram alerting
-   (feed-down/recovered, restart-budget-exhaustion).
-2. Add a concurrency limiter (`asyncio.Semaphore`) on `_request_snapshot`
+1. Re-verify P&L magnitude against the 1–5% benchmark using RESOLVED
+   trades in `compliance.db` from after the book-reset fix went live.
+2. Investigate the paper-trade fee variance noted above.
+3. Continue live-verifying Telegram alerting (feed-down/recovered,
+   restart-budget-exhaustion) now that the duplicate regulatory message is gone.
+4. Add a concurrency limiter (`asyncio.Semaphore`) on `_request_snapshot`
    REST calls to smooth the post-restart burst noted above — not urgent.
-3. Telegram `/mute` `/unmute` operator commands.
-4. Begin live executor spec once the 30-day paper run completes (2026-07-29).
+5. Telegram `/mute` `/unmute` operator commands.
+6. Begin live executor spec once the 30-day paper run completes (2026-07-29).
 
 ## License
 
