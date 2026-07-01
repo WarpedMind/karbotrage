@@ -17,7 +17,6 @@ check before anything else ran):
     between price levels (KXCS2GAME-...-AIM: -523.00 @ 0.02, +523.00 @ 0.08)
 """
 
-import json
 import sys
 import time
 from pathlib import Path
@@ -224,42 +223,102 @@ def test_sequence_gap_sets_needs_reset_and_snapshot_clears_it():
     assert book.needs_reset is False
 
 
+# ── _request_snapshot: REST-based recovery (Session 22) ─────────────────────
+#
+# Session 18 originally implemented _request_snapshot via a WS re-subscribe.
+# Session 21's live wire capture confirmed Kalshi responds to a duplicate
+# subscribe with {"type": "ok", "id": N} — never a fresh orderbook_snapshot —
+# and Kalshi's own docs confirm snapshot delivery is initial-subscribe-only.
+# Session 22 replaced the WS send with a direct REST GET to
+# /trade-api/v2/markets/{ticker}/orderbook. These tests mock that REST call
+# the same way tests/test_price_watcher.py mocks _fetch_active_kalshi_markets.
+
+class _FakeRestResponse:
+    def __init__(self, status: int, payload: dict = None, text: str = ""):
+        self.status = status
+        self._payload = payload or {}
+        self._text = text
+
+    async def json(self):
+        return self._payload
+
+    async def text(self):
+        return self._text
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def _fake_rest_session(response: _FakeRestResponse):
+    session = MagicMock()
+    session.get = MagicMock(return_value=response)
+
+    class _SessionCtx:
+        async def __aenter__(self):
+            return session
+
+        async def __aexit__(self, *exc):
+            return False
+
+    return _SessionCtx()
+
+
+def _rest_patches(response: _FakeRestResponse):
+    """Standard patch set for a _request_snapshot REST call."""
+    return (
+        patch("agents.floor.price_watcher._load_kalshi_private_key", return_value=MagicMock()),
+        patch("agents.floor.price_watcher._build_kalshi_auth_headers", return_value={}),
+        patch("aiohttp.ClientSession", return_value=_fake_rest_session(response)),
+    )
+
+
+_ORDERBOOK_PAYLOAD = {
+    "orderbook_fp": {
+        "yes_dollars": [["0.4700", "22.00"], ["0.4800", "251.00"]],
+        "no_dollars":  [["0.3200", "474.00"]],
+    }
+}
+
+
 # ── _request_snapshot throttling ─────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_request_snapshot_throttled_second_call_suppressed():
-    """Two _request_snapshot calls within 10s on the same market → only one WS send."""
+    """Two _request_snapshot calls within 10s on the same market → only one REST GET."""
     agent = _make_agent()
 
-    mock_ws = AsyncMock()
     mock_client = MagicMock()
     mock_client._connected = True
-    mock_client._ws = mock_ws
     agent._kalshi_client = mock_client
 
-    await agent._request_snapshot("KXTEST-THROTTLE")
-    await agent._request_snapshot("KXTEST-THROTTLE")   # within 10s → suppressed
+    p1, p2, p3 = _rest_patches(_FakeRestResponse(200, _ORDERBOOK_PAYLOAD))
+    with p1, p2, p3 as mock_session_cls:
+        await agent._request_snapshot("KXTEST-THROTTLE")
+        await agent._request_snapshot("KXTEST-THROTTLE")   # within 10s → suppressed
 
-    assert mock_ws.send.call_count == 1
+        assert mock_session_cls.call_count == 1
 
 
 @pytest.mark.asyncio
 async def test_request_snapshot_throttle_resets_after_window():
-    """A second call after >10s IS sent."""
+    """A second call after >10s IS fetched again."""
     agent = _make_agent()
 
-    mock_ws = AsyncMock()
     mock_client = MagicMock()
     mock_client._connected = True
-    mock_client._ws = mock_ws
     agent._kalshi_client = mock_client
 
     # Simulate the first call happening 11 seconds ago
     agent._reset_requested["KXTEST-WINDOW"] = time.monotonic() - 11.0
 
-    await agent._request_snapshot("KXTEST-WINDOW")
+    p1, p2, p3 = _rest_patches(_FakeRestResponse(200, _ORDERBOOK_PAYLOAD))
+    with p1, p2, p3 as mock_session_cls:
+        await agent._request_snapshot("KXTEST-WINDOW")
 
-    assert mock_ws.send.call_count == 1
+        assert mock_session_cls.call_count == 1
 
 
 # ── _request_snapshot no-ops when client is None ─────────────────────────────
@@ -276,49 +335,139 @@ async def test_request_snapshot_noop_when_client_none():
     assert "KXTEST-NOCLIENT" not in agent._reset_requested
 
 
-# ── _request_snapshot uses a unique "id" per call (not hardcoded) ───────────
+# ── _request_snapshot's id counter still increments (no longer sent over WS,
+# but kept for continuity/logging correlation per explicit instruction) ─────
 
 @pytest.mark.asyncio
-async def test_request_snapshot_uses_distinct_id_per_market():
-    """Each _request_snapshot call across different markets must use a distinct
-    "id" value — a shared hardcoded id lets Kalshi's response correlation
-    conflate concurrent resets across markets (root cause of the 10.2%
-    book_snapshot_applied completion rate observed on the VPS 2026-06-30)."""
+async def test_request_snapshot_id_counter_still_increments():
+    """The id counter still increments across successive (non-throttled) calls,
+    even though it's no longer transmitted anywhere — kept for continuity."""
     agent = _make_agent()
 
-    mock_ws = AsyncMock()
     mock_client = MagicMock()
     mock_client._connected = True
-    mock_client._ws = mock_ws
     agent._kalshi_client = mock_client
 
-    await agent._request_snapshot("KXTEST-IDA")
-    await agent._request_snapshot("KXTEST-IDB")
+    p1, p2, p3 = _rest_patches(_FakeRestResponse(200, _ORDERBOOK_PAYLOAD))
+    with p1, p2, p3:
+        await agent._request_snapshot("KXTEST-INC1")
+        first = agent._snapshot_request_id_counter
+        agent._reset_requested["KXTEST-INC2"] = time.monotonic() - 11.0
+        await agent._request_snapshot("KXTEST-INC2")
+        second = agent._snapshot_request_id_counter
 
-    sent_ids = [json.loads(call.args[0])["id"] for call in mock_ws.send.call_args_list]
-    assert len(sent_ids) == 2
-    assert sent_ids[0] != sent_ids[1]
-    assert all(i != 99 for i in sent_ids)
+    assert second > first
+
+
+# ── _request_snapshot: REST success applies snapshot, clears gap ────────────
+
+@pytest.mark.asyncio
+async def test_request_snapshot_rest_success_applies_snapshot_and_clears_gap():
+    """A successful REST fetch parses float bids/asks, calls apply_snapshot,
+    and clears _gap_detected on the affected book."""
+    agent = _make_agent()
+
+    mock_client = MagicMock()
+    mock_client._connected = True
+    agent._kalshi_client = mock_client
+
+    # Pre-seed a book in a gap state, as _handle_kalshi_delta would leave it.
+    book = OrderBook("KXTEST-RESTOK", "kalshi")
+    book.apply_delta("bid", 0.50, 100.0, seq=1)
+    book.sequence = 5
+    book.apply_delta("bid", 0.50, 10.0, seq=7)   # gap → needs_reset True
+    assert book.needs_reset is True
+    agent._books["KXTEST-RESTOK"] = book
+
+    p1, p2, p3 = _rest_patches(_FakeRestResponse(200, _ORDERBOOK_PAYLOAD))
+    with p1, p2, p3:
+        await agent._request_snapshot("KXTEST-RESTOK")
+
+    assert book.needs_reset is False
+    # NO bid at 0.32 -> derived YES ask at 1 - 0.32 = 0.68
+    assert book.bids == {0.47: 22.0, 0.48: 251.0}
+    assert book.asks == {0.68: 474.0}
+    # No sequence number in the REST response — sentinel 0, so the very next
+    # delta's seq is accepted regardless of its value (self.sequence == 0
+    # short-circuits the gap check in apply_delta).
+    assert book.sequence == 0
 
 
 @pytest.mark.asyncio
-async def test_request_snapshot_id_increments_monotonically():
-    """The id counter increments across successive (non-throttled) calls."""
+async def test_request_snapshot_rest_creates_book_if_missing():
+    """If no OrderBook exists yet for market_id, one is created before apply_snapshot."""
     agent = _make_agent()
 
-    mock_ws = AsyncMock()
     mock_client = MagicMock()
     mock_client._connected = True
-    mock_client._ws = mock_ws
     agent._kalshi_client = mock_client
 
-    await agent._request_snapshot("KXTEST-INC1")
-    agent._reset_requested["KXTEST-INC2"] = time.monotonic() - 11.0
-    await agent._request_snapshot("KXTEST-INC2")
+    assert "KXTEST-NEWBOOK" not in agent._books
 
-    sent_ids = [json.loads(call.args[0])["id"] for call in mock_ws.send.call_args_list]
-    assert sent_ids == sorted(sent_ids)
-    assert sent_ids[1] > sent_ids[0]
+    p1, p2, p3 = _rest_patches(_FakeRestResponse(200, _ORDERBOOK_PAYLOAD))
+    with p1, p2, p3:
+        await agent._request_snapshot("KXTEST-NEWBOOK")
+
+    assert "KXTEST-NEWBOOK" in agent._books
+    assert agent._books["KXTEST-NEWBOOK"].bids == {0.47: 22.0, 0.48: 251.0}
+
+
+# ── _request_snapshot: REST failure leaves gap state, does not crash ────────
+
+@pytest.mark.asyncio
+async def test_request_snapshot_rest_non_200_leaves_gap_detected():
+    """A non-200 REST response logs a warning and leaves _gap_detected True —
+    no crash, no apply_snapshot call."""
+    agent = _make_agent()
+
+    mock_client = MagicMock()
+    mock_client._connected = True
+    agent._kalshi_client = mock_client
+
+    book = OrderBook("KXTEST-REST500", "kalshi")
+    book.apply_delta("bid", 0.50, 100.0, seq=1)
+    book.sequence = 5
+    book.apply_delta("bid", 0.50, 10.0, seq=7)
+    assert book.needs_reset is True
+    agent._books["KXTEST-REST500"] = book
+
+    p1, p2, p3 = _rest_patches(_FakeRestResponse(500, text="internal error"))
+    with p1, p2, p3:
+        await agent._request_snapshot("KXTEST-REST500")   # must not raise
+
+    assert book.needs_reset is True   # unchanged — still awaiting recovery
+
+
+@pytest.mark.asyncio
+async def test_request_snapshot_rest_network_error_leaves_gap_detected():
+    """A network/timeout exception during the REST call logs a warning and
+    leaves _gap_detected True — no crash."""
+    agent = _make_agent()
+
+    mock_client = MagicMock()
+    mock_client._connected = True
+    agent._kalshi_client = mock_client
+
+    book = OrderBook("KXTEST-RESTERR", "kalshi")
+    book.apply_delta("bid", 0.50, 100.0, seq=1)
+    book.sequence = 5
+    book.apply_delta("bid", 0.50, 10.0, seq=7)
+    assert book.needs_reset is True
+    agent._books["KXTEST-RESTERR"] = book
+
+    class _RaisingSessionCtx:
+        async def __aenter__(self):
+            raise TimeoutError("connection timed out")
+
+        async def __aexit__(self, *exc):
+            return False
+
+    with patch("agents.floor.price_watcher._load_kalshi_private_key", return_value=MagicMock()), \
+         patch("agents.floor.price_watcher._build_kalshi_auth_headers", return_value={}), \
+         patch("aiohttp.ClientSession", return_value=_RaisingSessionCtx()):
+        await agent._request_snapshot("KXTEST-RESTERR")   # must not raise
+
+    assert book.needs_reset is True
 
 
 # ── book_needs_reset log level (Fix 2: noise reduction) ─────────────────────

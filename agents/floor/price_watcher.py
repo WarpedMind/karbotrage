@@ -243,12 +243,6 @@ class KalshiWebSocketClient:
         self._msg_count   = 0
         self._last_msg_time = time.monotonic()
 
-        # TEMPORARY DIAGNOSTIC — Session 21, revert after capture
-        # Running tally of every msg_type seen by _route_message, logged as a
-        # periodic summary so we don't have to grep tens of thousands of
-        # per-message diagnostic lines by hand. See _diag_summary_loop().
-        self._diag_msg_type_counts: Dict[str, int] = defaultdict(int)
-
     def _auth_headers(self) -> Dict[str, str]:
         """Generate RSA-signed auth headers for the WebSocket upgrade request."""
         return _build_kalshi_auth_headers(
@@ -296,47 +290,20 @@ class KalshiWebSocketClient:
 
     async def listen(self) -> None:
         """Process incoming messages indefinitely."""
-        # TEMPORARY DIAGNOSTIC — Session 21, revert after capture
-        diag_summary_task = asyncio.create_task(self._diag_summary_loop())
-        try:
-            async for raw_msg in self._ws:
-                self._msg_count += 1
-                self._last_msg_time = time.monotonic()
-                try:
-                    msg = json.loads(raw_msg)
-                    await self._route_message(msg)
-                except json.JSONDecodeError:
-                    log.error("kalshi_ws_bad_json", msg=raw_msg[:200])
-                except Exception as e:
-                    log.error("kalshi_ws_message_error", error=str(e))
-        finally:
-            # TEMPORARY DIAGNOSTIC — Session 21, revert after capture
-            diag_summary_task.cancel()
-
-    # TEMPORARY DIAGNOSTIC — Session 21, revert after capture
-    async def _diag_summary_loop(self) -> None:
-        """Log a running tally of msg_type counts every 60s, so the raw
-        per-message kalshi_raw_msg_diag lines don't have to be grepped by
-        hand to see the overall traffic composition."""
-        try:
-            while True:
-                await asyncio.sleep(60)
-                log.info("kalshi_raw_msg_diag_summary", counts=dict(self._diag_msg_type_counts))
-        except asyncio.CancelledError:
-            pass
+        async for raw_msg in self._ws:
+            self._msg_count += 1
+            self._last_msg_time = time.monotonic()
+            try:
+                msg = json.loads(raw_msg)
+                await self._route_message(msg)
+            except json.JSONDecodeError:
+                log.error("kalshi_ws_bad_json", msg=raw_msg[:200])
+            except Exception as e:
+                log.error("kalshi_ws_message_error", error=str(e))
 
     async def _route_message(self, msg: Dict) -> None:
         """Route incoming message to appropriate handler."""
         msg_type = msg.get("type", "")
-
-        # TEMPORARY DIAGNOSTIC — Session 21, revert after capture
-        # Unconditional per-message log + running tally, to see whether
-        # snapshot responses to _request_snapshot's re-subscribes are
-        # arriving under an unexpected type name, with unexpected ids, or
-        # not arriving at all — book_snapshot_applied has dropped to zero
-        # while book_snapshot_requested keeps climbing.
-        log.info("kalshi_raw_msg_diag", msg_type=msg_type, msg_id=msg.get("id"))
-        self._diag_msg_type_counts[msg_type or "<empty>"] += 1
 
         if msg_type == "orderbook_snapshot":
             await self._on_snapshot("kalshi", msg)
@@ -621,20 +588,42 @@ class PriceWatcherAgent:
         # Publish price update — this is the hot path
         await self.bus.publish(book.to_price_event(platform))
 
+    KALSHI_REST_SNAPSHOT_TIMEOUT_SECS = 5.0
+
     async def _request_snapshot(self, market_id: str) -> None:
-        """Re-subscribe to a market over the existing WS to trigger a fresh snapshot.
+        """Fetch a fresh order book snapshot via REST on sequence gap detection.
 
-        Kalshi responds to a subscribe message with an orderbook_snapshot even for
-        already-subscribed markets, which calls _handle_kalshi_snapshot → apply_snapshot
-        → clears _gap_detected. This is the correct recovery path; no REST API call needed.
+        Session 18 originally implemented this via a WS re-subscribe, on the
+        assumption that Kalshi would respond to a duplicate subscribe with a
+        fresh orderbook_snapshot. Session 21's live wire capture confirmed
+        that assumption was wrong: Kalshi responds to a duplicate subscribe
+        with {"type": "ok", "id": N} — a plain ack, never a snapshot — and
+        Kalshi's own docs state snapshot delivery only happens on the
+        *initial* subscribe to a channel, not on re-subscribing to an
+        already-subscribed market. The WS re-subscribe path could not work
+        as designed; replaced here with a direct REST fetch.
 
-        Throttled to one request per market per 10 seconds to avoid flooding the WS
-        when gap events fire repeatedly on the same market.
+        GET /trade-api/v2/markets/{ticker}/orderbook, no query params
+        (omitting `depth` returns all levels). Response:
+          {"orderbook_fp": {"yes_dollars": [[price_str, count_str], ...],
+                             "no_dollars":  [[price_str, count_str], ...]}}
+        Same bid-only-per-side structure as the WS snapshot payload, but
+        string values — cast to float before building (price, size) tuples.
 
-        Each call uses a unique "id" correlation value (monotonic counter). Gap
-        events routinely fire across dozens of markets within the same second,
-        so concurrent re-subscribes sharing a single hardcoded id would let
-        Kalshi's response correlation conflate requests across markets.
+        This REST response carries no sequence number, so `apply_snapshot`
+        is called with seq=0 (sentinel). `OrderBook.apply_delta`'s gap check
+        is `if seq != self.sequence + 1 and self.sequence != 0` — with
+        self.sequence reset to 0, that second condition is False, so the
+        very next delta is accepted regardless of its own seq value and
+        `self.sequence` naturally realigns to whatever Kalshi sends next.
+        No special-casing needed downstream.
+
+        Throttled to one REST fetch per market per 10 seconds to avoid
+        hammering the endpoint when gap events fire repeatedly on the same
+        market. On any failure (non-200, network error, timeout), logs a
+        warning and returns without calling apply_snapshot — `_gap_detected`
+        stays True, so the next delta on this market will retrigger a
+        throttled retry rather than crash the connection loop.
         """
         # Rate limit: skip if we requested a reset for this market within the last 10s
         _THROTTLE_SECS = 10.0
@@ -649,23 +638,44 @@ class PriceWatcherAgent:
             return
 
         self._reset_requested[market_id] = time.monotonic()
+
+        # Kept for continuity/logging correlation, but no longer load-bearing
+        # for this recovery path — no WS message is sent here anymore.
+        self._snapshot_request_id_counter += 1
+
+        rest_path = f"/trade-api/v2/markets/{market_id}/orderbook"
+        url = "https://api.elections.kalshi.com" + rest_path
         try:
-            self._snapshot_request_id_counter += 1
-            msg = {
-                "id": self._snapshot_request_id_counter,
-                "cmd": "subscribe",
-                "params": {
-                    "channels": ["orderbook_delta"],
-                    "market_tickers": [market_id],
-                },
-            }
-            await self._kalshi_client._ws.send(json.dumps(msg))
-            log.info("book_snapshot_requested", market=market_id)
-            # TEMPORARY DIAGNOSTIC — Session 21, revert after capture
-            log.info("kalshi_raw_msg_diag_sent",
-                      msg_id=self._snapshot_request_id_counter, market=market_id)
+            private_key = _load_kalshi_private_key(self.secrets.kalshi_private_key_path)
+            headers = _build_kalshi_auth_headers(
+                self.secrets.kalshi_api_key_id, private_key, "GET", rest_path
+            )
+            timeout = aiohttp.ClientTimeout(total=self.KALSHI_REST_SNAPSHOT_TIMEOUT_SECS)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=timeout) as resp:
+                    if resp.status != 200:
+                        body = await resp.text()
+                        log.warning("book_reset_rest_failed", market=market_id,
+                                    status=resp.status, body=body[:300])
+                        return
+                    data = await resp.json()
         except Exception as e:
-            log.warning("book_reset_send_failed", market=market_id, error=str(e))
+            log.warning("book_reset_rest_failed", market=market_id, error=str(e))
+            return
+
+        orderbook = data.get("orderbook_fp", {})
+        bids = [(float(price), float(count))
+                for price, count in orderbook.get("yes_dollars", [])]
+        asks = [(round(1.0 - float(price), 2), float(count))
+                for price, count in orderbook.get("no_dollars", [])]
+
+        book = self._books.get(market_id)
+        if book is None:
+            book = OrderBook(market_id, "kalshi")
+            self._books[market_id] = book
+
+        book.apply_snapshot(bids, asks, seq=0)
+        log.info("book_snapshot_requested", market=market_id)
 
     async def _handle_health_change(
         self, platform: str, connected: bool, latency_ms: float, error: str = ""

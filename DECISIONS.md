@@ -1,6 +1,91 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-07-01 — Session 22: book-reset recovery replaced with REST fetch (WS re-subscribe confirmed non-functional)
+
+### Kalshi does not send a fresh snapshot on duplicate WS subscribe — confirmed via live capture + docs
+- Session 18's `_request_snapshot` sent a WS `subscribe` message for an
+  already-subscribed market, on the assumption (stated explicitly in that
+  session's code comment) that Kalshi would respond with a fresh
+  `orderbook_snapshot`. Session 21's temporary diagnostic instrumentation
+  (unconditional per-message logging of every WS message's `type`/`id`)
+  captured live traffic and found Kalshi actually responds to a duplicate
+  subscribe with `{"type": "ok", "id": N}` — a plain acknowledgment, never
+  a snapshot. Cross-checked against Kalshi's own WS documentation, which
+  states snapshot delivery happens only on the *initial* subscribe to a
+  channel, not on re-subscribing to a market already subscribed.
+- This explains the regression observed going into this session:
+  `book_snapshot_requested` climbed to 3,365 in an 18-minute window while
+  `book_snapshot_applied` fell to **zero** in that same window (down from a
+  37% apply rate measured right before the last restart) — the WS
+  re-subscribe recovery mechanism could never have worked as designed; the
+  Session 18 id-collision fix improved request/response correlation, but
+  correlating with an ack that never carries book data doesn't recover
+  anything. The book-reset recovery KNOWN DEBT item, open since Session 18,
+  is retroactively explained: it was never going to work, regardless of the
+  id-collision fix.
+- Decision: this is the second time in this project (after Session 15's WS
+  schema ambiguity) that a WS behavior assumption was wrong in a way local
+  tests couldn't catch, because the tests were written against the assumed
+  schema, not the real one. Applied the same discipline as Session 15:
+  temporary, clearly-labeled diagnostic logging, capture real traffic,
+  confirm against official docs, then act on evidence — not a fourth guess.
+
+### Fix: REST fetch replaces WS re-subscribe for book-reset recovery
+- `_request_snapshot(market_id)` now makes a direct `aiohttp` GET to
+  `https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook`
+  (RSA-PSS auth headers reused via the existing `_build_kalshi_auth_headers`
+  helper, matching the pattern already used by
+  `_fetch_active_kalshi_markets` — simpler and consistent with the rest of
+  the file's REST calls, rather than adding a second unauthenticated-call
+  code path for a single endpoint) and calls `book.apply_snapshot(...)`
+  directly with the parsed `orderbook_fp.yes_dollars`/`no_dollars` levels
+  (string values cast to float; NO bids still derive YES asks at `1-p`,
+  matching the WS snapshot schema's existing convention).
+- The 10s per-market throttle and the "client must exist and be connected"
+  guard are unchanged — both are still meaningful for a REST-based
+  recovery path (avoid hammering the endpoint on repeated gap events; no
+  point fetching if the WS connection that would resume normal delta flow
+  is itself down).
+- **No sequence number in the REST response.** `apply_snapshot` is called
+  with `seq=0` (sentinel). `OrderBook.apply_delta`'s gap check —
+  `if seq != self.sequence + 1 and self.sequence != 0` — short-circuits on
+  `self.sequence == 0`, so the very next delta is accepted regardless of
+  its own seq value, and `self.sequence` naturally realigns to whatever
+  Kalshi sends next. No special-casing needed downstream; verified this
+  reasoning against the actual gap-check code before relying on it, rather
+  than assuming a sentinel would "just work."
+- On any REST failure (non-200, network error, timeout — a single
+  `try/except Exception` wraps the whole call), logs `book_reset_rest_failed`
+  at warning and returns without calling `apply_snapshot` — `_gap_detected`
+  stays `True`, so the next delta on that market retriggers a throttled
+  retry rather than crashing `_kalshi_connection_loop`.
+- The `_snapshot_request_id_counter` from Session 18 is kept (not removed)
+  but is no longer load-bearing for this recovery path, since no WS message
+  is sent from `_request_snapshot` anymore — left in place per explicit
+  instruction, with a comment explaining why, rather than ripping out
+  otherwise-harmless code mid-fix.
+- **Status: NOT yet confirmed live.** Unit-tested (4 new tests: REST
+  success applies snapshot + clears gap, book auto-created if missing,
+  non-200 leaves gap state, network error leaves gap state) plus the
+  existing throttle/no-client tests rewritten against the new REST call
+  shape. Not yet exercised against the real Kalshi REST endpoint on the
+  VPS. Next session must deploy and confirm `book_snapshot_applied`
+  (renamed conceptually — same log key, now fired from the REST path)
+  actually climbs again, and that `book_reset_rest_failed` rate stays low.
+
+### Session 21 diagnostic instrumentation reverted
+- All four `TEMPORARY DIAGNOSTIC` blocks added in Session 21
+  (`kalshi_raw_msg_diag` in `_route_message`, `_diag_msg_type_counts`,
+  `_diag_summary_loop`, `kalshi_raw_msg_diag_sent` in `_request_snapshot`)
+  removed now that the data they existed to capture has been captured and
+  used to diagnose the root cause above — consistent with the Session 15
+  precedent of not leaving temporary diagnostic logging in the codebase
+  permanently. Confirmed via `grep` that zero `DIAGNOSTIC`/`diag` references
+  remain in `agents/floor/price_watcher.py`.
+
+---
+
 ## 2026-07-01 — Session 20: Telegram feed-down alert + capped runner-level auto-restart
 
 ### RESOLVED: agent-level restart after stop_after_attempt(10) exhaustion (was open, flagged in Session 19)
@@ -105,6 +190,7 @@
 ---
 
 ## 2026-06-30 — Session 18: book-reset id collision fix (leading hypothesis, unconfirmed live)
+### → SUPERSEDED Session 22: WS re-subscribe recovery confirmed non-functional (Kalshi acks with "ok", never a fresh snapshot); replaced with REST fetch. See "book-reset recovery replaced with REST fetch" entry above.
 
 ### Unique per-call WS correlation id, not a hardcoded 99
 - `_request_snapshot(market_id)`'s WS re-subscribe message used `"id": 99` for

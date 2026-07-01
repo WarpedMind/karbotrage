@@ -1,6 +1,150 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-07-01 (Session 22 — book-reset recovery replaced with REST fetch; Session 21 diagnostics reverted — DEPLOYED, NOT YET CONFIRMED LIVE)
+
+### Root cause of the book_snapshot_applied=0 regression (from Session 21's live capture)
+- Session 21's temporary diagnostic instrumentation (unconditional per-message
+  `kalshi_raw_msg_diag` logging of every WS message's `type`/`id`) captured
+  real traffic and confirmed: Kalshi responds to a duplicate WS subscribe
+  message with `{"type": "ok", "id": N}` — a plain acknowledgment — **not**
+  a fresh `orderbook_snapshot`. Cross-checked against Kalshi's own WS docs,
+  which state snapshot delivery only happens on the *initial* subscribe to
+  a channel, never on re-subscribing to an already-subscribed market.
+- This means the Session 18 `_request_snapshot` WS re-subscribe recovery
+  mechanism could never have worked as designed, from the moment it was
+  written (Session 17 follow-up 3). The Session 18 id-collision fix
+  improved request/response *correlation*, but correlating cleanly with an
+  ack message that never carries book data doesn't recover a corrupted
+  book. The regression that triggered this session (`book_snapshot_requested`
+  climbing to 3,365 in 18 minutes while `book_snapshot_applied` fell to
+  zero, down from 37% before the last restart) is explained: whatever
+  changed between measurements, the underlying recovery path was already
+  fundamentally broken.
+
+### What was built
+- **`agents/floor/price_watcher.py` — `_request_snapshot` rewritten to use
+  a REST fetch instead of a WS re-subscribe.**
+  Makes an `aiohttp` GET to
+  `https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook`,
+  reusing `_build_kalshi_auth_headers` (matching the existing pattern in
+  `_fetch_active_kalshi_markets` — simpler than adding an unauthenticated
+  code path for one endpoint, and Kalshi accepts the auth headers even
+  though the endpoint itself doesn't strictly require them).
+  Parses `orderbook_fp.yes_dollars`/`no_dollars` (string `[price, count]`
+  pairs — cast to float; NO bids still derive YES asks at `1-p`, same
+  convention as the WS snapshot schema) and calls
+  `book.apply_snapshot(bids, asks, seq=0)` directly.
+  **Sequence handling**: the REST response carries no sequence number.
+  Verified against the actual gap-check code
+  (`OrderBook.apply_delta`: `if seq != self.sequence + 1 and self.sequence
+  != 0`) that a `seq=0` sentinel is safe — `self.sequence == 0`
+  short-circuits the gap check, so the next delta is accepted regardless of
+  its own seq value and `self.sequence` naturally realigns. No special
+  handling needed downstream.
+  The existing 10s per-market throttle (`_reset_requested`) and the
+  "client must exist and be connected" guard are unchanged — both still
+  apply to a REST-based recovery path.
+  On any failure (non-200, network error, timeout — one `try/except
+  Exception` wraps the whole call, 5s `aiohttp.ClientTimeout`), logs
+  `book_reset_rest_failed` at warning and returns without calling
+  `apply_snapshot` — `_gap_detected` stays `True`, so the next delta on
+  that market retriggers a throttled retry rather than crashing
+  `_kalshi_connection_loop`.
+  The Session 18 `_snapshot_request_id_counter` is kept (per explicit
+  instruction) but is no longer load-bearing for this path — a comment
+  explains why, since no WS message is sent from `_request_snapshot` anymore.
+- **Session 21 diagnostic instrumentation fully reverted.** All four
+  `TEMPORARY DIAGNOSTIC` blocks removed: `kalshi_raw_msg_diag` in
+  `_route_message`, `_diag_msg_type_counts`, `_diag_summary_loop`, and
+  `kalshi_raw_msg_diag_sent` in the old `_request_snapshot`. Confirmed via
+  `grep -in "diagnostic\|diag" agents/floor/price_watcher.py` → zero matches.
+- **`tests/test_kalshi_orderbook.py` — rewritten `_request_snapshot` test
+  coverage (21 tests total in this file, was 17):**
+  - Rewrote the throttle tests (`test_request_snapshot_throttled_second_call_suppressed`,
+    `test_request_snapshot_throttle_resets_after_window`) to mock the REST
+    call (`aiohttp.ClientSession`, `_load_kalshi_private_key`,
+    `_build_kalshi_auth_headers`) instead of asserting on WS `send` calls,
+    following the exact mocking pattern already established in
+    `tests/test_price_watcher.py` for `_fetch_active_kalshi_markets`.
+  - Replaced the two "distinct id sent over WS" tests (no longer meaningful
+    — nothing is sent over WS anymore) with
+    `test_request_snapshot_id_counter_still_increments`, confirming the
+    counter still increments even though it's not transmitted anywhere.
+  - **New**: `test_request_snapshot_rest_success_applies_snapshot_and_clears_gap`
+    — a pre-seeded gapped book gets float bids/asks applied and
+    `needs_reset` clears to `False`; also confirms `sequence == 0` (sentinel).
+  - **New**: `test_request_snapshot_rest_creates_book_if_missing` — no
+    `OrderBook` exists yet for the market; one is created before
+    `apply_snapshot` is called.
+  - **New**: `test_request_snapshot_rest_non_200_leaves_gap_detected` — a
+    500 response logs a warning, leaves `needs_reset` `True`, does not raise.
+  - **New**: `test_request_snapshot_rest_network_error_leaves_gap_detected`
+    — a raised `TimeoutError` during the REST call logs a warning, leaves
+    `needs_reset` `True`, does not raise.
+
+### What was decided
+- Reused `_build_kalshi_auth_headers` for the REST call even though Kalshi's
+  docs say this endpoint doesn't require authentication — matches the
+  existing REST-call pattern in this file (`_fetch_active_kalshi_markets`),
+  avoids a second, differently-authenticated code path for a single
+  endpoint, and costs nothing extra since the headers are cheap to compute.
+  Not empirically verified against the live unauthenticated case this
+  session (no live Kalshi access from this environment) — if the
+  authenticated call fails in an unexpected way once deployed, try the
+  request without auth headers as a fallback and note which actually works,
+  per the same "verify empirically, don't assume" discipline as prior
+  sessions' Kalshi API work.
+- `seq=0` sentinel chosen after reading `OrderBook.apply_delta`'s actual gap
+  -check condition, not assumed — the reasoning is documented in a comment
+  on `_request_snapshot` and in DECISIONS.md so a future session doesn't
+  have to re-derive it.
+
+### Verification
+- `karbotrage_env/bin/python -m pytest tests/ -v`: **75/75 passed** ✓
+  (72 baseline − 2 removed WS-id tests + 1 counter test + 4 new REST tests)
+- `grep -in "diagnostic\|diag" agents/floor/price_watcher.py`: zero matches ✓
+- Diff review (`git diff agents/floor/price_watcher.py`): confirms the
+  throttle logic, the "client connected" guard, and the id counter are
+  unchanged in substance — only the transport (WS send → REST GET) and
+  response-handling changed ✓
+- No `.env`, `config.yaml`, or `*.pem` in staged files ✓
+- `execution/engine.py` and `main.py` untouched ✓
+- Session 19 (`before_sleep_log`/structlog fix) and Session 20 (Telegram
+  feed-down alert, capped auto-restart) code confirmed untouched — `grep`
+  confirms `_log_before_sleep`, `before_sleep=_log_before_sleep`, and the
+  `error=str(e)` param on `_handle_health_change` are all still present;
+  `agents/notifications/telegram_agent.py`, `core/events.py`,
+  `karbot/core/config.py`, and `karbot_runner.py` are not in this session's
+  diff at all ✓
+
+### STATUS: DEPLOYED BUT NOT YET CONFIRMED LIVE
+The REST-based recovery has NOT been exercised against the real Kalshi
+REST endpoint on the VPS as of this entry. Next session must:
+1. Deploy (`git pull origin main`, restart `karbot`).
+2. Confirm `book_snapshot_requested` → (REST fetch, no longer a WS log
+   line) → `book_snapshot_applied` actually completes again — compare the
+   apply rate against both the Session 18 baseline (10.2%) and the
+   pre-this-session regression (0%). A healthy apply rate (ideally close to
+   100%, since REST GET either succeeds or fails per-call, with no
+   response-correlation ambiguity) confirms the fix.
+3. Watch for `book_reset_rest_failed` — if it fires frequently, investigate
+   whether the auth-headers-on-an-unauthenticated-endpoint assumption needs
+   revisiting (try without auth headers) or whether it's a genuine rate
+   limit / network issue.
+4. Re-check whether the P&L inflation KNOWN DEBT item (corrupt books
+   feeding stale spreads to ArbScanner) resolves now that books can
+   actually recover from sequence gaps.
+
+### What to do first next session
+1. Deploy this fix to the VPS and verify per the STATUS section above.
+2. Continue verifying the Session 19 before_sleep_log fix and the Session 20
+   Telegram/restart features per their own outstanding verification plans.
+3. Continue monitoring 30-day paper trading clock (started 2026-06-29,
+   target live date 2026-07-29).
+
+---
+
 ## 2026-07-01 (Session 21 — TEMPORARY diagnostic instrumentation for book_snapshot_applied=0 regression — REVERT NEXT SESSION AFTER CAPTURE)
 
 ### Context: new regression, not the Session 18 hypothesis
