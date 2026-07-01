@@ -1,6 +1,51 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-07-01 — Session 24: "verify live" extends to config state, not just API/code behavior — Telegram alerting never actually ran
+
+### A feature can pass every test, deploy cleanly three times, and still never run — if a gating flag defaults off and nothing confirms its resolved value in production
+- `TelegramConfig.enabled` defaults to `False`. No `config.yaml` existed on
+  the VPS (confirmed via `ls` — only the committed `config.yaml.example`
+  template is present), so `KarbotConfig.from_yaml()` fell back to that
+  default in production the entire time Sessions 19-20's Telegram features
+  were being built and deployed. `TelegramNotificationAgent` no-ops
+  completely when disabled — by design, correctly — but with zero error or
+  warning distinguishing "intentionally disabled" from "accidentally never
+  configured." Three live deploys, including a real crash/restart/
+  restart-budget-exhaustion cycle today that should have fired a CRITICAL
+  Telegram alert, produced no Telegram messages at all, and nothing in the
+  logs made that obvious.
+- **This extends the project's established "verify live before trusting
+  assumptions" principle (Session 13/15/18/21/22/23 precedent — previously
+  applied to API behavior, WS schema, and the project's own defensive code
+  additions) to a new category: config/environment state.** A feature can
+  be perfectly coded, pass every unit test, and deploy cleanly multiple
+  times, and still never actually execute in production if a gating
+  configuration flag silently resolves to "off" and nothing in the system
+  surfaces that resolved value where an operator would see it. Passing
+  tests and clean deploys are necessary but not sufficient evidence that a
+  feature is running — the actual runtime configuration state has to be
+  independently confirmed, the same way live API behavior has to be
+  independently confirmed rather than assumed from docs.
+- Decision: added a `config_resolved` startup log line
+  (`karbot_runner.py`) that prints the actual resolved value of every
+  subsystem enable/disable flag once, immediately after config load and
+  before any agent starts. This is the config-state equivalent of the
+  `kalshi_first_price_update` one-shot live-confirmation log added in
+  Session 15 for the WS price pipeline — a cheap, always-on, low-noise
+  signal that answers "is this actually on?" without needing to reconstruct
+  the answer from source code or tribal knowledge every time.
+- Also documented (comment in `config.yaml.example`, not a code fix) a
+  related but separate gap found while tracing this: `KarbotConfig.
+  from_yaml()` never parses a `data_feeds:` YAML section at all, so
+  `config.yaml.example`'s `api.kalshi.enabled`/`api.polymarket.enabled`
+  keys are dead — editing them has zero runtime effect, which is its own
+  smaller instance of the same category of bug (config that looks
+  authoritative but silently isn't). Not fixed this session — flagged as
+  KNOWN DEBT, out of scope for a "config + one log line" task.
+
+---
+
 ## 2026-07-01 — Session 23: REST snapshot endpoint requires no auth — confirmed live; defensive auth caused a real outage
 
 ### Kalshi's orderbook REST endpoint requires no authentication — CONFIRMED LIVE

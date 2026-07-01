@@ -1,6 +1,134 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-07-01 (Session 24 — Telegram alerting has NEVER fired live: telegram.enabled=False, no config.yaml on VPS)
+
+### Root cause: Telegram alerting was never actually running in production, across three live deploys
+- `TelegramConfig.enabled` defaults to `False`, and `KarbotConfig.from_yaml()`
+  falls back to that default whenever `config.yaml` doesn't exist. Confirmed
+  via `ls ~/karbotrage_v1/config.yaml` on the VPS: **the file does not
+  exist** — only the committed `config.yaml.example` template is present.
+- This means every Telegram-dependent feature shipped since Session 19 has
+  been running with `telegram.enabled=False` in production the entire
+  time: the feed-down/feed-recovered Tier 1 alert (Session 20), the capped
+  auto-restart's CRITICAL "AUTO-RECOVERY EXHAUSTED" alert (Session 20), and
+  the RegulatoryIntelligence/LegFailure Tier 1 alerts from earlier
+  sessions. `TelegramNotificationAgent.run()` no-ops entirely when
+  disabled — no HTTP calls, no polling, and critically, **no error or
+  warning of any kind**. This is a silent no-op by design (correct
+  behavior when genuinely disabled), but with no config.yaml driving it
+  intentionally, it meant three separate live deploys — including today's
+  (2026-07-01, ~16:00-16:05 UTC) real PriceWatcher
+  crash/restart/restart-budget-exhaustion cycle from Session 23's work —
+  produced zero Telegram messages, and nothing in the logs made that
+  obvious without already knowing to check `config.yaml`'s existence.
+- **All "DEPLOYED BUT NOT YET CONFIRMED LIVE" notes for Telegram features
+  in SESSIONS.md/CLAUDE.md from Session 19 onward should be read as
+  "never actually exercised in production," not "pending verification."**
+  The code itself may well be correct — the entire notification layer
+  simply never ran with `enabled=True` to find out.
+
+### What was built
+- **`config.yaml.example`** — added a comment block above `telegram:`
+  making explicit that `enabled` must be `true` for *any* Telegram
+  notification to send (including Tier 1 "always send" alerts), that the
+  disabled state is a total, silent no-op (no HTTP calls, no polling, no
+  error), and pointing at the new `config_resolved` startup log line as the
+  way to confirm the actual resolved value in production. Also added a
+  comment above the `api:` section noting that `KarbotConfig.from_yaml()`
+  does not currently parse it at all — confirmed by reading the source,
+  `kalshi_ws_enabled`/`polymarket_ws_enabled` come from `DataFeedsConfig`'s
+  dataclass defaults regardless of what's written under `api:` — so a
+  future operator editing those `enabled:` keys wouldn't silently assume
+  they do something they don't. (Discovered as a byproduct of writing the
+  `config_resolved` log line and tracing exactly which fields `from_yaml`
+  actually populates; not fixed this session, since the task scope was
+  config + one log line, not a `from_yaml` rewrite — flagged in KNOWN DEBT.)
+- **`karbot_runner.py`** — added a `config_resolved` INFO log line
+  immediately after config load, before any agent is instantiated, logging
+  the actual resolved value of every subsystem enable/disable flag:
+  `telegram_enabled`, `kalshi_ws_enabled`, `polymarket_ws_enabled`,
+  `regulatory_intelligence_enabled`, `paper_mode`, `phase`. Uses
+  `config.regulatory_intelligence.enabled` (not `config.intelligence.enabled`
+  as loosely suggested in the task brief) — verified by reading
+  `karbot/core/config.py` that `IntelligenceConfig` (MarketAnalyst's LLM
+  settings) has no `enabled` field at all; the actual Regulatory
+  Intelligence on/off flag lives on `RegulatoryIntelligenceConfig`. Using
+  the brief's literal suggestion would have raised `AttributeError` at
+  every startup. This closes the "silent no-op with no error" gap this
+  session's root cause depends on — any operator reading VPS logs after a
+  restart can now see immediately which subsystems are actually active,
+  rather than needing to already suspect a config problem and go check
+  `config.yaml`'s existence and contents by hand.
+- **`tests/test_config_resolved_log.py`** (new, 1 test) —
+  `test_config_resolved_log_fires_once_with_accurate_values` runs the
+  existing `--mock-prices --exit-after-test` path (no live network calls,
+  matches the project's established smoke-test pattern) and asserts
+  exactly one `config_resolved` log line fires, with values matching the
+  resolved `KarbotConfig` defaults (no `config.yaml` present in the test
+  environment): `telegram_enabled=False`, `kalshi_ws_enabled=True`,
+  `polymarket_ws_enabled=False`, `regulatory_intelligence_enabled=True`,
+  `paper_mode=True`, `phase=1`.
+
+### What was decided
+- Did not fix `KarbotConfig.from_yaml()`'s gap in parsing a `data_feeds:`
+  YAML section (or the dead `api:` section in `config.yaml.example`) this
+  session — out of scope per explicit instruction ("config + one log line
+  change — do not modify any agent logic"). Documented the gap in a code
+  comment and here so it isn't silently rediscovered again later.
+- The actual `config.yaml` with `telegram.enabled: true` is being created
+  directly on the VPS by the operator — not committed, per
+  `.gitignore`/CLAUDE.md security rules (`config*.yaml*` pattern already
+  covers it). This session's commit contains only `config.yaml.example`
+  (template/documentation) and the `karbot_runner.py`/test changes.
+
+### Verification
+- `karbotrage_env/bin/python -m pytest tests/ -v`: **80/80 passed** ✓
+  (79 baseline + 1 new)
+- Manually confirmed the log line's values match `KarbotConfig.from_yaml()`'s
+  actual resolution by running it directly against `config.yaml.example`
+  in a Python shell — output matched the log line format exactly ✓
+- No `.env`, `config.yaml`, or `*.pem` in staged files — confirmed via
+  `git status --short`; a local, gitignored, untracked `config.yaml` exists
+  in this dev environment (pre-existing test artifact) but was never staged
+  and does not appear in the diff ✓
+- `execution/engine.py` and `main.py` untouched ✓
+- No agent logic, Telegram handler code, or event bus behavior modified —
+  confirmed via diff review: only `config.yaml.example` (comments only) and
+  one new log-line block in `karbot_runner.py`'s `run()` changed ✓
+
+### KNOWN DEBT (new, discovered as a byproduct of this session)
+- `KarbotConfig.from_yaml()` does not parse a `data_feeds:` section from
+  YAML at all — `kalshi_ws_enabled`/`polymarket_ws_enabled` always come
+  from `DataFeedsConfig()` dataclass defaults, never from `config.yaml`.
+  `config.yaml.example`'s `api.kalshi.enabled`/`api.polymarket.enabled`
+  keys are consequently dead — editing them has no runtime effect. Not
+  fixed this session (out of scope); flagged with a comment in
+  `config.yaml.example` and here. A future session should either wire
+  `data_feeds:` parsing into `from_yaml()` or remove the misleading `api:`
+  section from the example file if Phase 1 will never need it configurable.
+
+### What to do first next session
+1. **Operator creates `config.yaml` on the VPS** with `telegram.enabled: true`
+   (not committed — gitignored, environment-specific) and deploys/restarts.
+2. After restart, confirm the `config_resolved` log line appears with
+   `telegram_enabled=True`, and that a real Telegram message actually
+   arrives on the next feed-down/feed-recovered transition or restart-cap
+   event — this is the FIRST live confirmation of the entire Telegram
+   notification layer since it was built.
+3. Once Telegram is confirmed live, re-open the Session 19/20 verification
+   items (before_sleep_log fix, feed-down alert, restart-cap CRITICAL
+   alert) — these can now actually be checked against real Telegram
+   messages instead of just log lines.
+4. Consider the `data_feeds:` YAML-parsing gap (KNOWN DEBT above) if it
+   becomes relevant to a near-term task (e.g. before Phase 2 Polymarket
+   work, or before live executor work needs to toggle `kalshi_ws_enabled`
+   from config rather than code).
+5. Continue monitoring 30-day paper trading clock (started 2026-06-29,
+   target live date 2026-07-29).
+
+---
+
 ## 2026-07-01 (Session 23 — REST snapshot auth removed after live crash; CONFIRMED LIVE)
 
 ### Live outage: Session 22's REST snapshot fetch crashed PriceWatcher 3x in ~8 minutes

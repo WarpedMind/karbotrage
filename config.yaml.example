@@ -10,6 +10,13 @@ trading:
   position_size: 1000
   risk_tolerance: 0.02
 
+# NOTE: KarbotConfig.from_yaml() does not currently parse this `api:` section
+# at all (confirmed by reading karbot/core/config.py — no `raw.get("api")`
+# call exists). kalshi_ws_enabled/polymarket_ws_enabled are controlled by
+# DataFeedsConfig's dataclass defaults (kalshi_ws_enabled=True,
+# polymarket_ws_enabled=False), not by editing enabled: below. Left in this
+# file as a placeholder for a future from_yaml() update — do not assume
+# editing these values changes runtime behavior until that gap is closed.
 api:
   polymarket:
     enabled: false
@@ -42,6 +49,14 @@ monitoring:
 # bot_token and chat_id are NOT stored here.
 # Set environment variables: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
 # See .env.example for setup instructions.
+#
+# enabled MUST be true for ANY Telegram notification to send — this includes
+# Tier 1 "always send" alerts (feed-down/feed-recovered, leg failures,
+# regulatory alerts, runner auto-recovery-exhausted). When false (the
+# default), TelegramNotificationAgent no-ops entirely: no HTTP calls, no
+# polling, and no alert of any kind is ever sent, silently. There is no
+# separate error or warning if this is left false — confirm the resolved
+# value via the config_resolved log line karbot_runner.py prints at startup.
 telegram:
   enabled: false
   notify_on_trade: true

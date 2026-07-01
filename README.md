@@ -120,21 +120,40 @@ iterations to reach its current, live-confirmed state:
   silently defeated the WebSocket reconnect retry was found and fixed; the
   runner gained a capped auto-restart for `PriceWatcher` (fixed delay,
   bounded number of restarts per rolling window, then a Telegram alert if
-  exhausted); and `TelegramNotificationAgent` now sends an immediate alert
-  on feed disconnect/reconnect.
+  exhausted); and `TelegramNotificationAgent` was built to send an alert on
+  feed disconnect/reconnect and on restart-budget exhaustion.
 - **Known minor issue, not urgent**: right after a restart, when many
   markets need recovery at once, a small fraction (~5.5% observed) of REST
   snapshot fetches hit Kalshi's rate limit. Handled safely (retried on the
   next throttle window) but a concurrency limiter is a flagged follow-up.
 
+## Telegram alerting had never actually run in production (found & fixed)
+
+All of the Telegram-alerting work above was built and unit-tested correctly,
+but `TelegramConfig.enabled` defaults to `False`, and no `config.yaml`
+existed on the VPS (only the committed `config.yaml.example` template) — so
+every Telegram alert has been silently disabled through three live deploys,
+including a real crash/restart/restart-budget-exhaustion cycle that should
+have paged the operator. `TelegramNotificationAgent` no-ops completely when
+disabled: no HTTP calls, no error, no warning. Fixed by adding a
+`config_resolved` startup log line (`karbot_runner.py`) that prints the
+actual resolved value of every subsystem enable/disable flag — including
+`telegram_enabled` — once at startup, so this class of gap is visible in
+logs going forward instead of requiring source-code archaeology to notice.
+A real `config.yaml` with `telegram.enabled: true` is being created directly
+on the VPS (never committed — gitignored, environment-specific).
+
 See DECISIONS.md and SESSIONS.md for full session-by-session detail.
 
 ## Next up
 
-1. Add a concurrency limiter (`asyncio.Semaphore`) on `_request_snapshot`
+1. Confirm `config.yaml` exists on the VPS with `telegram.enabled: true`,
+   then get the first-ever live confirmation of Telegram alerting
+   (feed-down/recovered, restart-budget-exhaustion).
+2. Add a concurrency limiter (`asyncio.Semaphore`) on `_request_snapshot`
    REST calls to smooth the post-restart burst noted above — not urgent.
-2. Telegram `/mute` `/unmute` operator commands.
-3. Begin live executor spec once the 30-day paper run completes (2026-07-29).
+3. Telegram `/mute` `/unmute` operator commands.
+4. Begin live executor spec once the 30-day paper run completes (2026-07-29).
 
 ## License
 

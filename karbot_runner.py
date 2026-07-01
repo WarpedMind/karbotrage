@@ -183,6 +183,23 @@ async def run(args: argparse.Namespace = None):
     config = KarbotConfig.from_yaml("config.yaml")
     logger.info(f"Config loaded | phase={config.phase} | paper_mode={config.paper_mode}")
 
+    # Log the resolved state of every subsystem enable/disable flag. This is
+    # the single place an operator can confirm what's actually active after
+    # a restart without grepping source code — added after Telegram alerting
+    # (feed-down, restart-exhaustion) went undetected across three live
+    # deploys because telegram.enabled defaulted to False and no config.yaml
+    # existed on the VPS to override it. A wrong or missing config.yaml is a
+    # silent no-op, not an error — this line closes that gap.
+    logger.info(
+        "config_resolved | "
+        f"telegram_enabled={config.telegram.enabled} | "
+        f"kalshi_ws_enabled={config.data_feeds.kalshi_ws_enabled} | "
+        f"polymarket_ws_enabled={config.data_feeds.polymarket_ws_enabled} | "
+        f"regulatory_intelligence_enabled={config.regulatory_intelligence.enabled} | "
+        f"paper_mode={config.paper_mode} | "
+        f"phase={config.phase}"
+    )
+
     # Phase 1 hard guard — belt and suspenders beyond KarbotConfig.__init__
     if not config.paper_mode:
         logger.warning("LIVE MODE DETECTED — paper trading must run successfully first")
