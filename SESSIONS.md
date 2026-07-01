@@ -1,6 +1,91 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-06-30 (Session 18 — book_snapshot_requested id collision fix — DEPLOYED, NOT YET CONFIRMED LIVE)
+
+### What was built
+- **`agents/floor/price_watcher.py` — `_request_snapshot` correlation id fixed.**
+  VPS logs from 2026-06-30 showed 23,412 `book_snapshot_requested` events but
+  only 2,380 `book_snapshot_applied` events (10.2% completion rate) — the
+  Session 17 follow-up 3 re-subscribe recovery was firing but mostly not
+  completing. Root-cause hypothesis: `_request_snapshot` sent a hardcoded
+  `"id": 99` on every WS re-subscribe message regardless of market. Gap
+  events routinely fire across dozens of markets within the same second;
+  if Kalshi's WS server correlates responses to requests via `id`, concurrent
+  reset requests sharing id=99 would cause most responses to be dropped or
+  misattributed to the wrong market's book.
+  Fix: added `self._snapshot_request_id_counter: int = 0` in `__init__`,
+  incremented and used as the `id` value on every `_request_snapshot` call.
+  Single asyncio event loop, single call site (inside `_handle_kalshi_delta`,
+  invoked serially per incoming WS message) — confirmed no concurrent-call
+  hazard, plain int increment is safe without a lock.
+- **`agents/floor/price_watcher.py` — `book_needs_reset` log demoted to debug
+  (noise reduction, secondary fix).** This log fired at warning level on
+  every delta received while a market awaited snapshot recovery (not once
+  per gap episode) — 2.17M warning-level lines in a single day on the VPS,
+  burying real signal. Changed the call site in `_handle_kalshi_delta`
+  (previously line 537) from `log.warning` to `log.debug`. Left
+  `sequence_gap_detected` in `OrderBook.apply_delta()` untouched at warning
+  — that one already fires only once per gap (False→True transition).
+- **`tests/test_kalshi_orderbook.py` — 4 new tests (63 total):**
+  - `test_request_snapshot_uses_distinct_id_per_market` — two calls across
+    different markets produce two distinct, non-99 `id` values
+  - `test_request_snapshot_id_increments_monotonically` — successive
+    non-throttled calls produce strictly increasing ids
+  - `test_book_needs_reset_logs_at_debug_not_warning` — confirms the
+    `_handle_kalshi_delta` call site uses `log.debug`, not `log.warning`
+  - `test_sequence_gap_detected_still_logs_at_warning` — confirms
+    `apply_delta()`'s existing warning log is untouched
+
+### What was decided
+- Root cause was reasoned from the observed 10.2% completion rate plus the
+  known gap-event pattern (dozens of markets per second) rather than
+  confirmed by capturing live Kalshi WS traffic this session — same category
+  of risk flagged in prior sessions' decisions (Session 15: "verify each
+  layer against the live API/wire before declaring it fixed"). This fix is
+  the leading hypothesis, not a confirmed root cause.
+- Did not add a lock around the counter — single event loop, single call
+  site, calls are inherently serialized by the WS message-receive loop.
+
+### Verification
+- `karbotrage_env/bin/python -m pytest tests/ -v`: **63/63 passed** ✓
+  (59 baseline + 4 new)
+- `grep -n '"id": 99' agents/floor/price_watcher.py`: zero matches ✓
+- No `.env`, `config.yaml`, or `*.pem` in staged files ✓
+- `execution/engine.py` and `main.py` untouched ✓
+- Event-bus publish/subscribe pattern untouched — only the WS message body
+  and one log level changed ✓
+
+### STATUS: DEPLOYED BUT NOT YET CONFIRMED LIVE
+This fix has NOT been deployed to the VPS or verified against live Kalshi
+traffic as of this entry. Before marking resolved in DECISIONS.md, next
+session must:
+1. Deploy (`git pull origin main`, restart `karbot`).
+2. Tail VPS logs and compare `book_snapshot_requested` vs
+   `book_snapshot_applied` counts over a comparable window to the 2026-06-30
+   baseline (23,412 requested / 2,380 applied, 10.2%). A meaningfully higher
+   completion rate confirms the id-collision hypothesis; if the rate does not
+   improve, the id fix was not the (or not the only) cause and the REST
+   snapshot / forced reconnect fallback from the original KNOWN DEBT note
+   must be designed instead.
+3. Confirm `book_needs_reset` no longer dominates VPS log volume (was 2.17M
+   lines/day) — should now appear only at debug level.
+4. Re-check whether paper P&L figures ($58–$288/trade, 11–57% net margins)
+   normalize toward the expected 1–5% net range once books recover
+   reliably — do not treat paper P&L as realistic until this is confirmed.
+
+### What to do first next session
+1. Deploy this fix to the VPS and verify per the STATUS section above.
+2. If completion rate improves: update DECISIONS.md to mark the book-reset
+   recovery caveat resolved, and re-evaluate whether P&L figures are now
+   trustworthy.
+3. If completion rate does NOT improve: design REST snapshot or forced
+   reconnect fallback (see KNOWN DEBT in CLAUDE.md).
+4. Continue monitoring 30-day paper trading clock (started 2026-06-29,
+   target live date 2026-07-29).
+
+---
+
 ## 2026-06-30 (Session 17 close-out — documentation only)
 
 ### What was done

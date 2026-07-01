@@ -17,6 +17,7 @@ check before anything else ran):
     between price levels (KXCS2GAME-...-AIM: -523.00 @ 0.02, +523.00 @ 0.08)
 """
 
+import json
 import sys
 import time
 from pathlib import Path
@@ -273,3 +274,105 @@ async def test_request_snapshot_noop_when_client_none():
 
     # No _reset_requested entry written (we returned before the throttle update)
     assert "KXTEST-NOCLIENT" not in agent._reset_requested
+
+
+# ── _request_snapshot uses a unique "id" per call (not hardcoded) ───────────
+
+@pytest.mark.asyncio
+async def test_request_snapshot_uses_distinct_id_per_market():
+    """Each _request_snapshot call across different markets must use a distinct
+    "id" value — a shared hardcoded id lets Kalshi's response correlation
+    conflate concurrent resets across markets (root cause of the 10.2%
+    book_snapshot_applied completion rate observed on the VPS 2026-06-30)."""
+    agent = _make_agent()
+
+    mock_ws = AsyncMock()
+    mock_client = MagicMock()
+    mock_client._connected = True
+    mock_client._ws = mock_ws
+    agent._kalshi_client = mock_client
+
+    await agent._request_snapshot("KXTEST-IDA")
+    await agent._request_snapshot("KXTEST-IDB")
+
+    sent_ids = [json.loads(call.args[0])["id"] for call in mock_ws.send.call_args_list]
+    assert len(sent_ids) == 2
+    assert sent_ids[0] != sent_ids[1]
+    assert all(i != 99 for i in sent_ids)
+
+
+@pytest.mark.asyncio
+async def test_request_snapshot_id_increments_monotonically():
+    """The id counter increments across successive (non-throttled) calls."""
+    agent = _make_agent()
+
+    mock_ws = AsyncMock()
+    mock_client = MagicMock()
+    mock_client._connected = True
+    mock_client._ws = mock_ws
+    agent._kalshi_client = mock_client
+
+    await agent._request_snapshot("KXTEST-INC1")
+    agent._reset_requested["KXTEST-INC2"] = time.monotonic() - 11.0
+    await agent._request_snapshot("KXTEST-INC2")
+
+    sent_ids = [json.loads(call.args[0])["id"] for call in mock_ws.send.call_args_list]
+    assert sent_ids == sorted(sent_ids)
+    assert sent_ids[1] > sent_ids[0]
+
+
+# ── book_needs_reset log level (Fix 2: noise reduction) ─────────────────────
+
+@pytest.mark.asyncio
+async def test_book_needs_reset_logs_at_debug_not_warning():
+    """The book_needs_reset call site in _handle_kalshi_delta must log at debug,
+    not warning — it fires on every delta received while a market awaits
+    snapshot recovery (2.17M warning lines/day observed on the VPS), unlike
+    sequence_gap_detected in apply_delta() which fires once per gap episode
+    and must remain at warning."""
+    import agents.floor.price_watcher as pw_module
+
+    agent = _make_agent()
+    snapshot_msg = {
+        "type": "orderbook_snapshot", "seq": 1,
+        "msg": {"market_ticker": "KXTEST-LOGLEVEL", "yes_dollars_fp": [], "no_dollars_fp": []},
+    }
+    await agent._handle_kalshi_snapshot("kalshi", snapshot_msg)
+
+    book = agent._books["KXTEST-LOGLEVEL"]
+    book.sequence = 5
+    book.apply_delta("bid", 0.50, 10.0, seq=7)   # gap → needs_reset True
+    assert book.needs_reset is True
+
+    with patch.object(pw_module.log, "debug") as mock_debug, \
+         patch.object(pw_module.log, "warning") as mock_warning:
+        delta_msg = {
+            "type": "orderbook_delta", "seq": 8,
+            "msg": {"market_ticker": "KXTEST-LOGLEVEL", "price_dollars": "0.50",
+                     "delta_fp": "1.00", "side": "yes"},
+        }
+        await agent._handle_kalshi_delta("kalshi", delta_msg)
+
+        debug_events = [call.args[0] for call in mock_debug.call_args_list]
+        warning_events = [call.args[0] for call in mock_warning.call_args_list]
+
+        assert "book_needs_reset" in debug_events
+        assert "book_needs_reset" not in warning_events
+
+
+def test_sequence_gap_detected_still_logs_at_warning():
+    """apply_delta()'s sequence_gap_detected log must remain at warning level —
+    it fires once per gap episode (False→True transition), unlike
+    book_needs_reset which fires per-delta and was moved to debug."""
+    import agents.floor.price_watcher as pw_module
+
+    book = OrderBook("KXTEST-GAPWARN", "kalshi")
+    book.apply_delta("bid", 0.50, 100.0, seq=1)
+    book.sequence = 5
+
+    with patch.object(pw_module.log, "warning") as mock_warning:
+        result = book.apply_delta("bid", 0.50, 10.0, seq=7)
+        assert result is False
+
+        warning_events = [call.args[0] for call in mock_warning.call_args_list]
+        assert "sequence_gap_detected" in warning_events

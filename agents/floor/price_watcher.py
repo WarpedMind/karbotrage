@@ -340,6 +340,7 @@ class PriceWatcherAgent:
         self._last_msg_times: Dict[str, float] = defaultdict(float)
         self._seen_first_delta: set = set()
         self._reset_requested: Dict[str, float] = {}  # market_id → monotonic time of last snapshot request
+        self._snapshot_request_id_counter: int = 0  # monotonic counter for WS "id" correlation field
 
     async def start(self) -> None:
         """Start all feed connections."""
@@ -534,7 +535,7 @@ class PriceWatcherAgent:
 
         # If book needs reset (sequence gap), request a fresh snapshot
         if book.needs_reset:
-            log.warning("book_needs_reset", market=market_id)
+            log.debug("book_needs_reset", market=market_id)
             await self._request_snapshot(market_id)
             return
 
@@ -567,6 +568,11 @@ class PriceWatcherAgent:
 
         Throttled to one request per market per 10 seconds to avoid flooding the WS
         when gap events fire repeatedly on the same market.
+
+        Each call uses a unique "id" correlation value (monotonic counter). Gap
+        events routinely fire across dozens of markets within the same second,
+        so concurrent re-subscribes sharing a single hardcoded id would let
+        Kalshi's response correlation conflate requests across markets.
         """
         # Rate limit: skip if we requested a reset for this market within the last 10s
         _THROTTLE_SECS = 10.0
@@ -582,8 +588,9 @@ class PriceWatcherAgent:
 
         self._reset_requested[market_id] = time.monotonic()
         try:
+            self._snapshot_request_id_counter += 1
             msg = {
-                "id": 99,
+                "id": self._snapshot_request_id_counter,
                 "cmd": "subscribe",
                 "params": {
                     "channels": ["orderbook_delta"],

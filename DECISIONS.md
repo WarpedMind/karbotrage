@@ -1,6 +1,38 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-06-30 — Session 18: book-reset id collision fix (leading hypothesis, unconfirmed live)
+
+### Unique per-call WS correlation id, not a hardcoded 99
+- `_request_snapshot(market_id)`'s WS re-subscribe message used `"id": 99` for
+  every call (Session 17 follow-up 3). VPS logs from 2026-06-30 showed a
+  10.2% `book_snapshot_requested` → `book_snapshot_applied` completion rate
+  (23,412 vs 2,380). Leading hypothesis: Kalshi's WS server correlates
+  responses to requests via `id`; concurrent resets across dozens of markets
+  within the same second sharing id=99 caused most responses to be dropped
+  or misattributed to the wrong market.
+- Decision: added `self._snapshot_request_id_counter`, incremented per call,
+  used as the `id` value. No lock: single event loop, single call site
+  (inside `_handle_kalshi_delta`, invoked serially by the WS message loop).
+- **Status: NOT confirmed live.** This is a reasoned hypothesis from the
+  completion-rate data and the known gap-event clustering pattern, not a
+  captured/confirmed root cause (unlike the Session 15 precedent of
+  verifying against real WS traffic). Do not treat the book-reset recovery
+  KNOWN DEBT item as resolved until next session's VPS log comparison
+  confirms the completion rate actually improves. See SESSIONS.md Session 18
+  for the full verification plan.
+
+### book_needs_reset log demoted to debug (noise only, not correctness)
+- This log fired at warning level on every delta received while a market
+  awaited snapshot recovery, not once per gap episode — 2.17M warning lines
+  in a single day on the VPS, burying real signal.
+- Decision: changed this specific call site to debug. Left
+  `sequence_gap_detected` in `OrderBook.apply_delta()` at warning — it
+  already fires only once per gap (False→True transition) and is the
+  correct signal-bearing log for this condition.
+
+---
+
 ## 2026-06-30 — Session 17: TradeResolvedEvent wiring, real-time DB INSERT, book reset recovery
 
 ### S1 P&L is deterministic at fill time — no Kalshi resolution polling needed
