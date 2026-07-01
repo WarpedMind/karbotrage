@@ -23,10 +23,12 @@ import asyncio
 import logging
 import signal
 import sys
+import time
 from pathlib import Path
+from typing import Callable, Awaitable, List
 
 # Core infrastructure
-from core.events import EventBus
+from core.events import EventBus, TelegramNotificationEvent
 from karbot.core.config import KarbotConfig
 
 # Phase 1 agents — Trading Floor
@@ -68,6 +70,77 @@ async def _run_supervised(agent_name: str, coro) -> None:
         raise
     except Exception:
         logger.exception(f"Agent {agent_name!r} crashed — runner continues with remaining agents")
+
+
+async def _run_supervised_with_restart(
+    agent_name: str,
+    coro_factory: Callable[[], Awaitable],
+    bus: EventBus,
+    restart_delay_seconds: int,
+    restart_max_count: int,
+    restart_window_minutes: int,
+) -> None:
+    """
+    Run an agent, restarting it after a fixed delay if it crashes, up to a
+    capped number of restarts within a rolling time window.
+
+    Unlike `_run_supervised` (fire-once, log-and-continue), this keeps
+    relaunching `coro_factory()` after each non-cancellation crash. If more
+    than `restart_max_count` restarts occur within any rolling
+    `restart_window_minutes` window, auto-restart stops permanently for this
+    agent and a CRITICAL Telegram alert is published via the event bus
+    (never a direct call into the Telegram agent — event-bus architecture
+    is canonical).
+
+    General enough to reuse for other supervised agents in the future, but
+    wired only to PriceWatcher in this session per explicit instruction.
+
+    `coro_factory` must return a fresh awaitable on each call — a coroutine
+    object can only be awaited once, so `agent.run()` (not `agent.run`) must
+    be called anew for every restart attempt.
+    """
+    restart_timestamps: List[float] = []
+
+    while True:
+        try:
+            await coro_factory()
+            # run() returned normally (should not happen for long-running
+            # agents, but treat it the same as a crash: nothing left to
+            # supervise otherwise).
+            logger.warning(f"Agent {agent_name!r} exited without error — not restarting")
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(f"Agent {agent_name!r} crashed")
+
+        now = time.monotonic()
+        window_seconds = restart_window_minutes * 60
+        restart_timestamps = [t for t in restart_timestamps if now - t < window_seconds]
+
+        if len(restart_timestamps) >= restart_max_count:
+            logger.error(
+                f"Agent {agent_name!r} exceeded {restart_max_count} restarts "
+                f"within {restart_window_minutes} minutes — auto-recovery exhausted, "
+                f"agent left stopped, manual intervention required"
+            )
+            await bus.publish(TelegramNotificationEvent(
+                message=(
+                    f"AUTO-RECOVERY EXHAUSTED for {agent_name}\n"
+                    f"{restart_max_count}+ restarts within {restart_window_minutes} "
+                    f"minutes — agent stopped, manual intervention required."
+                ),
+                tier=1,
+                event_source="karbot_runner",
+            ))
+            return
+
+        restart_timestamps.append(now)
+        logger.warning(
+            f"Restarting {agent_name!r} in {restart_delay_seconds}s "
+            f"(restart {len(restart_timestamps)}/{restart_max_count} in window)"
+        )
+        await asyncio.sleep(restart_delay_seconds)
 
 
 def parse_args() -> argparse.Namespace:
@@ -171,12 +244,30 @@ async def run(args: argparse.Namespace = None):
     # --- 5. Start all agents as concurrent asyncio tasks ---
     tasks = []
     for agent in agents:
-        task = asyncio.create_task(
-            _run_supervised(agent.__class__.__name__, agent.run()),
-            name=agent.__class__.__name__,
-        )
+        agent_name = agent.__class__.__name__
+        if isinstance(agent, PriceWatcher):
+            # PriceWatcher gets capped auto-restart at the runner level (on top
+            # of its own internal tenacity retry) rather than dying permanently
+            # once its internal retry budget is exhausted. See KarbotConfig
+            # .system.agent_restart_* for the delay/budget/window defaults.
+            task = asyncio.create_task(
+                _run_supervised_with_restart(
+                    agent_name,
+                    agent.run,
+                    bus,
+                    config.system.agent_restart_delay_seconds,
+                    config.system.agent_restart_max_count,
+                    config.system.agent_restart_window_minutes,
+                ),
+                name=agent_name,
+            )
+        else:
+            task = asyncio.create_task(
+                _run_supervised(agent_name, agent.run()),
+                name=agent_name,
+            )
         tasks.append(task)
-        logger.info(f"Started task: {agent.__class__.__name__}")
+        logger.info(f"Started task: {agent_name}")
 
     # Always run the bus dispatcher
     bus_task = asyncio.create_task(bus.run(), name="EventBus")

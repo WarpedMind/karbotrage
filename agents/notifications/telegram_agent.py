@@ -27,6 +27,7 @@ import aiohttp
 
 from core.events import (
     EventBus,
+    FeedHealthEvent,
     LegFailureEvent,
     RegulatoryAlertEvent,
     RejectedOpportunityEvent,
@@ -72,6 +73,11 @@ class TelegramNotificationAgent:
         self._request_expiry: Dict[str, float] = {}
         self._last_update_id: int = 0
 
+        # Feed health transition tracking (platform → last known connected state).
+        # Alerts fire only on connected→disconnected or disconnected→connected
+        # transitions, not on every FeedHealthEvent while still down.
+        self._feed_connected: Dict[str, bool] = {}
+
     def register_subscriptions(self):
         self.bus.subscribe(TelegramNotificationEvent, self._handle_notification)
         self.bus.subscribe(TelegramPermissionRequestEvent, self._handle_permission_request)
@@ -79,6 +85,7 @@ class TelegramNotificationAgent:
         self.bus.subscribe(LegFailureEvent, self._handle_leg_failure)
         self.bus.subscribe(TradeExecutedEvent, self._handle_trade_executed)
         self.bus.subscribe(RejectedOpportunityEvent, self._handle_rejected_opportunity)
+        self.bus.subscribe(FeedHealthEvent, self._handle_feed_health)
         logger.info("TelegramAgent subscriptions registered")
 
     async def run(self):
@@ -269,6 +276,47 @@ class TelegramNotificationAgent:
             f"Unwind required: {event.unwind_required}\n"
             f"{self._et_timestamp()}"
         )
+        await self._outbound_queue.put(text)
+
+    async def _handle_feed_health(self, event: FeedHealthEvent):
+        """Tier 1 — always sends, ignores any future mute state.
+
+        Fires only on a connected→disconnected or disconnected→connected
+        transition for platform="kalshi" — not on every FeedHealthEvent
+        published while the feed remains down (the agent's own health
+        monitor and reconnect-retry loop can republish FeedHealthEvent(
+        connected=False) repeatedly for the same continuous outage).
+        """
+        if event.platform != "kalshi":
+            return
+
+        was_connected = self._feed_connected.get(event.platform)
+        self._feed_connected[event.platform] = event.connected
+
+        # No transition (unknown→known-state on startup, or same state repeated).
+        if was_connected is None or was_connected == event.connected:
+            return
+
+        if not self.config.telegram.enabled:
+            return
+
+        timestamp = self._et_timestamp()
+        if event.connected:
+            text = (
+                f"🚨 KARBOT RAGE! CRITICAL\n"
+                f"FEED RECOVERED\n"
+                f"Platform: {event.platform}\n"
+                f"{timestamp}"
+            )
+        else:
+            error_line = f"Error: {event.error}\n" if event.error else ""
+            text = (
+                f"🚨 KARBOT RAGE! CRITICAL\n"
+                f"FEED DOWN\n"
+                f"Platform: {event.platform}\n"
+                f"{error_line}"
+                f"{timestamp}"
+            )
         await self._outbound_queue.put(text)
 
     async def _handle_trade_executed(self, event: TradeExecutedEvent):

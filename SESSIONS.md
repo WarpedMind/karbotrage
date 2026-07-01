@@ -1,6 +1,151 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-07-01 (Session 20 — Telegram feed-down alert + capped runner-level auto-restart — DEPLOYED, NOT YET CONFIRMED LIVE)
+
+### What was built
+- **`core/events.py` — `FeedHealthEvent.error` field added.** Additive
+  optional `str = ""` field so a disconnect caused by an exception can carry
+  the underlying error message through the event bus to any subscriber,
+  without a new event type or a direct call out of price_watcher.py.
+- **`agents/floor/price_watcher.py` — `_handle_health_change` gained an
+  optional `error: str = ""` parameter**, passed through to the new
+  `FeedHealthEvent.error` field. Only the `_kalshi_connection_loop` exception
+  handler passes a real value (`str(e)`); the other two call sites
+  (successful connect, silence-timeout in `_health_monitor`) are unchanged
+  and still omit it (default `""`).
+- **`agents/notifications/telegram_agent.py` — Tier 1 feed-health alert.**
+  `TelegramNotificationAgent` now subscribes to `FeedHealthEvent` and tracks
+  `_feed_connected: Dict[str, bool]` (last known connected state per
+  platform). `_handle_feed_health`:
+  - Ignores any platform other than `"kalshi"`.
+  - Fires an alert only on a connected→disconnected or disconnected→connected
+    **transition** — not on every `FeedHealthEvent`, so repeated
+    `connected=False` events during one continuous outage (e.g. from the
+    agent's own `_health_monitor` silence check) do not spam the operator.
+  - Down alert: "FEED DOWN", platform, error message (if present), timestamp.
+  - Recovery alert: distinct "FEED RECOVERED" text, platform, timestamp.
+  - Both bypass `config.telegram.enabled`-gated Tier 2/3 message routing the
+    same way the existing `_handle_leg_failure`/`_handle_regulatory_alert`
+    Tier 1 handlers do — pushed directly to `_outbound_queue`, ignoring any
+    future mute state (mute is not yet built, but this alert path is
+    explicitly designed to bypass it once it exists, per instruction).
+- **`karbot/core/config.py` — `SystemConfig` gained three new fields**:
+  `agent_restart_delay_seconds` (default 30), `agent_restart_max_count`
+  (default 3), `agent_restart_window_minutes` (default 60). Wired into
+  `KarbotConfig.from_yaml()`'s `system:` section parsing with the same
+  default-fallback pattern as the existing `paper_resolution_delay_seconds`.
+- **`karbot_runner.py` — `_run_supervised_with_restart()`, new general-purpose
+  supervision function.** Takes `agent_name`, a `coro_factory` (a zero-arg
+  callable returning a fresh awaitable — `agent.run`, not `agent.run()`,
+  since a coroutine object can only be awaited once), the event bus, and the
+  three restart parameters. On crash (any non-`CancelledError` exception):
+  records a `time.monotonic()` timestamp, prunes timestamps outside the
+  rolling window, and either sleeps `restart_delay_seconds` and relaunches,
+  or — if the budget is exhausted — logs an error, publishes a
+  `TelegramNotificationEvent(tier=1, ...)` with distinct "AUTO-RECOVERY
+  EXHAUSTED for {agent_name}" wording (different from the Tier 1 feed-down
+  alert above), and returns permanently (agent stays stopped). The existing
+  `_run_supervised()` (fire-once, log-and-continue, no restart) is
+  **unchanged** and still used for every other agent.
+  Wired only to `PriceWatcher` in the agent task-creation loop via
+  `isinstance(agent, PriceWatcher)` — `MockPriceWatcher` (used in
+  `--mock-prices` test mode) is a separate class, not a `PriceWatcher`
+  subclass, so mock/paper-mode-under-test behavior is unaffected; confirmed
+  via a full `--mock-prices ... --exit-after-test` run (unchanged output,
+  clean exit, all agents including `MockPriceWatcher` used the old
+  `_run_supervised` path as before).
+- **`tests/test_telegram_feed_health.py`** (new, 4 tests):
+  - `test_feed_down_triggers_exactly_one_alert_per_outage` — 3 consecutive
+    `connected=False` events for one outage → exactly 1 alert, containing
+    platform + error text.
+  - `test_feed_recovery_triggers_distinct_alert` — down alert, then
+    `connected=True` → a second, textually distinct "FEED RECOVERED" alert;
+    a further `connected=True` repeat does not re-alert.
+  - `test_non_kalshi_platform_ignored` — `platform="polymarket"` never alerts.
+  - `test_disabled_telegram_does_not_queue_message` — `telegram.enabled=False`
+    → no message queued regardless of transitions.
+- **`tests/test_runner_restart.py`** (new, 3 tests):
+  - `test_four_crashes_in_window_suppresses_fourth_restart_and_alerts` — a
+    test double crashing 4 times within the rolling window: exactly 3
+    restarts occur, the 4th crash trips the budget, exactly one
+    `TelegramNotificationEvent(tier=1)` publishes with "AUTO-RECOVERY
+    EXHAUSTED" text, and the function returns (agent stays stopped —
+    `call_count == 4`, no 5th launch attempt).
+  - `test_two_crashes_in_window_restart_normally_no_critical_alert` — 2
+    crashes within the window restart normally (3rd `run()` call reaches the
+    simulated long-running/healthy state), zero CRITICAL alerts published.
+  - `test_restart_uses_configured_delay` — confirms `asyncio.sleep` is
+    actually awaited with the configured `restart_delay_seconds` value
+    (30 in the test) between a crash and the next restart attempt.
+
+### What was decided
+- **Operator decision implemented**: task-level auto-restart with a capped
+  budget (30s delay, 3 restarts/60min, then CRITICAL alert + stop) — this
+  resolves the "failure-recovery philosophy" question flagged as open in
+  Session 19 (see DECISIONS.md, marked resolved this session).
+- The restart alert (event bus `TelegramNotificationEvent`) and the
+  feed-down alert (dedicated `FeedHealthEvent` subscription) are
+  intentionally two separate mechanisms with distinct wording: a feed-down
+  alert can fire and self-resolve many times while `PriceWatcher`'s own
+  internal tenacity retry succeeds — that's normal operation, not something
+  requiring a restart. The restart-exhaustion alert only fires when the
+  *runner* gives up relaunching the agent task entirely — a categorically
+  more serious event.
+- Restart logic built as a general `_run_supervised_with_restart()` function
+  (agent-agnostic: `agent_name` + `coro_factory` + bus + three params) but
+  wired only to `PriceWatcher` this session, per explicit instruction — no
+  other agent's supervision behavior changed.
+- Added `FeedHealthEvent.error` as a plain additive optional field rather
+  than a new event type — keeps the existing event-bus subscription pattern
+  intact and avoids a second code path for "feed health, but with an error".
+
+### Verification
+- `karbotrage_env/bin/python -m pytest tests/ -v`: **72/72 passed** ✓
+  (65 baseline + 4 new in test_telegram_feed_health.py + 3 new in
+  test_runner_restart.py)
+- Full `karbot_runner.py --mode paper --mock-prices
+  tests/fixtures/paper_test_prices.json --exit-after-test` run: unchanged
+  behavior, clean exit, `MockPriceWatcher` confirmed to still use the
+  unmodified `_run_supervised` path (not the new restart wrapper) ✓
+- No `.env`, `config.yaml`, or `*.pem` in staged files ✓
+- `execution/engine.py` and `main.py` untouched ✓
+- Event-bus publish/subscribe pattern preserved — the feed-down alert flows
+  through `FeedHealthEvent` (existing subscription pattern) and the
+  restart-exhaustion alert flows through `TelegramNotificationEvent`
+  published via `bus.publish()` (no direct call into `TelegramNotificationAgent`) ✓
+- Did NOT modify the Session 19 `before_sleep_log`/structlog fix or the
+  Session 18 snapshot `id` fix — confirmed via diff review, both are present
+  and unmodified (`_log_before_sleep`, `_snapshot_request_id_counter` grep
+  confirmed intact) ✓
+
+### STATUS: DEPLOYED BUT NOT YET CONFIRMED LIVE
+Neither the Telegram feed-down alert nor the capped auto-restart has been
+exercised against a real Kalshi WS outage or a real crash on the VPS as of
+this entry. Next session must:
+1. Deploy (`git pull origin main`, restart `karbot`).
+2. Trigger (or wait for) a real Kalshi WS disconnect and confirm: a "FEED
+   DOWN" Telegram message arrives promptly, a "FEED RECOVERED" message
+   arrives on reconnect, and no duplicate alerts fire during the outage.
+3. If the disconnect is severe enough to exhaust `PriceWatcher`'s internal
+   `stop_after_attempt(10)` retry (Session 19), confirm the runner actually
+   restarts the agent after ~30s rather than leaving it dead, and that
+   restart succeeds (feed comes back without a manual `systemctl restart`).
+4. Manually verify the restart-budget CRITICAL alert path only if 4+ crashes
+   occur within an hour in practice — otherwise this stays unverified against
+   real conditions (the unit tests confirm the logic; only a live VPS
+   observation confirms the operational behavior end-to-end).
+
+### What to do first next session
+1. Deploy this fix to the VPS and verify per the STATUS section above.
+2. Continue verifying the Session 19 before_sleep_log fix and the Session 18
+   book-reset id-collision fix per their own outstanding verification plans
+   — those remain open independently of this session's work.
+3. Continue monitoring 30-day paper trading clock (started 2026-06-29,
+   target live date 2026-07-29).
+
+---
+
 ## 2026-07-01 (Session 19 — before_sleep_log/structlog TypeError killed WS reconnect retry — DEPLOYED, NOT YET CONFIRMED LIVE)
 
 ### What was built

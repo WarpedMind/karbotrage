@@ -41,19 +41,19 @@ Karbot Rage! is a multi-agent automated trading system designed for decentralize
 ## Architecture
 
 ### Target architecture (event-bus-driven agents — extend this, not the legacy path)
-- karbot_runner.py: **NEW entry point** — starts all 10 Phase 1 agents as concurrent asyncio tasks; verified working. Use this, not main.py.
+- karbot_runner.py: **NEW entry point** — starts all 10 Phase 1 agents as concurrent asyncio tasks; verified working. Use this, not main.py. `_run_supervised_with_restart()` added Session 20 — general-purpose capped auto-restart (fixed delay, restart budget within a rolling window, then a CRITICAL Telegram alert + permanent stop); wired only to `PriceWatcher` via `isinstance(agent, PriceWatcher)` in the task-creation loop — every other agent still uses the original `_run_supervised()` (unchanged, fire-once, no restart) — DEPLOYED BUT NOT YET CONFIRMED LIVE, see KNOWN DEBT.
 - core/events.py: EventBus + all typed event dataclasses — the communication backbone; priority queue uses 3-tuple (priority, seq, event) to avoid heapq comparison errors between same-priority events.
 - karbot/core/: Package exists — agents import from here
-  - karbot/core/config.py: KarbotConfig typed dataclass; Phase 1 invariants enforced structurally at `__init__` — `polymarket_ws_enabled=True` with `phase=1` raises `ValueError`, `s2_cross_platform_enabled=True` with `phase=1` raises `ValueError`; RiskConfig hard limits also enforced at instantiation. Now also has `from_yaml(path)` classmethod, `.phase` property (→ capital.phase), and `.paper_mode` property (→ system.paper_mode). TelegramConfig + RegulatoryIntelligenceConfig sub-dataclasses added.
+  - karbot/core/config.py: KarbotConfig typed dataclass; Phase 1 invariants enforced structurally at `__init__` — `polymarket_ws_enabled=True` with `phase=1` raises `ValueError`, `s2_cross_platform_enabled=True` with `phase=1` raises `ValueError`; RiskConfig hard limits also enforced at instantiation. Now also has `from_yaml(path)` classmethod, `.phase` property (→ capital.phase), and `.paper_mode` property (→ system.paper_mode). TelegramConfig + RegulatoryIntelligenceConfig sub-dataclasses added. SystemConfig gained `agent_restart_delay_seconds` (30), `agent_restart_max_count` (3), `agent_restart_window_minutes` (60) Session 20 — configures karbot_runner.py's capped auto-restart.
   - karbot/core/events.py: Re-exports all event types from core/events.py
-- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PSS/SHA-256 auth via `cryptography` against `api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` + PKCS1v15 in Session 13); `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message); `_fetch_active_kalshi_markets()` sends `mve_filter=exclude` (Kalshi's catalog is otherwise 12,000+ consecutive zero-volume multi-variable-event markets) and paginates via `cursor` (20-page cap) as a secondary safeguard, filtering on `volume_24h_fp` — confirmed live (Session 15, count=785/4000); `_handle_kalshi_snapshot`/`_handle_kalshi_delta`/`OrderBook.apply_delta` rewritten for the real WS schema (Session 15 — payload nested under `msg["msg"]`, `yes_dollars_fp`/`no_dollars_fp` are bid-only books with NO bids deriving YES asks at `1-p`, `delta_fp` is a RELATIVE change not absolute) — NOT YET reverified live, see KNOWN DEBT; `_request_snapshot` added (Session 17 follow-up 3) — WS re-subscribe on sequence gap to recover corrupt books, throttled 10s/market; unique per-call `id` (was hardcoded 99) added Session 18 to fix a suspected response-correlation collision — DEPLOYED BUT NOT YET CONFIRMED LIVE, see KNOWN DEBT; `book_needs_reset` log demoted warning→debug same session; `_kalshi_connection_loop`'s `@retry` `before_sleep` fixed Session 19 (was `before_sleep_log(log, "WARNING")`, crashed on every retry attempt because `log` is a structlog logger, not stdlib — see KNOWN DEBT) — DEPLOYED BUT NOT YET CONFIRMED LIVE; agent-level restart after `stop_after_attempt(10)` exhaustion is an open question flagged for operator decision, not implemented
+- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PSS/SHA-256 auth via `cryptography` against `api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` + PKCS1v15 in Session 13); `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message); `_fetch_active_kalshi_markets()` sends `mve_filter=exclude` (Kalshi's catalog is otherwise 12,000+ consecutive zero-volume multi-variable-event markets) and paginates via `cursor` (20-page cap) as a secondary safeguard, filtering on `volume_24h_fp` — confirmed live (Session 15, count=785/4000); `_handle_kalshi_snapshot`/`_handle_kalshi_delta`/`OrderBook.apply_delta` rewritten for the real WS schema (Session 15 — payload nested under `msg["msg"]`, `yes_dollars_fp`/`no_dollars_fp` are bid-only books with NO bids deriving YES asks at `1-p`, `delta_fp` is a RELATIVE change not absolute) — NOT YET reverified live, see KNOWN DEBT; `_request_snapshot` added (Session 17 follow-up 3) — WS re-subscribe on sequence gap to recover corrupt books, throttled 10s/market; unique per-call `id` (was hardcoded 99) added Session 18 to fix a suspected response-correlation collision — DEPLOYED BUT NOT YET CONFIRMED LIVE, see KNOWN DEBT; `book_needs_reset` log demoted warning→debug same session; `_kalshi_connection_loop`'s `@retry` `before_sleep` fixed Session 19 (was `before_sleep_log(log, "WARNING")`, crashed on every retry attempt because `log` is a structlog logger, not stdlib — see KNOWN DEBT) — DEPLOYED BUT NOT YET CONFIRMED LIVE; agent-level restart after `stop_after_attempt(10)` exhaustion — RESOLVED Session 20 (operator decided: capped runner-level auto-restart, see karbot_runner.py entry below) — DEPLOYED BUT NOT YET CONFIRMED LIVE; `_handle_health_change`/`FeedHealthEvent` gained an optional `error` field Session 20 so Telegram alerts can include the underlying disconnect error
 - agents/floor/arb_scanner.py: `ArbScannerAgent` (full impl, has register_subscriptions) + `ArbScanner` (inherits it); `run()` starts heartbeat + cache-cleanup tasks then idles; S1 opportunity detection fully wired
 - agents/floor/risk_gate.py: `RiskGateAgent` (full impl, has register_subscriptions) + `RiskGate` (inherits it); `run()` starts heartbeat task then idles; subscribes to RegulatoryAlertEvent; _regulatory_pause=True blocks all trades when urgency=5; cleared by urgency=0 event from RegulatoryIntelligenceAgent
 - agents/research/market_analyst.py: `MarketAnalystAgent` (full impl) + `MarketAnalyst` (inherits it); `run()` starts LLM analysis loop (5-min), heartbeat, cache-cleanup; no-op when ANTHROPIC_API_KEY absent; uses `AsyncAnthropic` (migrated from synchronous client in Session 14)
 - agents/research/regulatory_intelligence.py: **NEW COMPLETE** — `RegulatoryIntelligenceAgentImpl` (full impl) + `RegulatoryIntelligenceAgent` (BaseAgent stub); polls CFTC RSS + Federal Register every 6h; keyword pre-filter controls API costs; Claude Sonnet assesses urgency 1-5; urgency 3→Telegram FYI, 4→Telegram alert, 5→Telegram + trading pause; operator sends clear phrase via Telegram to resume; weekly sweep skips keyword filter; daily/cycle caps + circuit breaker; overflow queue for items exceeding per-cycle cap
 - agents/management/reflection.py: `ReflectionAgentImpl` (full impl) + `ReflectionAgent` (inherits it); `run()` starts nightly scheduler (02:00 ET / 07:00 UTC) + heartbeat; uses `AsyncAnthropic` (migrated from synchronous client in Session 14); reads/writes `logs/compliance.db` (trades, rejections, audit_trail tables — created Session 14)
 - agents/management/compliance.py: **v4 UPDATED** — IRS dual-track logging, append-only audit trail, compliance action log, REGULATORY_HALT enforcement; **polling loop removed** (now handled by RegulatoryIntelligenceAgent); subscribes to RegulatoryAlertEvent to log AI-assessed alerts to compliance_actions.jsonl; subscriptions wired to TradeExecutedEvent, TradeResolvedEvent, LegFailureEvent, RejectedOpportunityEvent, RegulatoryAlertEvent; TradeExecutedEvent handler INSERTs per-trade row into compliance.db (INSERT OR IGNORE, real-time); TradeResolvedEvent handler updates kalshi_trades.csv (atomic read-modify-write, gain_loss split across legs, status=RESOLVED) and UPDATEs compliance.db row; _ensure_log_files bootstraps compliance.db schema (trades/rejections/audit_trail) at startup so DB is always ready
-- agents/notifications/telegram_agent.py: **UPDATED** — TelegramNotificationAgent (full impl) + TelegramAgent (BaseAgent stub); subscribes to TelegramNotificationEvent, TelegramPermissionRequestEvent, RegulatoryAlertEvent (Tier 1), LegFailureEvent (Tier 1), TradeExecutedEvent (Tier 2), RejectedOpportunityEvent (Tier 2); getUpdates polling every 3s; 1 msg/sec rate limit; single-operator FIFO permission resolution; always publishes TelegramPermissionResponseEvent with response_text so RegulatoryIntelligenceAgent can check for clear phrase; enabled=False → no-op (no HTTP calls, no polling)
+- agents/notifications/telegram_agent.py: **UPDATED** — TelegramNotificationAgent (full impl) + TelegramAgent (BaseAgent stub); subscribes to TelegramNotificationEvent, TelegramPermissionRequestEvent, RegulatoryAlertEvent (Tier 1), LegFailureEvent (Tier 1), TradeExecutedEvent (Tier 2), RejectedOpportunityEvent (Tier 2), FeedHealthEvent (Tier 1, Session 20); getUpdates polling every 3s; 1 msg/sec rate limit; single-operator FIFO permission resolution; always publishes TelegramPermissionResponseEvent with response_text so RegulatoryIntelligenceAgent can check for clear phrase; enabled=False → no-op (no HTTP calls, no polling); `_handle_feed_health` (Session 20) tracks last-known connected state per platform and alerts only on connected→disconnected/disconnected→connected transition for platform="kalshi", ignoring other platforms — DEPLOYED BUT NOT YET CONFIRMED LIVE, see KNOWN DEBT
 
 ### BaseAgent interface (all runner-facing classes implement this)
 ```python
@@ -96,7 +96,7 @@ async def run(self): ...
   Confirmed live on VPS: real Kalshi trades (PGA, World Cup, tennis, MLB)
   writing correctly with full data to kalshi_trades.csv ✓
 - **30-day paper trading clock: STARTED 2026-06-29. Target live date: 2026-07-29.**
-- Full test suite: 65/65 passing ✓ (49 baseline + 4 S17 + 2 S17-fu2 + 4 S17-fu3 + 4 S18 + 2 S19)
+- Full test suite: 72/72 passing ✓ (49 baseline + 4 S17 + 2 S17-fu2 + 4 S17-fu3 + 4 S18 + 2 S19 + 4 S20-telegram + 3 S20-restart)
 - Kalshi market volume filter: FIXED AND CONFIRMED LIVE (Session 15) —
   `_fetch_active_kalshi_markets()` sends `mve_filter=exclude`, paginates
   via `cursor`, filters on `volume_24h_fp` (cast to float). Live VPS
@@ -189,15 +189,46 @@ async def run(self): ...
   agent that was dead for stretches of that window, not actively processing
   gap events. Re-verify the Session 18 completion-rate comparison only after
   this fix is confirmed live and the feed is confirmed to survive disconnects.
-- **Open architectural question (NOT decided, flagged for operator input)**:
-  once `stop_after_attempt(10)` is genuinely exhausted (10 real failed
-  reconnects), the failure still propagates and `PriceWatcher` still dies
-  permanently, requiring manual `systemctl restart karbot`. Whether this is
-  acceptable as designed (operator paged via Telegram, restarts manually) or
-  whether `_run_supervised` should itself restart a dead `PriceWatcher` after
-  a cooldown is a real failure-recovery philosophy question, not a
-  code-correctness bug — not decided unilaterally. See SESSIONS.md Session 19
-  and DECISIONS.md for full framing.
+- **RESOLVED Session 20**: once `stop_after_attempt(10)` is genuinely
+  exhausted (10 real failed reconnects), `karbot_runner.py` now restarts
+  `PriceWatcher` automatically after a 30s delay, capped at 3 restarts per
+  rolling 60-minute window (all configurable via
+  `KarbotConfig.system.agent_restart_*`); exceeding the cap stops
+  auto-restart permanently and fires a CRITICAL Telegram alert
+  ("AUTO-RECOVERY EXHAUSTED"). Operator decided on this capped-auto-restart
+  approach over "accept permanent death, manual restart only." See the
+  "Telegram feed-down alert + capped runner-level auto-restart" entry below
+  and SESSIONS.md Session 20 / DECISIONS.md for full framing.
+
+### Telegram feed-down alert + capped runner-level auto-restart — DEPLOYED BUT NOT YET CONFIRMED LIVE
+- **Feed-down/recovery Telegram alert (Session 20)**: `FeedHealthEvent`
+  gained an additive `error: str = ""` field; `TelegramNotificationAgent`
+  subscribes to `FeedHealthEvent` and alerts (Tier 1, bypasses
+  `telegram.enabled` gating the same way other Tier 1 handlers do) only on
+  a connected→disconnected or disconnected→connected transition for
+  `platform="kalshi"` — not on every repeated `connected=False` event during
+  one continuous outage. Down alert includes the error message when present;
+  recovery alert is textually distinct ("FEED RECOVERED").
+- **Capped runner-level auto-restart (Session 20)**: resolves the Session 19
+  open question — `karbot_runner.py._run_supervised_with_restart()` restarts
+  a crashed `PriceWatcher` task after `agent_restart_delay_seconds` (default
+  30s), capped at `agent_restart_max_count` (default 3) restarts within any
+  rolling `agent_restart_window_minutes` (default 60) window. Exceeding the
+  budget stops auto-restart permanently for that agent and publishes a
+  CRITICAL Telegram alert ("AUTO-RECOVERY EXHAUSTED for {agent_name}") via
+  `TelegramNotificationEvent` — a bus-published event, not a direct call.
+  General-purpose function, reusable for other agents, but wired only to
+  `PriceWatcher` this session (`isinstance(agent, PriceWatcher)` in the task
+  loop); every other agent still uses the original, unmodified
+  `_run_supervised()`.
+  Unit-tested (7 new tests total: 4 Telegram feed-health, 3 runner-restart,
+  72 total). **NOT yet deployed to VPS or exercised against a real Kalshi
+  outage or a real agent crash** — next session must deploy, then confirm:
+  (1) a real disconnect produces a "FEED DOWN" Telegram message and a "FEED
+  RECOVERED" message on reconnect with no duplicate alerts mid-outage; (2)
+  if `PriceWatcher`'s internal retry is ever exhausted, the runner actually
+  restarts it after ~30s and the feed recovers without a manual
+  `systemctl restart`.
 
 ### book_needs_reset recovery — id-collision fix applied, DEPLOYED BUT NOT YET CONFIRMED LIVE
 - `_request_snapshot(market_id)` sends a WS re-subscribe message on sequence
@@ -259,13 +290,16 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **Deploy and verify the Session 19 before_sleep_log/structlog fix on
-   VPS** — deploy (`git pull origin main`, restart `karbot`), then confirm no
+1. **Deploy and verify Session 19 + Session 20 fixes together on VPS** —
+   deploy (`git pull origin main`, restart `karbot`), then confirm: no
    `TypeError` appears on any real Kalshi WS disconnect, `kalshi_reconnect_retry`
    logs appear with increasing `attempt` numbers, and the feed actually
-   reconnects. This is a precondition for priority 2 below — bring the open
-   architectural question (agent-level restart after `stop_after_attempt(10)`
-   exhaustion) to the operator for a decision at the same time.
+   reconnects (Session 19); a "FEED DOWN" Telegram message arrives promptly on
+   any real disconnect and a distinct "FEED RECOVERED" message arrives on
+   reconnect with no duplicate alerts mid-outage (Session 20); if internal
+   retry is ever exhausted, the runner restarts `PriceWatcher` after ~30s
+   rather than leaving it dead (Session 20). This is a precondition for
+   priority 2 below.
 2. **Deploy and verify the Session 18 id-collision fix on VPS** — deploy
    (if not already live from step 1's deploy), then tail logs and compare the
    `book_snapshot_requested`/`book_snapshot_applied` completion rate against
@@ -281,7 +315,9 @@ async def run(self): ...
 3. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
    so the bot can be silenced during high-volume paper trading without
    disabling the agent entirely. Scope: `TelegramNotificationAgent`
-   command handler only; no changes to event bus or other agents.
+   command handler only; no changes to event bus or other agents. Note: the
+   Session 20 feed-down alert is explicitly designed to keep bypassing mute
+   once this is built — do not let it get silenced.
 4. **Monitor paper trading** — clock running since 2026-06-29, target
    live date 2026-07-29. Review `logs/kalshi_trades.csv` and
    `logs/compliance_actions.jsonl` periodically. Confirm resolved rows

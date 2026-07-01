@@ -44,6 +44,11 @@ class SystemConfig:
     log_level: str = "INFO"
     paper_resolution_delay_seconds: int = 300   # delay before emitting TradeResolvedEvent in paper mode
 
+    # Runner-level supervised-agent auto-restart (karbot_runner.py._run_supervised)
+    agent_restart_delay_seconds: int = 30          # fixed delay before restarting a crashed agent
+    agent_restart_max_count: int = 3               # max restarts allowed within the rolling window
+    agent_restart_window_minutes: int = 60         # rolling window for the restart budget
+
 
 @dataclass
 class DataFeedsConfig:
@@ -244,12 +249,22 @@ class KarbotConfig:
         paper = trading.get("mode", "paper") == "paper"
 
         sys_raw = raw.get("system", {})
+        default_system = SystemConfig()
         system = SystemConfig(
             paper_mode=paper,
             debug=sys_raw.get("debug", False),
             log_level=sys_raw.get("log_level", "INFO"),
             paper_resolution_delay_seconds=sys_raw.get(
                 "paper_resolution_delay_seconds", 300
+            ),
+            agent_restart_delay_seconds=sys_raw.get(
+                "agent_restart_delay_seconds", default_system.agent_restart_delay_seconds
+            ),
+            agent_restart_max_count=sys_raw.get(
+                "agent_restart_max_count", default_system.agent_restart_max_count
+            ),
+            agent_restart_window_minutes=sys_raw.get(
+                "agent_restart_window_minutes", default_system.agent_restart_window_minutes
             ),
         )
 

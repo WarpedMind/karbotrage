@@ -437,7 +437,7 @@ class PriceWatcherAgent:
 
         except Exception as e:
             log.error("kalshi_ws_error", error=str(e))
-            await self._handle_health_change("kalshi", False, 0.0)
+            await self._handle_health_change("kalshi", False, 0.0, error=str(e))
             raise
 
     KALSHI_MARKETS_PAGE_CAP = 20  # safety bound on cursor-following, ~4000 markets
@@ -632,7 +632,7 @@ class PriceWatcherAgent:
             log.warning("book_reset_send_failed", market=market_id, error=str(e))
 
     async def _handle_health_change(
-        self, platform: str, connected: bool, latency_ms: float
+        self, platform: str, connected: bool, latency_ms: float, error: str = ""
     ) -> None:
         """Publish feed health event."""
         rate = self._calculate_msg_rate(platform)
@@ -642,6 +642,7 @@ class PriceWatcherAgent:
             connected    = connected,
             latency_ms   = latency_ms,
             message_rate_per_sec = rate,
+            error        = error,
         ))
 
     def _calculate_msg_rate(self, platform: str) -> float:

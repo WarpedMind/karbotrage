@@ -86,6 +86,7 @@ class FeedHealthEvent(Event):
     connected:  bool = False
     latency_ms: float = 0.0
     message_rate_per_sec: float = 0.0
+    error:      str  = ""   # underlying error message, if disconnect was caused by an exception
 
 
 @dataclass

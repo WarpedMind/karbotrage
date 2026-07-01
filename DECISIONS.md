@@ -1,6 +1,64 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-07-01 — Session 20: Telegram feed-down alert + capped runner-level auto-restart
+
+### RESOLVED: agent-level restart after stop_after_attempt(10) exhaustion (was open, flagged in Session 19)
+- Session 19 flagged a real failure-recovery philosophy question: once
+  `PriceWatcher`'s internal `@retry` (`stop_after_attempt(10)`) is exhausted,
+  should the agent stay dead until a manual `systemctl restart karbot`, or
+  should something restart it automatically?
+- **Operator decision: task-level auto-restart with a capped budget.**
+  `karbot_runner.py`'s supervision layer now restarts a crashed
+  `PriceWatcher` task after a fixed 30-second delay, up to 3 restarts within
+  any rolling 60-minute window. If that budget is exceeded, auto-restart
+  stops permanently for the affected agent and a CRITICAL Telegram alert
+  fires ("AUTO-RECOVERY EXHAUSTED") instead of continuing to retry silently
+  forever — bounding the failure mode instead of choosing between "never
+  restart" and "restart forever, possibly masking a real outage."
+- Rationale: an unbounded auto-restart risks silently hiding a genuine,
+  longer-lived Kalshi-side or credential-side outage (the operator would
+  never know the feed had been down for hours if the runner just kept
+  quietly relaunching); a hard cap converts "silent infinite retry" into
+  "bounded retry, then a loud, distinct alert demanding human attention" —
+  consistent with the project's existing pattern of capped budgets +
+  circuit-breaker-style Telegram alerts elsewhere (e.g. RegulatoryIntelligence's
+  daily-cap/circuit-breaker Telegram alerts).
+- Decision: implemented as a general-purpose `_run_supervised_with_restart()`
+  function (agent name + coro factory + bus + three configurable params),
+  not a `PriceWatcher`-specific hack — reusable for other agents in the
+  future — but wired only to `PriceWatcher` this session; every other
+  agent's supervision is unchanged (`_run_supervised()`, untouched).
+- Configurable via `KarbotConfig.system.agent_restart_delay_seconds` (30),
+  `agent_restart_max_count` (3), `agent_restart_window_minutes` (60) — not
+  hardcoded, so the operator can retune without a code change.
+- **Status: NOT confirmed live.** Unit-tested (3 new tests) against a
+  simulated crashing agent; not yet exercised against a real Kalshi outage
+  or a real crash on the VPS. See SESSIONS.md Session 20 for the
+  verification plan.
+
+### FeedHealthEvent-driven Tier 1 Telegram alert on feed down/recovery
+- Added a `FeedHealthEvent.error: str = ""` additive field and a
+  `TelegramNotificationAgent._handle_feed_health` subscriber that alerts on
+  a connected→disconnected or disconnected→connected transition for
+  `platform="kalshi"` only, tracking last-known state per platform to avoid
+  re-alerting on every repeated `connected=False` event during one
+  continuous outage.
+- Decision: routed entirely through the existing event-bus
+  publish/subscribe pattern (`FeedHealthEvent` → `TelegramNotificationAgent`
+  subscription), not a new direct call from `price_watcher.py` into
+  Telegram — consistent with "event-bus architecture is canonical" from
+  CLAUDE.md.
+- Decision: this alert bypasses `config.telegram.enabled`-gated tier
+  routing the same way existing Tier 1 handlers (`_handle_leg_failure`,
+  `_handle_regulatory_alert`) already do, and is explicitly designed to keep
+  bypassing any future mute/unmute feature (not yet built) — a dead price
+  feed should never be silenced.
+- **Status: NOT confirmed live.** Unit-tested (4 new tests); not yet
+  exercised against a real Kalshi WS disconnect/reconnect on the VPS.
+
+---
+
 ## 2026-07-01 — Session 19: structlog-incompatible before_sleep_log crashed WS reconnect retry
 
 ### Custom before_sleep callback over any structlog/tenacity compatibility shim
@@ -29,6 +87,7 @@
   than the still-unconfirmed Session 18 id-collision hypothesis below.
 
 ### Agent-level restart after stop_after_attempt(10) exhaustion — NOT decided, flagged for operator
+### → RESOLVED Session 20: see "RESOLVED: agent-level restart..." entry above.
 - Once `stop_after_attempt(10)` is genuinely exhausted, `PriceWatcher` dies
   permanently (`tenacity.RetryError` propagates through `_run_supervised` in
   `karbot_runner.py`) and requires a manual `systemctl restart karbot`.
