@@ -243,6 +243,12 @@ class KalshiWebSocketClient:
         self._msg_count   = 0
         self._last_msg_time = time.monotonic()
 
+        # TEMPORARY DIAGNOSTIC — Session 21, revert after capture
+        # Running tally of every msg_type seen by _route_message, logged as a
+        # periodic summary so we don't have to grep tens of thousands of
+        # per-message diagnostic lines by hand. See _diag_summary_loop().
+        self._diag_msg_type_counts: Dict[str, int] = defaultdict(int)
+
     def _auth_headers(self) -> Dict[str, str]:
         """Generate RSA-signed auth headers for the WebSocket upgrade request."""
         return _build_kalshi_auth_headers(
@@ -290,20 +296,47 @@ class KalshiWebSocketClient:
 
     async def listen(self) -> None:
         """Process incoming messages indefinitely."""
-        async for raw_msg in self._ws:
-            self._msg_count += 1
-            self._last_msg_time = time.monotonic()
-            try:
-                msg = json.loads(raw_msg)
-                await self._route_message(msg)
-            except json.JSONDecodeError:
-                log.error("kalshi_ws_bad_json", msg=raw_msg[:200])
-            except Exception as e:
-                log.error("kalshi_ws_message_error", error=str(e))
+        # TEMPORARY DIAGNOSTIC — Session 21, revert after capture
+        diag_summary_task = asyncio.create_task(self._diag_summary_loop())
+        try:
+            async for raw_msg in self._ws:
+                self._msg_count += 1
+                self._last_msg_time = time.monotonic()
+                try:
+                    msg = json.loads(raw_msg)
+                    await self._route_message(msg)
+                except json.JSONDecodeError:
+                    log.error("kalshi_ws_bad_json", msg=raw_msg[:200])
+                except Exception as e:
+                    log.error("kalshi_ws_message_error", error=str(e))
+        finally:
+            # TEMPORARY DIAGNOSTIC — Session 21, revert after capture
+            diag_summary_task.cancel()
+
+    # TEMPORARY DIAGNOSTIC — Session 21, revert after capture
+    async def _diag_summary_loop(self) -> None:
+        """Log a running tally of msg_type counts every 60s, so the raw
+        per-message kalshi_raw_msg_diag lines don't have to be grepped by
+        hand to see the overall traffic composition."""
+        try:
+            while True:
+                await asyncio.sleep(60)
+                log.info("kalshi_raw_msg_diag_summary", counts=dict(self._diag_msg_type_counts))
+        except asyncio.CancelledError:
+            pass
 
     async def _route_message(self, msg: Dict) -> None:
         """Route incoming message to appropriate handler."""
         msg_type = msg.get("type", "")
+
+        # TEMPORARY DIAGNOSTIC — Session 21, revert after capture
+        # Unconditional per-message log + running tally, to see whether
+        # snapshot responses to _request_snapshot's re-subscribes are
+        # arriving under an unexpected type name, with unexpected ids, or
+        # not arriving at all — book_snapshot_applied has dropped to zero
+        # while book_snapshot_requested keeps climbing.
+        log.info("kalshi_raw_msg_diag", msg_type=msg_type, msg_id=msg.get("id"))
+        self._diag_msg_type_counts[msg_type or "<empty>"] += 1
 
         if msg_type == "orderbook_snapshot":
             await self._on_snapshot("kalshi", msg)
@@ -628,6 +661,9 @@ class PriceWatcherAgent:
             }
             await self._kalshi_client._ws.send(json.dumps(msg))
             log.info("book_snapshot_requested", market=market_id)
+            # TEMPORARY DIAGNOSTIC — Session 21, revert after capture
+            log.info("kalshi_raw_msg_diag_sent",
+                      msg_id=self._snapshot_request_id_counter, market=market_id)
         except Exception as e:
             log.warning("book_reset_send_failed", market=market_id, error=str(e))
 

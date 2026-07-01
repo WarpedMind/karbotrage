@@ -1,6 +1,110 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-07-01 (Session 21 — TEMPORARY diagnostic instrumentation for book_snapshot_applied=0 regression — REVERT NEXT SESSION AFTER CAPTURE)
+
+### Context: new regression, not the Session 18 hypothesis
+- `book_snapshot_requested` climbed from 23,412/day (Session 18 baseline) to
+  3,365 in an 18-minute window right after the latest restart, while
+  `book_snapshot_applied` dropped to **zero** in that same window — down
+  from a 37% apply rate measured just before the restart. This is worse
+  than the original Session 18 problem (10.2% completion), not an
+  improvement, and the drop to exactly zero suggests something structural
+  changed, not a continuation of the id-collision issue.
+- Two hypotheses were checked and ruled out by code/diff review before
+  reaching for instrumentation: (1) a WS "id" collision between
+  `_request_snapshot`'s counter and `subscribe_markets`'s per-batch ids —
+  reviewed both call sites, ids are independent counters with no shared
+  state or expected collision; (2) a regression introduced by the Session
+  20 Telegram/restart-cap deploy — reviewed that diff, it touches
+  `FeedHealthEvent`, `TelegramNotificationAgent`, and `karbot_runner.py`
+  only; nothing in the snapshot-response code path changed. Both ruled out;
+  root cause is unknown without seeing the actual wire traffic.
+
+### What was built (TEMPORARY — must be reverted next session after capture)
+Following the same temporary-diagnostic-then-revert pattern used in
+Session 15 to resolve the WS schema ambiguity (raw-message logging, capture
+real traffic, resolve, revert):
+- **`agents/floor/price_watcher.py` — `KalshiWebSocketClient._route_message`**:
+  now logs `kalshi_raw_msg_diag` at INFO for **every** incoming message
+  (`msg_type`, `msg_id`), unconditionally — not just `orderbook_snapshot` —
+  so we can see if snapshot responses are arriving under an unexpected
+  `type`, with unexpected `id`s, or not arriving on the wire at all.
+- **`_diag_msg_type_counts: Dict[str, int]`** (new field on
+  `KalshiWebSocketClient.__init__`) — incremented per message in
+  `_route_message` for every `msg_type` seen (empty type bucketed as
+  `"<empty>"`).
+- **`_diag_summary_loop()`** (new method on `KalshiWebSocketClient`) — logs
+  `kalshi_raw_msg_diag_summary` with the running tally once every 60s, so
+  the per-message lines don't have to be grepped by hand to see traffic
+  composition. Started as a sibling task in `listen()`, cancelled in a
+  `finally` block when `listen()` exits (WS disconnect or cancellation) —
+  no dangling task.
+- **`_request_snapshot()`** — added `kalshi_raw_msg_diag_sent` INFO log
+  immediately after a successful send, with the `msg_id` and `market_id`
+  just sent, so sent-ids can be cross-referenced against received-ids in
+  the `kalshi_raw_msg_diag` stream.
+- All four additions are marked with `# TEMPORARY DIAGNOSTIC — Session 21,
+  revert after capture` comments, placed immediately around each change so
+  they are unmistakable and trivial to find/remove (`grep -n "TEMPORARY
+  DIAGNOSTIC" agents/floor/price_watcher.py`).
+
+### What was explicitly NOT changed
+- `_handle_kalshi_snapshot`'s matching/routing logic — untouched.
+- The 10s throttle in `_request_snapshot` — untouched.
+- The `_snapshot_request_id_counter` monotonic id fix (Session 18) —
+  untouched, confirmed present via `grep`.
+- The `before_sleep_log`/structlog fix (Session 19) — untouched, confirmed
+  present via `grep`.
+- The Telegram feed-down alert and capped auto-restart (Session 20) —
+  untouched; only `agents/floor/price_watcher.py` was modified this
+  session, none of `core/events.py`, `agents/notifications/telegram_agent.py`,
+  `karbot/core/config.py`, or `karbot_runner.py`.
+- No event-bus publish/subscribe pattern changes — this is logging only.
+- `execution/engine.py` and `main.py` — untouched.
+
+### Verification
+- `karbotrage_env/bin/python -m pytest tests/ -v`: **72/72 passed**,
+  unchanged from baseline — confirms no test asserts on log volume/content
+  in a way this instrumentation breaks ✓
+- Diff review (`git diff agents/floor/price_watcher.py`): confirms every
+  change is additive (new log lines, a new counter dict, a new
+  cancel-on-exit summary task) — no existing conditional, return value, or
+  control-flow branch was altered ✓
+- No `.env`, `config.yaml`, or `*.pem` in staged files ✓
+
+### STATUS: TEMPORARY — MUST BE REVERTED NEXT SESSION AFTER CAPTURE
+This instrumentation is not a fix and not a feature. It exists solely to
+capture real wire traffic during the next live window so the actual root
+cause of the `book_snapshot_applied=0` regression can be diagnosed from
+data instead of a third guess. Next session must:
+1. Deploy (`git pull origin main`, restart `karbot`).
+2. Let it run through at least one `book_snapshot_requested` burst, then
+   pull VPS logs and inspect: does `kalshi_raw_msg_diag` show any message
+   type at all correlating with sent `msg_id`s from
+   `kalshi_raw_msg_diag_sent`? Is Kalshi responding with `orderbook_snapshot`
+   under an unexpected id, a different type entirely, an `error` message, or
+   not responding at all? Check `kalshi_raw_msg_diag_summary` for the
+   overall type-count breakdown across the capture window.
+3. Diagnose and fix the actual root cause based on that data.
+4. **Revert all Session 21 diagnostic code** (`grep -n "TEMPORARY
+   DIAGNOSTIC" agents/floor/price_watcher.py` to find every change) once
+   root cause is captured and understood — this must not stay in the
+   codebase permanently, same as the Session 15 precedent.
+
+### What to do first next session
+1. Deploy this instrumentation to the VPS and capture live traffic per the
+   STATUS section above.
+2. Diagnose the `book_snapshot_applied=0` regression from captured data,
+   fix it, then revert all Session 21 diagnostic logging.
+3. Continue verifying the Session 19 before_sleep_log fix, the Session 18
+   book-reset id-collision fix, and the Session 20 Telegram/restart
+   features per their own outstanding verification plans.
+4. Continue monitoring 30-day paper trading clock (started 2026-06-29,
+   target live date 2026-07-29).
+
+---
+
 ## 2026-07-01 (Session 20 — Telegram feed-down alert + capped runner-level auto-restart — DEPLOYED, NOT YET CONFIRMED LIVE)
 
 ### What was built
