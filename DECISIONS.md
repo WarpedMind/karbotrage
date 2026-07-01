@@ -1,6 +1,62 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-07-01 — Session 23: REST snapshot endpoint requires no auth — confirmed live; defensive auth caused a real outage
+
+### Kalshi's orderbook REST endpoint requires no authentication — CONFIRMED LIVE
+- Session 22 added RSA-PSS auth headers to the new REST snapshot fetch
+  defensively, without empirical verification, despite Kalshi's docs
+  already stating the endpoint requires no auth. That session's own
+  SESSIONS.md entry explicitly flagged this as unverified.
+- Deploying it caused a real live outage: `PriceWatcher` crashed 3 times in
+  ~8 minutes with `AttributeError: 'NoneType' object has no attribute
+  'resume_reading'` inside `websockets`' `recv()` flow control, because
+  `_request_snapshot()` called `_load_kalshi_private_key()` (blocking file
+  read) and `_build_kalshi_auth_headers()` (blocking RSA-PSS signing)
+  synchronously inside an `async def`, on every REST call. Under real gap
+  -event load this blocked the event loop long enough to miss Kalshi's WS
+  ping frames within `ping_timeout=10s`; Kalshi tore down the transport,
+  and the next `recv()` hit a `None` transport. This exhausted the Session
+  20 restart budget (3/60min) and left the agent permanently stopped.
+- Decision: removed the auth headers entirely from `_request_snapshot`.
+  **Live-confirmed** after deploy: the unauthenticated `GET
+  /trade-api/v2/markets/{ticker}/orderbook` call returns HTTP 200, with
+  1,764 `book_snapshot_applied` events firing correctly in a ~2.5 minute
+  window and zero crashes over sustained load.
+- **This is a concrete instance of the project's standing "verify live
+  before trusting assumptions" principle (Session 13/15/18/21/22
+  precedent) applying to the project's own defensive code additions, not
+  just third-party claims or ambiguous docs.** A "safe-looking" defensive
+  addition (auth headers "just in case") was itself the direct cause of a
+  production outage, because it was never empirically checked against the
+  documented behavior it was defending against. Going forward: when docs
+  already state a specific behavior (e.g. "no auth required"), treat
+  deviating from that documented behavior as the thing that needs
+  justification and verification — not the reverse.
+
+### Shared aiohttp.ClientSession for REST snapshot fetches
+- Replaced the per-call `async with aiohttp.ClientSession() as session:`
+  pattern in `_request_snapshot` with a lazily-created, agent-level shared
+  session (`PriceWatcherAgent._get_rest_session()`), closed in `stop()`.
+- Decision: independent of the auth-blocking bug, unbounded per-call
+  session creation is wasteful under the bursty gap-event load this path
+  is designed to handle (dozens of markets can go stale in the same
+  second). A single reused session avoids that overhead entirely.
+
+### Concurrency limiter on REST snapshot calls — flagged, NOT built this session
+- Live verification also surfaced 56/1,016 (~5.5%) REST snapshot requests
+  hitting HTTP 429 (`too_many_requests`) during the initial post-restart
+  surge, when many markets simultaneously needed recovery.
+- Decision: not fixed this session — already handled safely by the
+  existing failure path (429 logged as `book_reset_rest_failed`,
+  `_gap_detected` stays `True`, retried on the next throttled window). Not
+  a crash risk, purely an efficiency gap under restart-time bursts.
+  Flagged as KNOWN DEBT for a future session to add an `asyncio.Semaphore`
+  (or similar) bounding in-flight `_request_snapshot` calls — explicitly
+  deferred per instruction, not urgent.
+
+---
+
 ## 2026-07-01 — Session 22: book-reset recovery replaced with REST fetch (WS re-subscribe confirmed non-functional)
 
 ### Kalshi does not send a fresh snapshot on duplicate WS subscribe — confirmed via live capture + docs

@@ -1,6 +1,141 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-07-01 (Session 23 — REST snapshot auth removed after live crash; CONFIRMED LIVE)
+
+### Live outage: Session 22's REST snapshot fetch crashed PriceWatcher 3x in ~8 minutes
+- Deploying Session 22's REST-based book-reset recovery caused
+  `PriceWatcher` to crash three times in roughly 8 minutes with
+  `AttributeError: 'NoneType' object has no attribute 'resume_reading'`
+  inside `websockets`' internal `recv()` flow-control path, exhausting the
+  Session 20 restart budget (3 restarts/60min) and leaving the agent
+  permanently stopped.
+- **Root cause**: `_request_snapshot()` called `_load_kalshi_private_key()`
+  (blocking disk read) and `_build_kalshi_auth_headers()` (blocking
+  RSA-PSS signing) synchronously, inside an `async def`, on every single
+  REST snapshot fetch. Under the observed load (~13,761
+  `book_needs_reset`/15min, ~1,073 throttled-through REST calls), that
+  blocking work stacked up on the event loop long enough that the WS
+  listen loop couldn't respond to Kalshi's ping frames within
+  `ping_timeout=10s`. Kalshi tore down the WS transport mid-flight; the
+  next `recv()` call then hit a `None` transport, producing the crash.
+  Additionally, Kalshi's own docs confirm
+  `GET /trade-api/v2/markets/{ticker}/orderbook` requires **no
+  authentication** — the auth headers added in Session 22 were purely
+  defensive, added without empirical verification (explicitly flagged as
+  an open question in that session's own SESSIONS.md entry), and turned
+  out to be the direct cause of a real outage rather than a safety margin.
+
+### What was built
+- **`agents/floor/price_watcher.py` — `_request_snapshot` no longer
+  authenticates.** Removed the `_load_kalshi_private_key()` and
+  `_build_kalshi_auth_headers()` calls entirely; the REST `GET` now sends
+  no `headers` kwarg at all.
+- **Shared `aiohttp.ClientSession`** — added `PriceWatcherAgent._rest_session`
+  (initialized to `None`) and a new `_get_rest_session()` helper that lazily
+  creates one `aiohttp.ClientSession` and reuses it across every
+  `_request_snapshot` call, instead of the prior `async with
+  aiohttp.ClientSession() as session:` pattern that constructed a brand new
+  session per call. Gap events fire across many markets within the same
+  second under real load, so unbounded per-call session creation was
+  wasteful even independent of the blocking-auth bug. Closed in
+  `PriceWatcherAgent.stop()` (`if self._rest_session is not None and not
+  self._rest_session.closed: await self._rest_session.close()`) so nothing
+  leaks across restarts.
+- **Fix 2 investigated, no change needed**: confirmed
+  `KalshiWebSocketClient.__init__` already loads the private key exactly
+  once at construction (`self._private_key = _load_kalshi_private_key(...)`)
+  and reuses it for the WS connect handshake — this is a one-time cost per
+  WS connection, not a recurring per-message/per-call blocking pattern like
+  the bug in `_request_snapshot`. No fix needed here; noted in this
+  session's summary as investigated and ruled out, per instruction not to
+  touch it unless trivially safe.
+- **`tests/test_kalshi_orderbook.py`** — 4 new tests (79 total):
+  - `test_request_snapshot_does_not_call_auth_helpers` — confirms neither
+    auth helper is called and the GET carries no `headers` kwarg.
+  - `test_request_snapshot_reuses_shared_session_across_calls` — three
+    calls across different (non-throttled) markets construct
+    `aiohttp.ClientSession()` at most once.
+  - `test_get_rest_session_returns_same_instance` — repeated
+    `_get_rest_session()` calls return the identical object while open.
+  - `test_stop_closes_rest_session` — `PriceWatcherAgent.stop()` awaits
+    `close()` on the shared session and clears the reference.
+  - Existing throttle/success/failure tests for `_request_snapshot`
+    rewritten to mock the new shared-session shape
+    (`agent._get_rest_session()` patched directly) instead of patching
+    `aiohttp.ClientSession` as a fresh per-call context manager.
+
+### LIVE VERIFICATION — CONFIRMED
+Operator deployed to the VPS and reported back:
+- **HTTP status for the unauthenticated `GET
+  /trade-api/v2/markets/{ticker}/orderbook`: 200.** 1,764
+  `book_snapshot_applied` events fired in a ~2.5 minute window with valid
+  order book data — the REST-based recovery mechanism (Session 22's design,
+  Session 23's no-auth fix) works end-to-end for the first time.
+- **Zero crashes** (`TypeError`/`resume_reading` or otherwise) observed
+  over sustained load after the fix deployed.
+- **Minor known issue, not urgent**: 56 of 1,016 REST requests (~5.5%) hit
+  HTTP 429 (`too_many_requests`) during the initial post-restart surge, when
+  many markets simultaneously had stale books needing recovery at once.
+  Already handled gracefully by the existing failure path —
+  `book_reset_rest_failed` logs the 429, `_gap_detected` stays `True`, and
+  the next throttled window (10s later) retries. Not a crash risk, just an
+  efficiency gap under restart-time bursts.
+
+### What was decided
+- Root cause (per-call blocking crypto/file I/O on the event loop) was
+  confirmed via direct code inspection of the old `_request_snapshot`
+  implementation and cross-referenced against `websockets`' documented
+  `ping_timeout` behavior, then confirmed as the fix via live deploy — not
+  just inferred from the crash traceback alone.
+- Did not implement a concurrency limiter (`asyncio.Semaphore`) on
+  in-flight REST snapshot calls this session, despite the 429 finding —
+  explicitly flagged as a non-urgent follow-up per instruction. See KNOWN
+  DEBT below.
+
+### KNOWN DEBT — follow-up, not urgent
+- **REST snapshot fetch has no concurrency limit.** Right after a restart
+  (or any event that leaves many markets simultaneously with stale books),
+  `_request_snapshot` can fire many concurrent REST calls in a short
+  window — observed 56/1,016 (~5.5%) hitting Kalshi's rate limit (HTTP
+  429) in the post-restart surge during this session's live verification.
+  Currently handled safely (429 logged, gap stays detected, retried on the
+  next 10s throttle window) but wastes calls and delays recovery for the
+  affected markets. A future session should add an `asyncio.Semaphore` (or
+  similar) bounding in-flight `_request_snapshot` REST calls to smooth
+  bursts, especially right after a restart. Not implemented this session —
+  not a crash risk, purely an efficiency improvement.
+
+### Verification
+- `karbotrage_env/bin/python -m pytest tests/ -v`: **79/79 passed** ✓
+  (75 baseline + 4 new)
+- Diff review (`git diff agents/floor/price_watcher.py`): confirms the
+  throttle logic, the "client connected" guard, and the failure-handling
+  path are unchanged in substance — only the transport (removed
+  authentication, added a shared session) changed ✓
+- No `.env`, `config.yaml`, or `*.pem` in staged files ✓
+- `execution/engine.py` and `main.py` untouched ✓
+- Session 19 (`before_sleep_log`/structlog fix) and Session 20 (Telegram
+  feed-down alert, capped auto-restart) code confirmed untouched —
+  `agents/notifications/telegram_agent.py`, `core/events.py`,
+  `karbot/core/config.py`, and `karbot_runner.py` are not in this session's
+  diff at all ✓
+- **Live deploy on the VPS**: 200 HTTP status confirmed, 1,764
+  `book_snapshot_applied` in ~2.5 min, zero crashes over sustained load ✓
+
+### What to do first next session
+1. Continue monitoring the book-reset recovery path on the VPS — confirm
+   the 429 rate stays low/stable and doesn't grow, and that
+   `book_needs_reset` rate trends down as recovery keeps working.
+2. Consider the concurrency-limiter follow-up (KNOWN DEBT above) if 429s
+   become a recurring pattern rather than a one-time post-restart surge.
+3. Continue verifying the Session 19 before_sleep_log fix and the Session 20
+   Telegram/restart features per their own outstanding verification plans.
+4. Continue monitoring 30-day paper trading clock (started 2026-06-29,
+   target live date 2026-07-29).
+
+---
+
 ## 2026-07-01 (Session 22 — book-reset recovery replaced with REST fetch; Session 21 diagnostics reverted — DEPLOYED, NOT YET CONFIRMED LIVE)
 
 ### Root cause of the book_snapshot_applied=0 regression (from Session 21's live capture)

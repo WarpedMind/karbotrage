@@ -46,7 +46,7 @@ Karbot Rage! is a multi-agent automated trading system designed for decentralize
 - karbot/core/: Package exists — agents import from here
   - karbot/core/config.py: KarbotConfig typed dataclass; Phase 1 invariants enforced structurally at `__init__` — `polymarket_ws_enabled=True` with `phase=1` raises `ValueError`, `s2_cross_platform_enabled=True` with `phase=1` raises `ValueError`; RiskConfig hard limits also enforced at instantiation. Now also has `from_yaml(path)` classmethod, `.phase` property (→ capital.phase), and `.paper_mode` property (→ system.paper_mode). TelegramConfig + RegulatoryIntelligenceConfig sub-dataclasses added. SystemConfig gained `agent_restart_delay_seconds` (30), `agent_restart_max_count` (3), `agent_restart_window_minutes` (60) Session 20 — configures karbot_runner.py's capped auto-restart.
   - karbot/core/events.py: Re-exports all event types from core/events.py
-- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PSS/SHA-256 auth via `cryptography` against `api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` + PKCS1v15 in Session 13); `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message); `_fetch_active_kalshi_markets()` sends `mve_filter=exclude` (Kalshi's catalog is otherwise 12,000+ consecutive zero-volume multi-variable-event markets) and paginates via `cursor` (20-page cap) as a secondary safeguard, filtering on `volume_24h_fp` — confirmed live (Session 15, count=785/4000); `_handle_kalshi_snapshot`/`_handle_kalshi_delta`/`OrderBook.apply_delta` rewritten for the real WS schema (Session 15 — payload nested under `msg["msg"]`, `yes_dollars_fp`/`no_dollars_fp` are bid-only books with NO bids deriving YES asks at `1-p`, `delta_fp` is a RELATIVE change not absolute) — NOT YET reverified live, see KNOWN DEBT; `_request_snapshot` added (Session 17 follow-up 3) — originally a WS re-subscribe on sequence gap, throttled 10s/market; unique per-call `id` (was hardcoded 99) added Session 18 to fix a suspected response-correlation collision; `book_needs_reset` log demoted warning→debug same session; **REPLACED Session 22** — live wire capture (Session 21) confirmed Kalshi acks a duplicate WS subscribe with `{"type":"ok"}`, never a fresh snapshot, so the WS re-subscribe path could never have worked; `_request_snapshot` now makes an authenticated `aiohttp` GET to `/trade-api/v2/markets/{ticker}/orderbook`, parses `orderbook_fp.yes_dollars`/`no_dollars`, and calls `apply_snapshot(bids, asks, seq=0)` directly (sentinel `seq=0` short-circuits `apply_delta`'s gap check so the next delta naturally realigns); 10s throttle and connected-guard unchanged; REST failures log `book_reset_rest_failed` and leave `_gap_detected=True` for a throttled retry — DEPLOYED BUT NOT YET CONFIRMED LIVE, see KNOWN DEBT; `_kalshi_connection_loop`'s `@retry` `before_sleep` fixed Session 19 (was `before_sleep_log(log, "WARNING")`, crashed on every retry attempt because `log` is a structlog logger, not stdlib — see KNOWN DEBT) — DEPLOYED BUT NOT YET CONFIRMED LIVE; agent-level restart after `stop_after_attempt(10)` exhaustion — RESOLVED Session 20 (operator decided: capped runner-level auto-restart, see karbot_runner.py entry below) — DEPLOYED BUT NOT YET CONFIRMED LIVE; `_handle_health_change`/`FeedHealthEvent` gained an optional `error` field Session 20 so Telegram alerts can include the underlying disconnect error
+- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PSS/SHA-256 auth via `cryptography` against `api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` + PKCS1v15 in Session 13); `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message); `_fetch_active_kalshi_markets()` sends `mve_filter=exclude` (Kalshi's catalog is otherwise 12,000+ consecutive zero-volume multi-variable-event markets) and paginates via `cursor` (20-page cap) as a secondary safeguard, filtering on `volume_24h_fp` — confirmed live (Session 15, count=785/4000); `_handle_kalshi_snapshot`/`_handle_kalshi_delta`/`OrderBook.apply_delta` rewritten for the real WS schema (Session 15 — payload nested under `msg["msg"]`, `yes_dollars_fp`/`no_dollars_fp` are bid-only books with NO bids deriving YES asks at `1-p`, `delta_fp` is a RELATIVE change not absolute) — NOT YET reverified live, see KNOWN DEBT; `_request_snapshot` added (Session 17 follow-up 3) — originally a WS re-subscribe on sequence gap, throttled 10s/market; unique per-call `id` (was hardcoded 99) added Session 18 to fix a suspected response-correlation collision; `book_needs_reset` log demoted warning→debug same session; **REPLACED Session 22, auth removed Session 23 — CONFIRMED LIVE** — live wire capture (Session 21) confirmed Kalshi acks a duplicate WS subscribe with `{"type":"ok"}`, never a fresh snapshot, so the WS re-subscribe path could never have worked; `_request_snapshot` now makes an unauthenticated `aiohttp` GET to `/trade-api/v2/markets/{ticker}/orderbook` (Session 22 added RSA-PSS auth headers defensively without verification; that per-call blocking crypto/file-I/O stalled the event loop under load and crashed PriceWatcher 3x/~8min via missed WS pings — Session 23 removed auth entirely, confirmed live: 200 status, 1,764 `book_snapshot_applied`/2.5min, zero crashes), parses `orderbook_fp.yes_dollars`/`no_dollars`, and calls `apply_snapshot(bids, asks, seq=0)` directly (sentinel `seq=0` short-circuits `apply_delta`'s gap check so the next delta naturally realigns); 10s throttle and connected-guard unchanged; uses a shared `aiohttp.ClientSession` (`_get_rest_session`, closed in `stop()`) instead of one per call; REST failures (incl. an observed ~5.5% 429 rate right after restart, KNOWN DEBT) log `book_reset_rest_failed` and leave `_gap_detected=True` for a throttled retry; `_kalshi_connection_loop`'s `@retry` `before_sleep` fixed Session 19 (was `before_sleep_log(log, "WARNING")`, crashed on every retry attempt because `log` is a structlog logger, not stdlib — see KNOWN DEBT) — DEPLOYED BUT NOT YET CONFIRMED LIVE; agent-level restart after `stop_after_attempt(10)` exhaustion — RESOLVED Session 20 (operator decided: capped runner-level auto-restart, see karbot_runner.py entry below) — DEPLOYED BUT NOT YET CONFIRMED LIVE; `_handle_health_change`/`FeedHealthEvent` gained an optional `error` field Session 20 so Telegram alerts can include the underlying disconnect error
 - agents/floor/arb_scanner.py: `ArbScannerAgent` (full impl, has register_subscriptions) + `ArbScanner` (inherits it); `run()` starts heartbeat + cache-cleanup tasks then idles; S1 opportunity detection fully wired
 - agents/floor/risk_gate.py: `RiskGateAgent` (full impl, has register_subscriptions) + `RiskGate` (inherits it); `run()` starts heartbeat task then idles; subscribes to RegulatoryAlertEvent; _regulatory_pause=True blocks all trades when urgency=5; cleared by urgency=0 event from RegulatoryIntelligenceAgent
 - agents/research/market_analyst.py: `MarketAnalystAgent` (full impl) + `MarketAnalyst` (inherits it); `run()` starts LLM analysis loop (5-min), heartbeat, cache-cleanup; no-op when ANTHROPIC_API_KEY absent; uses `AsyncAnthropic` (migrated from synchronous client in Session 14)
@@ -96,7 +96,7 @@ async def run(self): ...
   Confirmed live on VPS: real Kalshi trades (PGA, World Cup, tennis, MLB)
   writing correctly with full data to kalshi_trades.csv ✓
 - **30-day paper trading clock: STARTED 2026-06-29. Target live date: 2026-07-29.**
-- Full test suite: 75/75 passing ✓ (49 baseline + 4 S17 + 2 S17-fu2 + 4 S17-fu3 + 4 S18 + 2 S19 + 4 S20-telegram + 3 S20-restart + 2 S22-net + 4 S22-new)
+- Full test suite: 79/79 passing ✓ (49 baseline + 4 S17 + 2 S17-fu2 + 4 S17-fu3 + 4 S18 + 2 S19 + 4 S20-telegram + 3 S20-restart + 2 S22-net + 4 S22-new + 4 S23)
 - Kalshi market volume filter: FIXED AND CONFIRMED LIVE (Session 15) —
   `_fetch_active_kalshi_markets()` sends `mve_filter=exclude`, paginates
   via `cursor`, filters on `volume_24h_fp` (cast to float). Live VPS
@@ -230,7 +230,7 @@ async def run(self): ...
   restarts it after ~30s and the feed recovers without a manual
   `systemctl restart`.
 
-### book_needs_reset recovery — WS re-subscribe replaced with REST fetch (Session 22), DEPLOYED BUT NOT YET CONFIRMED LIVE
+### book_needs_reset recovery — WS re-subscribe replaced with REST fetch, no-auth fix — CONFIRMED LIVE (Session 23)
 - **Root cause found (Session 21 live wire capture + Kalshi docs)**: the
   original Session 17/18 WS re-subscribe recovery mechanism assumed Kalshi
   would respond to a duplicate `subscribe` message with a fresh
@@ -244,48 +244,69 @@ async def run(self): ...
   0% (`book_snapshot_requested` climbing to 3,365 in an 18-minute window
   while `book_snapshot_applied` fell to zero, down from 37%) observed going
   into Session 22.
-- **Fix (Session 22)**: `_request_snapshot(market_id)` now makes a direct
+- **Fix (Session 22)**: `_request_snapshot(market_id)` makes a direct
   `aiohttp` GET to `https://api.elections.kalshi.com/trade-api/v2/markets/
-  {ticker}/orderbook` (reuses `_build_kalshi_auth_headers`, matching the
-  existing `_fetch_active_kalshi_markets` REST pattern), parses
-  `orderbook_fp.yes_dollars`/`no_dollars` (string values, cast to float;
-  NO bids still derive YES asks at `1-p`), and calls
-  `book.apply_snapshot(bids, asks, seq=0)` directly. The REST response
-  carries no sequence number — `seq=0` is a sentinel that short-circuits
-  `OrderBook.apply_delta`'s gap check (`if seq != self.sequence + 1 and
-  self.sequence != 0`), so the next delta is accepted regardless of its own
-  seq value and `self.sequence` naturally realigns; verified against the
-  actual gap-check code, not assumed. The existing 10s per-market throttle
-  and "client connected" guard are unchanged. On any REST failure (non-200,
-  network error, timeout — 5s `aiohttp.ClientTimeout`), logs
-  `book_reset_rest_failed` at warning and leaves `_gap_detected=True` so the
-  next delta retriggers a throttled retry rather than crashing
-  `_kalshi_connection_loop`. The Session 18 `_snapshot_request_id_counter`
-  is kept (no longer load-bearing, since no WS message is sent from this
-  path anymore) per explicit instruction.
-- Unit-tested (4 new tests + 2 rewritten throttle tests, 75 total).
-  **NOT yet deployed to VPS or verified against the real Kalshi REST
-  endpoint.** Verify next session: after deploy, confirm the apply rate
-  actually climbs (ideally near 100%, since REST is a direct per-call
-  success/fail with no response-correlation ambiguity) and
-  `book_reset_rest_failed` stays low. If the endpoint rejects the auth
-  headers unexpectedly, try the call without them — Kalshi's docs say this
-  endpoint doesn't require auth, and that hasn't been empirically verified
-  from this environment.
+  {ticker}/orderbook`, parses `orderbook_fp.yes_dollars`/`no_dollars`
+  (string values, cast to float; NO bids still derive YES asks at `1-p`),
+  and calls `book.apply_snapshot(bids, asks, seq=0)` directly. The REST
+  response carries no sequence number — `seq=0` is a sentinel that
+  short-circuits `OrderBook.apply_delta`'s gap check (`if seq !=
+  self.sequence + 1 and self.sequence != 0`), so the next delta is accepted
+  regardless of its own seq value and `self.sequence` naturally realigns;
+  verified against the actual gap-check code, not assumed. The 10s
+  per-market throttle and "client connected" guard are unchanged.
+- **Live outage + fix (Session 23)**: Session 22 defensively added
+  `_build_kalshi_auth_headers`/`_load_kalshi_private_key` calls to this
+  REST fetch, without empirical verification that Kalshi's endpoint
+  (documented as requiring no auth) needed them. Deploying it crashed
+  `PriceWatcher` 3 times in ~8 minutes — the per-call blocking RSA-PSS
+  signing + private-key file read stalled the event loop long enough under
+  real gap-event load (~13,761 `book_needs_reset`/15min) that the WS listen
+  loop missed Kalshi's ping frames within `ping_timeout=10s`; Kalshi tore
+  down the transport, and the next `recv()` crashed with `AttributeError:
+  'NoneType' object has no attribute 'resume_reading'` — exhausting the
+  Session 20 restart budget and leaving the agent permanently stopped. Auth
+  removed entirely; also added a shared `aiohttp.ClientSession`
+  (`_get_rest_session()`, closed in `stop()`) instead of one per call.
+- **CONFIRMED LIVE (Session 23)**: unauthenticated `GET
+  /trade-api/v2/markets/{ticker}/orderbook` returns HTTP 200; 1,764
+  `book_snapshot_applied` events fired correctly in a ~2.5 minute window;
+  zero crashes over sustained load. The book-reset recovery mechanism now
+  works end-to-end for the first time since it was originally designed in
+  Session 17.
+- Unit-tested (79 total, 4 new this session: no-auth-helpers-called,
+  shared-session-reuse, `_get_rest_session` same-instance, `stop()` closes
+  session).
 - Session 21's temporary diagnostic instrumentation (unconditional
   per-message WS logging, added solely to capture the traffic that led to
-  this fix) has been fully reverted — confirmed via `grep -in
+  this fix) was fully reverted in Session 22 — confirmed via `grep -in
   "diagnostic\|diag" agents/floor/price_watcher.py` returning zero matches.
+
+### REST snapshot fetch has no concurrency limit — follow-up, not urgent
+- Live verification (Session 23) surfaced 56/1,016 (~5.5%) REST snapshot
+  requests hitting HTTP 429 (`too_many_requests`) during the initial
+  post-restart surge, when many markets simultaneously needed recovery at
+  once. Already handled safely by the existing failure path — the 429 logs
+  as `book_reset_rest_failed`, `_gap_detected` stays `True`, and the next
+  throttled window (10s later) retries — not a crash risk, just an
+  efficiency gap under restart-time bursts.
+- A future session should add an `asyncio.Semaphore` (or similar) bounding
+  in-flight `_request_snapshot` REST calls to smooth bursts and avoid
+  hitting Kalshi's rate limit, especially right after a restart when many
+  books are simultaneously stale. Not implemented — explicitly deferred,
+  not urgent.
 
 ### P&L figures likely inflated during paper trading
 - VPS paper trades show $58–$288 realized P&L per trade at ~$500 position
   size, implying 11–57% net margins. S1 arb on liquid Kalshi binary markets
   should realistically yield 1–5% net after fees. The most probable cause is
-  corrupt order books (from unrecovered sequence gaps — see above) feeding
-  stale/wrong bid-ask spreads to ArbScanner, which then detects spuriously
-  large spreads as arb opportunities. Do not treat paper P&L figures as a
-  realistic live-trading forecast until the Session 22 REST-based recovery
-  above is confirmed live and `book_needs_reset` rate drops to near-zero.
+  corrupt order books (from unrecovered sequence gaps) feeding stale/wrong
+  bid-ask spreads to ArbScanner, which then detects spuriously large spreads
+  as arb opportunities. The book-reset recovery mechanism is now confirmed
+  working live (Session 23, see above) — re-check whether P&L figures
+  normalize toward the expected 1–5% net range now that books can actually
+  recover from sequence gaps. Do not yet treat paper P&L as a realistic
+  live-trading forecast until this normalization is directly observed.
 
 ### Reconciliation (NOT built — future session)
 - No periodic reconciliation job exists to cross-check resolved S1 trades
@@ -316,43 +337,42 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **Deploy and verify Session 19 + Session 20 fixes together on VPS** —
-   deploy (`git pull origin main`, restart `karbot`), then confirm: no
-   `TypeError` appears on any real Kalshi WS disconnect, `kalshi_reconnect_retry`
-   logs appear with increasing `attempt` numbers, and the feed actually
-   reconnects (Session 19); a "FEED DOWN" Telegram message arrives promptly on
-   any real disconnect and a distinct "FEED RECOVERED" message arrives on
-   reconnect with no duplicate alerts mid-outage (Session 20); if internal
-   retry is ever exhausted, the runner restarts `PriceWatcher` after ~30s
-   rather than leaving it dead (Session 20). This is a precondition for
-   priority 2 below.
-2. **Deploy and verify the Session 22 REST-based book-reset recovery on
-   VPS** — deploy (if not already live from step 1's deploy), then tail
-   logs and confirm the REST fetch in `_request_snapshot` actually succeeds
-   and `book_snapshot_applied` climbs (ideally near 100%, since this is now
-   a direct per-call success/fail with no WS response-correlation
-   ambiguity — the prior WS re-subscribe mechanism could never have worked,
-   per Session 21's live capture). Watch `book_reset_rest_failed` rate; if
-   high, investigate whether the auth-headers-on-an-unauthenticated-endpoint
-   assumption needs revisiting (try the call without auth headers). Also
-   re-check whether P&L inflation persists now that books can actually
-   recover from sequence gaps.
-3. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
+1. **Verify Session 19 + Session 20 fixes on VPS** (still outstanding —
+   independent of the now-confirmed Session 22/23 book-reset work) —
+   confirm no `TypeError` appears on any real Kalshi WS disconnect,
+   `kalshi_reconnect_retry` logs appear with increasing `attempt` numbers,
+   and the feed actually reconnects (Session 19); a "FEED DOWN" Telegram
+   message arrives promptly on any real disconnect and a distinct "FEED
+   RECOVERED" message arrives on reconnect with no duplicate alerts
+   mid-outage (Session 20); if internal retry is ever exhausted, the
+   runner restarts `PriceWatcher` after ~30s rather than leaving it dead
+   (Session 20).
+2. **Monitor the now-confirmed-live book-reset recovery (Session 22/23)**
+   — watch that `book_snapshot_applied` keeps firing at a healthy rate and
+   the 429 rate (currently ~5.5% right after restart, KNOWN DEBT) stays a
+   one-time post-restart surge rather than a sustained pattern. Re-check
+   whether the P&L inflation KNOWN DEBT item resolves now that books can
+   reliably recover from sequence gaps.
+3. **Add a concurrency limiter on `_request_snapshot` REST calls** (KNOWN
+   DEBT from Session 23, not urgent) — an `asyncio.Semaphore` or similar
+   bounding in-flight REST snapshot fetches, to smooth the post-restart
+   burst that produced the 429s. Only worth prioritizing if 429s become a
+   recurring pattern rather than a one-time restart surge.
+4. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
    so the bot can be silenced during high-volume paper trading without
    disabling the agent entirely. Scope: `TelegramNotificationAgent`
    command handler only; no changes to event bus or other agents. Note: the
    Session 20 feed-down alert is explicitly designed to keep bypassing mute
    once this is built — do not let it get silenced.
-4. **Monitor paper trading** — clock running since 2026-06-29, target
+5. **Monitor paper trading** — clock running since 2026-06-29, target
    live date 2026-07-29. Review `logs/kalshi_trades.csv` and
    `logs/compliance_actions.jsonl` periodically. Confirm resolved rows
    show nonzero `gain_loss` and `status=RESOLVED` after
-   `paper_resolution_delay_seconds`. Hold off on treating P&L figures as
-   realistic until KNOWN DEBT snapshot recovery is confirmed (see above).
-5. **Begin live executor spec** after 30-day paper run completes
+   `paper_resolution_delay_seconds`.
+6. **Begin live executor spec** after 30-day paper run completes
    (2026-07-29). Design `live_executor.py` to replace `paper_executor.py`
    on the real Kalshi trading path.
-6. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
+7. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
    in VPS logs — no Health Monitor agent subscribed yet; confirm this
    isn't masking a real event-bus wiring issue.
 
