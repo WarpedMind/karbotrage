@@ -46,7 +46,7 @@ Karbot Rage! is a multi-agent automated trading system designed for decentralize
 - karbot/core/: Package exists — agents import from here
   - karbot/core/config.py: KarbotConfig typed dataclass; Phase 1 invariants enforced structurally at `__init__` — `polymarket_ws_enabled=True` with `phase=1` raises `ValueError`, `s2_cross_platform_enabled=True` with `phase=1` raises `ValueError`; RiskConfig hard limits also enforced at instantiation. Now also has `from_yaml(path)` classmethod, `.phase` property (→ capital.phase), and `.paper_mode` property (→ system.paper_mode). TelegramConfig + RegulatoryIntelligenceConfig sub-dataclasses added.
   - karbot/core/events.py: Re-exports all event types from core/events.py
-- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PSS/SHA-256 auth via `cryptography` against `api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` + PKCS1v15 in Session 13); `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message); `_fetch_active_kalshi_markets()` sends `mve_filter=exclude` (Kalshi's catalog is otherwise 12,000+ consecutive zero-volume multi-variable-event markets) and paginates via `cursor` (20-page cap) as a secondary safeguard, filtering on `volume_24h_fp` — confirmed live (Session 15, count=785/4000); `_handle_kalshi_snapshot`/`_handle_kalshi_delta`/`OrderBook.apply_delta` rewritten for the real WS schema (Session 15 — payload nested under `msg["msg"]`, `yes_dollars_fp`/`no_dollars_fp` are bid-only books with NO bids deriving YES asks at `1-p`, `delta_fp` is a RELATIVE change not absolute) — NOT YET reverified live, see KNOWN DEBT; `_request_snapshot` added (Session 17 follow-up 3) — WS re-subscribe on sequence gap to recover corrupt books, throttled 10s/market; unique per-call `id` (was hardcoded 99) added Session 18 to fix a suspected response-correlation collision — DEPLOYED BUT NOT YET CONFIRMED LIVE, see KNOWN DEBT; `book_needs_reset` log demoted warning→debug same session
+- agents/floor/price_watcher.py: `PriceWatcherAgent` (full impl) + `PriceWatcher` (inherits it); RSA-PSS/SHA-256 auth via `cryptography` against `api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` + PKCS1v15 in Session 13); `run()` connects to real Kalshi WS when credentials present, idles gracefully when absent; batched market subscription (50/message); `_fetch_active_kalshi_markets()` sends `mve_filter=exclude` (Kalshi's catalog is otherwise 12,000+ consecutive zero-volume multi-variable-event markets) and paginates via `cursor` (20-page cap) as a secondary safeguard, filtering on `volume_24h_fp` — confirmed live (Session 15, count=785/4000); `_handle_kalshi_snapshot`/`_handle_kalshi_delta`/`OrderBook.apply_delta` rewritten for the real WS schema (Session 15 — payload nested under `msg["msg"]`, `yes_dollars_fp`/`no_dollars_fp` are bid-only books with NO bids deriving YES asks at `1-p`, `delta_fp` is a RELATIVE change not absolute) — NOT YET reverified live, see KNOWN DEBT; `_request_snapshot` added (Session 17 follow-up 3) — WS re-subscribe on sequence gap to recover corrupt books, throttled 10s/market; unique per-call `id` (was hardcoded 99) added Session 18 to fix a suspected response-correlation collision — DEPLOYED BUT NOT YET CONFIRMED LIVE, see KNOWN DEBT; `book_needs_reset` log demoted warning→debug same session; `_kalshi_connection_loop`'s `@retry` `before_sleep` fixed Session 19 (was `before_sleep_log(log, "WARNING")`, crashed on every retry attempt because `log` is a structlog logger, not stdlib — see KNOWN DEBT) — DEPLOYED BUT NOT YET CONFIRMED LIVE; agent-level restart after `stop_after_attempt(10)` exhaustion is an open question flagged for operator decision, not implemented
 - agents/floor/arb_scanner.py: `ArbScannerAgent` (full impl, has register_subscriptions) + `ArbScanner` (inherits it); `run()` starts heartbeat + cache-cleanup tasks then idles; S1 opportunity detection fully wired
 - agents/floor/risk_gate.py: `RiskGateAgent` (full impl, has register_subscriptions) + `RiskGate` (inherits it); `run()` starts heartbeat task then idles; subscribes to RegulatoryAlertEvent; _regulatory_pause=True blocks all trades when urgency=5; cleared by urgency=0 event from RegulatoryIntelligenceAgent
 - agents/research/market_analyst.py: `MarketAnalystAgent` (full impl) + `MarketAnalyst` (inherits it); `run()` starts LLM analysis loop (5-min), heartbeat, cache-cleanup; no-op when ANTHROPIC_API_KEY absent; uses `AsyncAnthropic` (migrated from synchronous client in Session 14)
@@ -96,7 +96,7 @@ async def run(self): ...
   Confirmed live on VPS: real Kalshi trades (PGA, World Cup, tennis, MLB)
   writing correctly with full data to kalshi_trades.csv ✓
 - **30-day paper trading clock: STARTED 2026-06-29. Target live date: 2026-07-29.**
-- Full test suite: 63/63 passing ✓ (49 baseline + 4 S17 + 2 S17-fu2 + 4 S17-fu3 + 4 S18)
+- Full test suite: 65/65 passing ✓ (49 baseline + 4 S17 + 2 S17-fu2 + 4 S17-fu3 + 4 S18 + 2 S19)
 - Kalshi market volume filter: FIXED AND CONFIRMED LIVE (Session 15) —
   `_fetch_active_kalshi_markets()` sends `mve_filter=exclude`, paginates
   via `cursor`, filters on `volume_24h_fp` (cast to float). Live VPS
@@ -158,6 +158,47 @@ async def run(self): ...
   Monitor Agent" conceptually but it isn't implemented. Likely
   pre-existing, not a regression, but unconfirmed.
 
+### PriceWatcher died permanently on WS disconnect for ~6 hours — fix applied, DEPLOYED BUT NOT YET CONFIRMED LIVE
+- `_kalshi_connection_loop`'s `@retry` decorator used tenacity's
+  `before_sleep_log(log, "WARNING")`, written for stdlib `logging.Logger`. It
+  calls `logger.log("WARNING", ...)` (a string level); structlog's
+  `BoundLogger.log()` expects an int and raises
+  `TypeError: '<' not supported between instances of 'str' and 'int'` on the
+  very first retry attempt — meaning `@retry` had never actually retried
+  successfully since this decorator was written. The TypeError propagated
+  out of tenacity's own machinery, crashing through to `_run_supervised` in
+  `karbot_runner.py`, which killed the agent permanently.
+  **Confirmed live**: a Kalshi WS disconnect at 07:42:02 UTC on 2026-06-30
+  killed the price feed for ~6 hours (zero retry attempts logged) until a
+  manual `systemctl restart karbot`.
+  Fix (Session 19): replaced `before_sleep_log(log, "WARNING")` with a custom
+  `_log_before_sleep(retry_state)` function using structlog's own API.
+  `stop_after_attempt(10)`, `wait_exponential(...)`,
+  `retry_if_exception_type(...)` unchanged. Unit-tested (2 new tests, 65
+  total) — one test reproduces the original bug directly (mocked
+  `ConnectionClosedError` on first `connect()`, success on second; confirms
+  retry now actually proceeds instead of crashing on attempt 1).
+  **NOT yet deployed to VPS or verified against a real Kalshi disconnect** —
+  next session must deploy and confirm `kalshi_reconnect_retry` logs appear
+  (with no `TypeError`) on any real disconnect, and that the feed actually
+  recovers.
+- **Precondition-breaking for the Session 18 book-reset investigation**: if
+  `PriceWatcher` was dying permanently on WS disconnects throughout the
+  2026-06-30 observation window, the `book_snapshot_requested`/
+  `book_snapshot_applied` 10.2% completion-rate data may be confounded by an
+  agent that was dead for stretches of that window, not actively processing
+  gap events. Re-verify the Session 18 completion-rate comparison only after
+  this fix is confirmed live and the feed is confirmed to survive disconnects.
+- **Open architectural question (NOT decided, flagged for operator input)**:
+  once `stop_after_attempt(10)` is genuinely exhausted (10 real failed
+  reconnects), the failure still propagates and `PriceWatcher` still dies
+  permanently, requiring manual `systemctl restart karbot`. Whether this is
+  acceptable as designed (operator paged via Telegram, restarts manually) or
+  whether `_run_supervised` should itself restart a dead `PriceWatcher` after
+  a cooldown is a real failure-recovery philosophy question, not a
+  code-correctness bug — not decided unilaterally. See SESSIONS.md Session 19
+  and DECISIONS.md for full framing.
+
 ### book_needs_reset recovery — id-collision fix applied, DEPLOYED BUT NOT YET CONFIRMED LIVE
 - `_request_snapshot(market_id)` sends a WS re-subscribe message on sequence
   gap detection, throttled 10s/market (Session 17 follow-up 3). VPS logs from
@@ -218,29 +259,39 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **Deploy and verify the Session 18 id-collision fix on VPS** — deploy
-   (`git pull origin main`, restart `karbot`), then tail logs and compare the
+1. **Deploy and verify the Session 19 before_sleep_log/structlog fix on
+   VPS** — deploy (`git pull origin main`, restart `karbot`), then confirm no
+   `TypeError` appears on any real Kalshi WS disconnect, `kalshi_reconnect_retry`
+   logs appear with increasing `attempt` numbers, and the feed actually
+   reconnects. This is a precondition for priority 2 below — bring the open
+   architectural question (agent-level restart after `stop_after_attempt(10)`
+   exhaustion) to the operator for a decision at the same time.
+2. **Deploy and verify the Session 18 id-collision fix on VPS** — deploy
+   (if not already live from step 1's deploy), then tail logs and compare the
    `book_snapshot_requested`/`book_snapshot_applied` completion rate against
-   the 2026-06-30 baseline (23,412 requested / 2,380 applied, 10.2%). A
+   the 2026-06-30 baseline (23,412 requested / 2,380 applied, 10.2%). Note:
+   that baseline may itself be confounded if PriceWatcher was dying
+   permanently during part of the observation window (see Session 19 KNOWN
+   DEBT) — re-verify only once the Session 19 fix is confirmed stable. A
    meaningfully higher rate confirms the id-collision hypothesis. If it does
    not improve, the id fix was not the (sole) cause and a fallback (REST
    snapshot or forced reconnect) must be designed instead. Also confirm
    `book_needs_reset` no longer dominates log volume (now debug-level) and
    re-check whether P&L inflation persists.
-2. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
+3. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
    so the bot can be silenced during high-volume paper trading without
    disabling the agent entirely. Scope: `TelegramNotificationAgent`
    command handler only; no changes to event bus or other agents.
-3. **Monitor paper trading** — clock running since 2026-06-29, target
+4. **Monitor paper trading** — clock running since 2026-06-29, target
    live date 2026-07-29. Review `logs/kalshi_trades.csv` and
    `logs/compliance_actions.jsonl` periodically. Confirm resolved rows
    show nonzero `gain_loss` and `status=RESOLVED` after
    `paper_resolution_delay_seconds`. Hold off on treating P&L figures as
    realistic until KNOWN DEBT snapshot recovery is confirmed (see above).
-4. **Begin live executor spec** after 30-day paper run completes
+5. **Begin live executor spec** after 30-day paper run completes
    (2026-07-29). Design `live_executor.py` to replace `paper_executor.py`
    on the real Kalshi trading path.
-5. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
+6. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
    in VPS logs — no Health Monitor agent subscribed yet; confirm this
    isn't masking a real event-bus wiring issue.
 

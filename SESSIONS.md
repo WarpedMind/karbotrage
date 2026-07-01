@@ -1,6 +1,136 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-07-01 (Session 19 — before_sleep_log/structlog TypeError killed WS reconnect retry — DEPLOYED, NOT YET CONFIRMED LIVE)
+
+### What was built
+- **`agents/floor/price_watcher.py` — `@retry`'s `before_sleep` argument fixed.**
+  Root cause: the `@retry` decorator on `_kalshi_connection_loop` used
+  tenacity's `before_sleep_log(log, "WARNING")`, which is written for stdlib
+  `logging.Logger` and calls `logger.log("WARNING", ...)` — passing the level
+  as a string. `log` here is a `structlog.get_logger(__name__)` instance;
+  structlog's `BoundLogger.log()` expects an int level and does
+  `if level < min_level`, raising
+  `TypeError: '<' not supported between instances of 'str' and 'int'`. That
+  TypeError occurred inside tenacity's own retry machinery, on the very first
+  retry attempt after any connection failure — meaning `@retry` had never
+  actually retried successfully since this decorator was written. It crashed
+  through to `_run_supervised` in `karbot_runner.py`, which logs the crash and
+  lets the agent die permanently.
+  **Confirmed live impact**: a Kalshi WS disconnect at 07:42:02 UTC on
+  2026-06-30 killed the price feed. It stayed dead for ~6 hours (until
+  ~13:3x UTC) with zero retry attempts logged, requiring a manual
+  `systemctl restart karbot`.
+  Fix: replaced `before_sleep_log(log, "WARNING")` with a custom
+  `_log_before_sleep(retry_state)` module-level function that calls
+  `log.warning("kalshi_reconnect_retry", attempt=..., wait_seconds=...)`
+  directly — compatible with structlog's keyword-based API. `before_sleep_log`
+  removed from the tenacity import. `stop_after_attempt(10)`,
+  `wait_exponential(...)`, and `retry_if_exception_type(...)` unchanged.
+- **Documented, not changed: behavior after `stop_after_attempt(10)` is
+  exhausted.** Added a `NOTE` comment directly above `_kalshi_connection_loop`
+  stating that once 10 real failed reconnect attempts occur, the failure
+  (wrapped as `tenacity.RetryError`) propagates out of the coroutine,
+  `_run_supervised` logs the crash, and `PriceWatcher` is dead until an
+  operator runs `systemctl restart karbot` — there is no agent-level
+  auto-restart after a cooldown. **This is flagged as an open architectural
+  question for operator decision, not resolved this session** (see below).
+- **`tests/test_kalshi_reconnect.py`** (new file, 2 tests):
+  - `test_kalshi_connection_loop_retries_and_succeeds_after_failure` — mocks
+    `KalshiWebSocketClient.connect()` to raise
+    `websockets.exceptions.ConnectionClosedError` on the first call and
+    succeed on the second; confirms the before_sleep callback does NOT raise
+    and the retry actually proceeds to a successful second attempt (this is
+    the test that would have caught the original bug — it fails immediately
+    with the old `before_sleep_log` because the TypeError inside tenacity's
+    machinery pre-empts any retry).
+  - `test_kalshi_connection_loop_gives_up_after_max_attempts` — confirms
+    `stop_after_attempt(10)` still terminates after exactly 10 failed
+    attempts and the failure propagates as `tenacity.RetryError` (documents
+    current, unchanged behavior).
+  - Both tests patch `asyncio.sleep` to a no-op so tenacity's real
+    exponential backoff (which would otherwise sum to 151s across 9 waits
+    before the 10th attempt) doesn't slow down the test run; the real
+    stop/wait/retry logic still executes unmodified.
+
+### What was decided
+- Root cause is confirmed via direct code inspection of both tenacity's
+  `before_sleep_log` implementation and structlog's `BoundLogger.log()` — not
+  just inferred from the live symptom. This is a different verification
+  posture than the Session 18 id-collision fix (which is still an unconfirmed
+  hypothesis); this one is a mechanically demonstrable bug, and the new test
+  reproduces it directly (it fails against the pre-fix code).
+- Did NOT implement agent-level restart of a dead `PriceWatcher` in
+  `_run_supervised` — this is a real architectural question (see below),
+  not something to decide unilaterally in this session.
+
+### OPEN ARCHITECTURAL QUESTION — needs operator decision
+Once `stop_after_attempt(10)` is genuinely exhausted, `PriceWatcher` dies
+permanently and requires a manual `systemctl restart karbot`. Two paths:
+1. **Accept as designed**: operator gets paged/alerted via Telegram
+   (`FeedHealthEvent`/existing alerting) and manually restarts. Simple, but
+   means any Kalshi-side outage longer than ~10 exponential-backoff attempts
+   (up to ~4.5 minutes worst case: 1+2+4+8+16+30+30+30+30 = 151s, this
+   session's test confirmed 151s slept across 9 waits) requires human
+   intervention even if Kalshi recovers on its own shortly after.
+2. **`_run_supervised` restarts a dead `PriceWatcher` after a cooldown** —
+   would require `_run_supervised` to distinguish "this specific agent
+   crashed and should be relaunched" from other failure modes, and decide on
+   a cooldown/backoff strategy at the runner level (on top of the agent's own
+   internal retry). Not implemented this session per explicit instruction —
+   flagged for operator decision.
+**This is a real question about acceptable downtime and failure-recovery
+philosophy, not a code-correctness bug — do not decide unilaterally.**
+
+### Verification
+- `karbotrage_env/bin/python -m pytest tests/ -v`: **65/65 passed** ✓
+  (63 baseline + 2 new in test_kalshi_reconnect.py)
+- `grep -rn "before_sleep_log\|before_log" --include="*.py" .`: only match is
+  the explanatory docstring comment in the new `_log_before_sleep` function
+  itself — no other tenacity `before_sleep_log`/`before_log` usage with a
+  structlog logger exists elsewhere in the codebase ✓
+- No `.env`, `config.yaml`, or `*.pem` in staged files ✓
+- `execution/engine.py` and `main.py` untouched ✓
+- Event-bus publish/subscribe pattern untouched — only the retry decorator's
+  `before_sleep` argument and a doc comment changed ✓
+- Did NOT touch the Session 18 snapshot `id` fix or `book_needs_reset` log
+  level — confirmed via diff review, those lines are unmodified ✓
+
+### STATUS: DEPLOYED BUT NOT YET CONFIRMED LIVE
+This fix has NOT been deployed to the VPS as of this entry. Next session must:
+1. Deploy (`git pull origin main`, restart `karbot`).
+2. Confirm no further `TypeError` appears in logs if/when a real Kalshi WS
+   disconnect occurs.
+3. Confirm `kalshi_reconnect_retry` (new log key) appears with increasing
+   `attempt` numbers on any real disconnect, and that the feed actually
+   recovers (reconnects) instead of dying — this is the live confirmation
+   that was impossible before this fix (every real disconnect previously
+   crashed on attempt 1).
+4. Bring the open architectural question above to the operator for a
+   decision before implementing either path.
+
+### Interaction with Session 18 (book-reset id collision fix)
+This bug is a precondition-breaking issue for the entire Session 18
+investigation: if `PriceWatcher` dies permanently on the first WS disconnect
+and never reconnects, `book_snapshot_requested`/`book_snapshot_applied`
+completion-rate data from the VPS may be confounded by an agent that was
+dead for stretches of the observation window, not actively processing gap
+events. Re-verify the Session 18 completion-rate comparison only after this
+fix is confirmed live and the feed is confirmed to survive disconnects.
+
+### What to do first next session
+1. Deploy this fix to the VPS and verify per the STATUS section above.
+2. Bring the open architectural question (agent-level restart after
+   `stop_after_attempt` exhaustion) to the operator.
+3. Once confirmed stable, proceed with the Session 18 verification (compare
+   `book_snapshot_requested`/`book_snapshot_applied` completion rate) — note
+   the Session 18 baseline data may be unreliable if the feed was dead for
+   part of that window.
+4. Continue monitoring 30-day paper trading clock (started 2026-06-29,
+   target live date 2026-07-29).
+
+---
+
 ## 2026-06-30 (Session 18 — book_snapshot_requested id collision fix — DEPLOYED, NOT YET CONFIRMED LIVE)
 
 ### What was built

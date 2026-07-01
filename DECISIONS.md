@@ -1,6 +1,50 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-07-01 — Session 19: structlog-incompatible before_sleep_log crashed WS reconnect retry
+
+### Custom before_sleep callback over any structlog/tenacity compatibility shim
+- tenacity's `before_sleep_log(logger, "WARNING")` assumes a stdlib
+  `logging.Logger` and calls `logger.log("WARNING", ...)` — a string level.
+  structlog's `BoundLogger.log()` expects an int and does
+  `if level < min_level`, raising `TypeError` on the very first retry
+  attempt. This meant `@retry` on `_kalshi_connection_loop` had never
+  actually retried successfully — confirmed live via a 2026-06-30 07:42 UTC
+  Kalshi WS disconnect that killed the price feed for ~6 hours with zero
+  retry attempts logged.
+- Decision: wrote a small module-level `_log_before_sleep(retry_state)`
+  function calling `log.warning("kalshi_reconnect_retry", attempt=...,
+  wait_seconds=...)` directly, passed as `before_sleep=_log_before_sleep`.
+  Did not reach for a generic "make structlog look like stdlib logging"
+  adapter — the callback tenacity needs is a single-argument function taking
+  `RetryState`, and structlog's own API surface (keyword-based `.warning()`)
+  is a better fit than shimming compatibility with the stdlib-oriented helper.
+- Rationale: this is the same category of bug as any interface mismatch
+  between two libraries with different logging conventions — the safest fix
+  is a small adapter function scoped to exactly this call site, not a
+  project-wide compatibility layer that could mask other, different
+  mismatches. Confirmed via direct code inspection of both tenacity's
+  `before_sleep_log` source and structlog's `BoundLogger.log()` source (not
+  just inferred from the live symptom) — a stronger verification posture
+  than the still-unconfirmed Session 18 id-collision hypothesis below.
+
+### Agent-level restart after stop_after_attempt(10) exhaustion — NOT decided, flagged for operator
+- Once `stop_after_attempt(10)` is genuinely exhausted, `PriceWatcher` dies
+  permanently (`tenacity.RetryError` propagates through `_run_supervised` in
+  `karbot_runner.py`) and requires a manual `systemctl restart karbot`.
+  Documented via a `NOTE` comment above `_kalshi_connection_loop`, not
+  resolved. Two live options: (1) accept as designed — operator is
+  paged/alerted and restarts manually; (2) `_run_supervised` itself restarts
+  a dead `PriceWatcher` after a cooldown.
+- Decision: explicitly deferred. This is a failure-recovery philosophy
+  question (acceptable downtime, whether Kalshi-side transient outages
+  should self-heal without human intervention) — not a code-correctness bug,
+  and not something to decide unilaterally per session instructions. See
+  SESSIONS.md Session 19 for full framing; needs operator input before any
+  runner-level restart logic is built.
+
+---
+
 ## 2026-06-30 — Session 18: book-reset id collision fix (leading hypothesis, unconfirmed live)
 
 ### Unique per-call WS correlation id, not a hardcoded 99

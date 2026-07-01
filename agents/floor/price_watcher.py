@@ -34,7 +34,7 @@ from cryptography.hazmat.primitives.asymmetric import padding as crypto_padding
 from cryptography.hazmat.primitives.asymmetric.padding import PSS, MGF1
 from tenacity import (
     retry, stop_after_attempt, wait_exponential,
-    retry_if_exception_type, before_sleep_log
+    retry_if_exception_type
 )
 
 from karbot.core.config import KarbotConfig
@@ -44,6 +44,25 @@ from karbot.core.events import (
 )
 
 log = structlog.get_logger(__name__)
+
+
+def _log_before_sleep(retry_state) -> None:
+    """tenacity before_sleep callback compatible with structlog.
+
+    tenacity's built-in before_sleep_log(logger, "WARNING") is written for
+    stdlib logging.Logger and calls logger.log("WARNING", ...) — passing the
+    level as a string. structlog's BoundLogger.log() expects an int level and
+    does `if level < min_level`, raising TypeError("'<' not supported between
+    instances of 'str' and 'int'") on every retry attempt. That TypeError
+    propagated out of tenacity's retry machinery itself, so @retry below never
+    actually retried — confirmed live (2026-06-30 07:42 UTC Kalshi WS
+    disconnect, ~6 hours dead with zero retry attempts logged).
+    """
+    log.warning(
+        "kalshi_reconnect_retry",
+        attempt=retry_state.attempt_number,
+        wait_seconds=getattr(retry_state.next_action, "sleep", None),
+    )
 
 
 # ── Kalshi RSA authentication ─────────────────────────────────────────────────
@@ -380,12 +399,22 @@ class PriceWatcherAgent:
             await self._kalshi_client.disconnect()
         log.info("price_watcher_stopped")
 
+    # NOTE (Session 19, current behavior — dies permanently after 10 failed
+    # attempts): once stop_after_attempt(10) is genuinely exhausted (10 real
+    # failed reconnect attempts), the exception propagates out of this
+    # coroutine, _run_supervised in karbot_runner.py logs the crash, and the
+    # PriceWatcher agent is dead until an operator runs
+    # `systemctl restart karbot`. There is no agent-level auto-restart after
+    # cooldown. Whether that's acceptable (operator gets paged via Telegram
+    # and restarts manually) or whether _run_supervised should itself restart
+    # a dead PriceWatcher after a cooldown is an open architectural question
+    # — flagged for operator decision, not resolved here.
     @retry(
         stop=stop_after_attempt(10),
         wait=wait_exponential(multiplier=1, min=1, max=30),
         retry=retry_if_exception_type((websockets.exceptions.WebSocketException,
                                        ConnectionError, OSError)),
-        before_sleep=before_sleep_log(log, "WARNING"),
+        before_sleep=_log_before_sleep,
     )
     async def _kalshi_connection_loop(self) -> None:
         """Connect to Kalshi WebSocket with automatic reconnection."""
