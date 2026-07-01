@@ -360,6 +360,7 @@ class PriceWatcherAgent:
         self._seen_first_delta: set = set()
         self._reset_requested: Dict[str, float] = {}  # market_id → monotonic time of last snapshot request
         self._snapshot_request_id_counter: int = 0  # monotonic counter for WS "id" correlation field
+        self._rest_session: Optional[aiohttp.ClientSession] = None  # shared across _request_snapshot calls
 
     async def start(self) -> None:
         """Start all feed connections."""
@@ -397,7 +398,23 @@ class PriceWatcherAgent:
             task.cancel()
         if self._kalshi_client:
             await self._kalshi_client.disconnect()
+        if self._rest_session is not None and not self._rest_session.closed:
+            await self._rest_session.close()
+            self._rest_session = None
         log.info("price_watcher_stopped")
+
+    def _get_rest_session(self) -> aiohttp.ClientSession:
+        """Shared aiohttp session for REST snapshot fetches.
+
+        Created once and reused across all _request_snapshot calls instead
+        of a new ClientSession() per call — gap events can fire across many
+        markets within the same second, and creating a new session per call
+        under that load is wasteful. Closed in stop() so nothing leaks
+        across restarts.
+        """
+        if self._rest_session is None or self._rest_session.closed:
+            self._rest_session = aiohttp.ClientSession()
+        return self._rest_session
 
     # NOTE (Session 19, current behavior — dies permanently after 10 failed
     # attempts): once stop_after_attempt(10) is genuinely exhausted (10 real
@@ -601,7 +618,7 @@ class PriceWatcherAgent:
         Kalshi's own docs state snapshot delivery only happens on the
         *initial* subscribe to a channel, not on re-subscribing to an
         already-subscribed market. The WS re-subscribe path could not work
-        as designed; replaced here with a direct REST fetch.
+        as designed; replaced (Session 22) with a direct REST fetch.
 
         GET /trade-api/v2/markets/{ticker}/orderbook, no query params
         (omitting `depth` returns all levels). Response:
@@ -609,6 +626,21 @@ class PriceWatcherAgent:
                              "no_dollars":  [[price_str, count_str], ...]}}
         Same bid-only-per-side structure as the WS snapshot payload, but
         string values — cast to float before building (price, size) tuples.
+
+        NO authentication — per Kalshi's own docs (pending live confirmation
+        this session, see SESSIONS.md Session 23). Session 22 added auth
+        headers here defensively, without empirical verification; that per-call
+        RSA-PSS signing (_build_kalshi_auth_headers) plus a per-call private
+        key file read (_load_kalshi_private_key) is blocking, synchronous
+        work executed inside this async function. Under real load
+        (~13,761 book_needs_reset/15min, ~1,073 throttled-through calls),
+        that blocking work stacked up on the event loop long enough that
+        the WS listen loop couldn't respond to Kalshi's ping frames within
+        ping_timeout=10s, Kalshi tore down the transport, and the next
+        recv() crashed with AttributeError: 'NoneType' object has no
+        attribute 'resume_reading' — 3 crashes in ~8 minutes, exhausting the
+        Session 20 restart budget and leaving PriceWatcher permanently
+        stopped. Do not reintroduce per-call blocking crypto/file I/O here.
 
         This REST response carries no sequence number, so `apply_snapshot`
         is called with seq=0 (sentinel). `OrderBook.apply_delta`'s gap check
@@ -620,10 +652,12 @@ class PriceWatcherAgent:
 
         Throttled to one REST fetch per market per 10 seconds to avoid
         hammering the endpoint when gap events fire repeatedly on the same
-        market. On any failure (non-200, network error, timeout), logs a
-        warning and returns without calling apply_snapshot — `_gap_detected`
-        stays True, so the next delta on this market will retrigger a
-        throttled retry rather than crash the connection loop.
+        market. Uses a shared aiohttp.ClientSession (see _get_rest_session)
+        rather than creating a new session per call. On any failure
+        (non-200, network error, timeout), logs a warning and returns
+        without calling apply_snapshot — `_gap_detected` stays True, so the
+        next delta on this market will retrigger a throttled retry rather
+        than crash the connection loop.
         """
         # Rate limit: skip if we requested a reset for this market within the last 10s
         _THROTTLE_SECS = 10.0
@@ -646,19 +680,15 @@ class PriceWatcherAgent:
         rest_path = f"/trade-api/v2/markets/{market_id}/orderbook"
         url = "https://api.elections.kalshi.com" + rest_path
         try:
-            private_key = _load_kalshi_private_key(self.secrets.kalshi_private_key_path)
-            headers = _build_kalshi_auth_headers(
-                self.secrets.kalshi_api_key_id, private_key, "GET", rest_path
-            )
+            session = self._get_rest_session()
             timeout = aiohttp.ClientTimeout(total=self.KALSHI_REST_SNAPSHOT_TIMEOUT_SECS)
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, timeout=timeout) as resp:
-                    if resp.status != 200:
-                        body = await resp.text()
-                        log.warning("book_reset_rest_failed", market=market_id,
-                                    status=resp.status, body=body[:300])
-                        return
-                    data = await resp.json()
+            async with session.get(url, timeout=timeout) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    log.warning("book_reset_rest_failed", market=market_id,
+                                status=resp.status, body=body[:300])
+                    return
+                data = await resp.json()
         except Exception as e:
             log.warning("book_reset_rest_failed", market=market_id, error=str(e))
             return

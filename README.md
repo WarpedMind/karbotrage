@@ -68,7 +68,7 @@ The legacy `python main.py` path still works but is intentionally not extended �
 
 - Kalshi is the primary data source; Polymarket is gated behind `polymarket_ws_enabled` (disabled in Phase 1)
 - Phase 1 invariants are enforced structurally in `KarbotConfig.__init__` — enabling Polymarket WebSocket or cross-platform strategies while `phase=1` raises `ValueError` at startup
-- Paper trading mode only; 30-day paper trading clock started 2026-05-26; live execution deferred until it completes and end-to-end results are reviewed
+- Paper trading mode only; 30-day paper trading clock started 2026-06-29, target live date 2026-07-29; live execution deferred until it completes and end-to-end results are reviewed
 
 ## Project layout
 
@@ -99,10 +99,16 @@ data/market_data.py       # Kalshi-first market data
 
 ## Next up
 
-1. Investigate the Kalshi market volume filter — 0/200 markets currently
-   pass `volume_24h > 100` in `_fetch_active_kalshi_markets()`, so no
-   PriceUpdateEvents flow despite working auth and WS connection
-2. Begin live executor spec — the 30-day paper run completed 2026-06-25
+1. **Pending live verification**: order-book gap recovery (`_request_snapshot`
+   in `agents/floor/price_watcher.py`) now fetches a fresh snapshot via REST
+   (`GET /trade-api/v2/markets/{ticker}/orderbook`, no auth) instead of a WS
+   re-subscribe, and reuses a single shared `aiohttp.ClientSession` instead
+   of creating one per call — fixes a live outage where per-call blocking
+   RSA-PSS signing on the old (unnecessary) auth path stalled the event loop
+   long enough to miss Kalshi's WS pings and crash the connection. See
+   DECISIONS.md / SESSIONS.md for full detail once the operator confirms
+   the fix live on the VPS.
+2. Begin live executor spec once the 30-day paper run completes (2026-07-29)
 
 ## License
 
