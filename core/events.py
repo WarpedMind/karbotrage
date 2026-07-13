@@ -20,7 +20,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum, auto
-from typing import Any, Callable, Awaitable, Dict, List, Optional, Type, TypeVar
+from typing import Any, Callable, Awaitable, Dict, List, Optional, Tuple, Type, TypeVar
 
 import structlog
 
@@ -67,6 +67,14 @@ class PriceUpdateEvent(Event):
     volume_24h:     float = 0.0
     open_interest:  int   = 0
     sequence_num:   int   = 0           # For detecting gaps in WebSocket stream
+
+    # Order book depth behind yes_bid / no_bid, top levels sorted best-price
+    # first: [(price, size), ...]. Lets strategies size against real
+    # available liquidity instead of assuming the full order can fill at the
+    # single best-quoted price — live-confirmed 2026-07-13 that a "3% edge"
+    # top-of-book quote can be backed by as little as 1 contract.
+    yes_bid_depth:  List[Tuple[float, float]] = field(default_factory=list)
+    no_bid_depth:   List[Tuple[float, float]] = field(default_factory=list)
 
 
 @dataclass
@@ -120,6 +128,14 @@ class OpportunityEvent(Event):
     expected_resolution:       Optional[datetime] = None
     resolution_criteria_match: Optional[bool] = None  # Required for cross-platform
     capital_required_usd:      float = 0.0
+
+    # Liquidity: max quantity (contracts — same unit RiskGate.approved_size /
+    # PaperExecutor's leg "quantity" already use) the order book can actually
+    # support at prices that still clear s1_min_net_profit_pct, computed by
+    # walking real book depth rather than assuming unlimited size at the
+    # top-of-book quote. 0.0 = not computed by this strategy (no cap applied
+    # by Risk Gate).
+    max_fillable_qty:          float = 0.0
 
 
 @dataclass

@@ -190,6 +190,29 @@ class OrderBook:
         """True if a sequence gap was detected — needs snapshot refresh."""
         return self._gap_detected
 
+    MAX_DEPTH_LEVELS = 20
+
+    def depth(self, side: str) -> List[Tuple[float, float]]:
+        """
+        Top MAX_DEPTH_LEVELS (price, size) levels for `side`, best price
+        first. "yes_bid" reads self.bids directly (literal YES bids).
+        "no_bid" reads self.asks (which stores each NO-side delta at the
+        transformed price 1-P — see _handle_kalshi_delta) and converts back:
+        a resting NO bid of size S at price P is stored as an entry at
+        price (1-P), so the NO bid price is recovered as (1 - stored_price)
+        with the same size.
+        """
+        if side == "yes_bid":
+            levels = sorted(self.bids.items(), key=lambda kv: -kv[0])
+        elif side == "no_bid":
+            levels = sorted(
+                ((round(1.0 - price, 4), size) for price, size in self.asks.items()),
+                key=lambda kv: -kv[0],
+            )
+        else:
+            raise ValueError(f"unknown depth side: {side}")
+        return levels[: self.MAX_DEPTH_LEVELS]
+
     def to_price_event(self, platform: str) -> PriceUpdateEvent:
         """Convert current book state to a PriceUpdateEvent."""
         # For Kalshi binary contracts: YES bid/ask and NO bid/ask
@@ -198,14 +221,16 @@ class OrderBook:
         yes_ask = self.best_ask or 0.0
 
         return PriceUpdateEvent(
-            source       = f"price_watcher_{platform}",
-            platform     = platform,
-            market_id    = self.market_id,
-            yes_bid      = yes_bid,
-            yes_ask      = yes_ask,
-            no_bid       = round(1.0 - yes_ask, 4),  # NO bid = 1 - YES ask
-            no_ask       = round(1.0 - yes_bid, 4),  # NO ask = 1 - YES bid
-            sequence_num = self.sequence,
+            source        = f"price_watcher_{platform}",
+            platform      = platform,
+            market_id     = self.market_id,
+            yes_bid       = yes_bid,
+            yes_ask       = yes_ask,
+            no_bid        = round(1.0 - yes_ask, 4),  # NO bid = 1 - YES ask
+            no_ask        = round(1.0 - yes_bid, 4),  # NO ask = 1 - YES bid
+            sequence_num  = self.sequence,
+            yes_bid_depth = self.depth("yes_bid"),
+            no_bid_depth  = self.depth("no_bid"),
         )
 
 
