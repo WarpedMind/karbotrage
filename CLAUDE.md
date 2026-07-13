@@ -277,13 +277,25 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
   "CONFIRMED LIVE" claim elsewhere in this file should be treated as
   unverified until independently re-checked against the VPS directly.
 
-### Secrets policy violation on live VPS — found Session 26, not fixed
-- `karbot.service` has `EnvironmentFile=/home/ubuntu/karbotrage_v1/.env` —
-  this file's own VPS security rules (above) say secrets must come from a
-  systemd EnvironmentFile *outside* the repo directory (e.g.
-  `/etc/karbot/secrets/`), not a `.env` inside it. Not fixed Session 26
-  (avoided touching the live secrets path during an active outage
-  response) — needs a dedicated, careful session.
+### Secrets policy violation on live VPS — FIXED, Session 26 (2026-07-13)
+- `karbot.service` had `EnvironmentFile=/home/ubuntu/karbotrage_v1/.env` —
+  violated this file's own VPS security rule that secrets must come from
+  a systemd EnvironmentFile *outside* the repo directory. The private key
+  (`KALSHI_PRIVATE_KEY_PATH`) was already correctly stored at
+  `/etc/karbot/secrets/kalshi_private_key.pem` (`chmod 600`, owned by the
+  `ubuntu` service user) — only the `.env` holding
+  `KALSHI_API_KEY_ID`/`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`/
+  `ANTHROPIC_API_KEY` was misplaced, and was world-readable
+  (`rw-rw-r--`) inside the repo directory.
+- Fixed: copied to `/etc/karbot/secrets/karbot.env` (matching the
+  existing private-key file's ownership/permission convention:
+  `ubuntu:ubuntu`, `chmod 600`), updated `karbot.service`'s
+  `EnvironmentFile=` to the new path, `daemon-reload` + restart. Verified
+  live: `config_resolved` log shows `telegram_enabled=True` and all
+  subsystems correctly enabled from the new path, no
+  `secrets_missing_at_startup` warning. Old repo-directory `.env` deleted
+  after confirming the service ran cleanly without it (was gitignored,
+  never committed — confirmed via `git check-ignore` before deletion).
 
 - correlation_score in PositionSnapshot is permanently 0.0 — Phase 3 item
 - execution/engine.py — legacy monolithic path, intentionally deferred,
@@ -579,13 +591,8 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
    them "CONFIRMED LIVE." Going forward, "confirmed live" must mean checked
    against `git log -1` on the VPS itself and fresh log output, not just a
    local commit plus a plausible-sounding log line from one prior check.
-7. **Move `.env` off the repo path on the VPS** (Session 26) — live
-   `karbot.service` has `EnvironmentFile=/home/ubuntu/karbotrage_v1/.env`,
-   which violates this file's own VPS security rule (secrets should come
-   from a systemd EnvironmentFile outside the repo directory, e.g.
-   `/etc/karbot/secrets/`). Not fixed Session 26 (didn't want to touch the
-   live secrets path mid-outage-response) — do it in a dedicated, careful
-   session.
+7. ~~Move `.env` off the repo path on the VPS~~ — **DONE, Session 26
+   (2026-07-13)**, see KNOWN DEBT above.
 8. **Investigate paper-trade fee variance** (KNOWN DEBT, Session 25) — fee
    amounts observed live via Telegram vary unexplainably ($70.00 flat,
    $0.00, $42.78, $113.27, $56.64). Pull the fee calculation logic

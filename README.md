@@ -266,9 +266,6 @@ tonight's findings are consistent with that framing.
 
 ## Open questions (flagged live, not yet resolved)
 
-- **`size_usd=0.0` approved trades** (noticed 2026-07-13): some
-  `opportunity_approved` events show zero size — zero-size trades being
-  approved and executed pointlessly. Not yet root-caused.
 - **S1's liquidity cap is top-of-book only**, not a full multi-level
   depth walk — deliberately conservative scope for 2026-07-13, extending
   it is a reasonable follow-up now that the pricing formula is correct.
@@ -279,26 +276,34 @@ tonight's findings are consistent with that framing.
   $0–$113 depending on the trade) — needs a cross-check against the fee
   calculation logic and `compliance.db` before assuming it's correct. Not
   investigated yet.
-- **Secrets policy deviation on the live VPS**: `karbot.service`'s
-  `EnvironmentFile=/home/ubuntu/karbotrage_v1/.env` violates this
-  project's own stated rule that secrets should be injected from outside
-  the repo directory (e.g. `/etc/karbot/secrets/`). Found 2026-07-13, not
-  yet fixed.
+
+Two other items flagged earlier the same session were fixed before this
+list needed to carry them: the `size_usd=0.0` approved-trade bug
+(RiskGate now rejects a non-positive approved size instead of executing
+it — `ZERO_APPROVED_SIZE`) and the secrets policy deviation (`.env`
+moved to `/etc/karbot/secrets/karbot.env`, `chmod 600`, matching the
+private key's existing convention; old repo-directory copy deleted after
+confirming the service ran cleanly from the new path).
+
+Also added the same session: `s1_candidate_seen` visibility logging —
+every S1 candidate that clears zero gross spread now logs its
+gross/fee/net breakdown regardless of whether it clears the trading
+threshold, so the operator can judge real-world viability from a few
+hours of logs instead of waiting days for an actual trade.
 
 ## Next up
 
 1. Let clean post-fix data accumulate, then re-run the P&L-as-%-of-position-size
    benchmark check against a real sample (not just the first few minutes
-   observed live) — the fix above needs to hold up over time.
-2. Investigate the `size_usd=0.0` approved-trade bug noted above.
-3. Investigate the stuck order-book reset loop (why some markets never
+   observed live) — the fix above needs to hold up over time. Watch
+   `s1_candidate_seen` logs for near-miss frequency in the meantime.
+2. Investigate the stuck order-book reset loop (why some markets never
    complete recovery — the disk-filling symptom is fixed, the loop itself
    isn't).
-4. Re-audit every other "CONFIRMED LIVE" claim in CLAUDE.md against actual
+3. Re-audit every other "CONFIRMED LIVE" claim in CLAUDE.md against actual
    VPS state, not just prior session notes.
-5. Move `.env` off the repo path on the VPS to close the secrets-policy gap.
-6. Investigate the paper-trade fee variance noted above.
-7. Continue live-verifying Telegram alerting (feed-down/recovered,
+4. Investigate the paper-trade fee variance noted above.
+5. Continue live-verifying Telegram alerting (feed-down/recovered,
    restart-budget-exhaustion) now that the duplicate regulatory message is gone.
 8. Add a concurrency limiter (`asyncio.Semaphore`) on `_request_snapshot`
    REST calls to smooth the post-restart burst noted above — not urgent.
