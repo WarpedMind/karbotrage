@@ -85,17 +85,23 @@ async def _run_pipeline(bus: EventBus, agents: list) -> None:
 
 
 async def _inject_price(bus: EventBus, entry: dict) -> None:
+    yes_ask = float(entry["yes_ask"])
+    no_ask  = float(entry["no_ask"])
     await bus.publish(PriceUpdateEvent(
         source        = "test",
         platform      = entry["platform"],
         market_id     = entry["market_id"],
         yes_bid       = float(entry["yes_bid"]),
-        yes_ask       = float(entry["yes_ask"]),
+        yes_ask       = yes_ask,
         no_bid        = float(entry["no_bid"]),
-        no_ask        = float(entry["no_ask"]),
+        no_ask        = no_ask,
         volume_24h    = float(entry.get("volume_24h", 0.0)),
         open_interest = int(entry.get("open_interest", 0)),
         sequence_num  = int(entry.get("sequence_num", 0)),
+        # S1 requires real depth as of 2026-07-13 (DECISIONS.md) — default
+        # to a generous size so these fixtures aren't liquidity-limited.
+        yes_ask_depth = [(yes_ask, float(entry.get("yes_ask_size", 1000.0)))],
+        no_ask_depth  = [(no_ask, float(entry.get("no_ask_size", 1000.0)))],
     ))
 
 

@@ -194,20 +194,27 @@ class OrderBook:
 
     def depth(self, side: str) -> List[Tuple[float, float]]:
         """
-        Top MAX_DEPTH_LEVELS (price, size) levels for `side`, best price
-        first. "yes_bid" reads self.bids directly (literal YES bids).
-        "no_bid" reads self.asks (which stores each NO-side delta at the
-        transformed price 1-P — see _handle_kalshi_delta) and converts back:
-        a resting NO bid of size S at price P is stored as an entry at
-        price (1-P), so the NO bid price is recovered as (1 - stored_price)
-        with the same size.
+        Top MAX_DEPTH_LEVELS (price, size) levels for `side`, best (lowest,
+        most favorable to a buyer) price first.
+
+        "yes_ask": the real prices at which YES can be bought right now.
+        Stored directly in self.asks — each NO-side delta at price P is
+        stored at the transformed price (1-P) with the resting NO bid's
+        size (see _handle_kalshi_delta), which IS the YES ask level: a
+        resting bid to buy NO at P is economically an offer to sell YES at
+        (1-P) (binary-market complement equivalence, confirmed live
+        Session 15). No further transform needed.
+
+        "no_ask": the real prices at which NO can be bought right now,
+        derived symmetrically from self.bids (each YES bid at price P
+        implies a synthetic NO ask at (1-P) with the same size).
         """
-        if side == "yes_bid":
-            levels = sorted(self.bids.items(), key=lambda kv: -kv[0])
-        elif side == "no_bid":
+        if side == "yes_ask":
+            levels = sorted(self.asks.items(), key=lambda kv: kv[0])
+        elif side == "no_ask":
             levels = sorted(
-                ((round(1.0 - price, 4), size) for price, size in self.asks.items()),
-                key=lambda kv: -kv[0],
+                ((round(1.0 - price, 4), size) for price, size in self.bids.items()),
+                key=lambda kv: kv[0],
             )
         else:
             raise ValueError(f"unknown depth side: {side}")
@@ -229,8 +236,8 @@ class OrderBook:
             no_bid        = round(1.0 - yes_ask, 4),  # NO bid = 1 - YES ask
             no_ask        = round(1.0 - yes_bid, 4),  # NO ask = 1 - YES bid
             sequence_num  = self.sequence,
-            yes_bid_depth = self.depth("yes_bid"),
-            no_bid_depth  = self.depth("no_bid"),
+            yes_ask_depth = self.depth("yes_ask"),
+            no_ask_depth  = self.depth("no_ask"),
         )
 
 

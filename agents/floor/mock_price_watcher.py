@@ -71,17 +71,25 @@ class MockPriceWatcher:
         log.info("mock_price_watcher_starting", total_entries=len(entries))
 
         for entry in entries:
+            yes_ask = float(entry["yes_ask"])
+            no_ask  = float(entry["no_ask"])
             event = PriceUpdateEvent(
                 source        = self.AGENT_NAME,
                 platform      = entry["platform"],
                 market_id     = entry["market_id"],
                 yes_bid       = float(entry["yes_bid"]),
-                yes_ask       = float(entry["yes_ask"]),
+                yes_ask       = yes_ask,
                 no_bid        = float(entry["no_bid"]),
-                no_ask        = float(entry["no_ask"]),
+                no_ask        = no_ask,
                 volume_24h    = float(entry.get("volume_24h", 0.0)),
                 open_interest = int(entry.get("open_interest", 0)),
                 sequence_num  = int(entry.get("sequence_num", 0)),
+                # Depth defaults to a generous size unless a fixture entry
+                # explicitly sets yes_ask_size/no_ask_size to test thin
+                # liquidity — S1 requires real depth (see 2026-07-13 fix,
+                # DECISIONS.md) and treats missing depth as zero liquidity.
+                yes_ask_depth = [(yes_ask, float(entry.get("yes_ask_size", 1000.0)))],
+                no_ask_depth  = [(no_ask, float(entry.get("no_ask_size", 1000.0)))],
             )
             await self.bus.publish(event)
             log.info("mock_price_published",

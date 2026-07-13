@@ -68,13 +68,17 @@ class PriceUpdateEvent(Event):
     open_interest:  int   = 0
     sequence_num:   int   = 0           # For detecting gaps in WebSocket stream
 
-    # Order book depth behind yes_bid / no_bid, top levels sorted best-price
-    # first: [(price, size), ...]. Lets strategies size against real
-    # available liquidity instead of assuming the full order can fill at the
-    # single best-quoted price — live-confirmed 2026-07-13 that a "3% edge"
-    # top-of-book quote can be backed by as little as 1 contract.
-    yes_bid_depth:  List[Tuple[float, float]] = field(default_factory=list)
-    no_bid_depth:   List[Tuple[float, float]] = field(default_factory=list)
+    # Order book depth at the real, executable ASK prices — top levels
+    # sorted best (lowest) price first: [(price, size), ...]. yes_ask_depth
+    # / no_ask_depth, not bid depth: a BUY order executes against the ask
+    # side, and yes_bid/no_bid are prices *other* participants are willing
+    # to pay, not prices this system can buy at (see DECISIONS.md Session 26,
+    # "S1 arb formula uses BID prices for both legs of a BUY trade"). Lets
+    # strategies size against real available liquidity instead of assuming
+    # the full order fills at the single best-quoted price — live-confirmed
+    # 2026-07-13 that a quoted edge can be backed by as little as 1 contract.
+    yes_ask_depth:  List[Tuple[float, float]] = field(default_factory=list)
+    no_ask_depth:   List[Tuple[float, float]] = field(default_factory=list)
 
 
 @dataclass

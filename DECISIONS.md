@@ -1,6 +1,105 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-07-13 — Session 26: S1 arb formula uses BID prices for both legs of a BUY trade — likely inverts P&L sign on every trade since inception
+
+### Revert point: commit `5348533` — before this fix. Everything below it (all Session 26 work up to and including the disk outage fix, stale-publish fix, sanity ceiling, depth plumbing) is unaffected by this finding and does not need to be reverted if this fix is backed out.
+
+### The math
+`agents/floor/arb_scanner.py::_check_s1_rebalancing` computes:
+```
+combined_cost = event.yes_bid + event.no_bid
+gross_pct = (1.0 - combined_cost) * 100
+```
+`yes_bid` and `no_bid` are **bid** prices — the price *other market
+participants* are resting orders to buy at. They are not prices you can
+buy at. To actually execute "buy YES + buy NO," you must cross to the
+**ask** side of each book.
+
+Kalshi's order book is bid-only by design (documented in this file,
+Session 15): a resting bid to buy NO at price P is mathematically
+equivalent to an offer to sell YES at price `(1-P)`, because holding NO
+and being short YES have identical payoffs on a binary contract. So:
+```
+real cost to buy YES now = yes_ask = 1 - best_no_bid
+real cost to buy NO now  = no_ask  = 1 - best_yes_bid
+real combined cost       = yes_ask + no_ask = 2 - (yes_bid + no_bid)
+real gross profit        = 1 - real_combined_cost = (yes_bid + no_bid) - 1
+```
+That is the **negative** of what `_check_s1_rebalancing` currently
+computes (`gross_pct = (1 - (yes_bid+no_bid))*100`). The formula has the
+sign backwards: it is scoring the BID-side sum as if it were the ASK-side
+cost.
+
+`PriceUpdateEvent.yes_ask` / `.no_ask` already contain the correct,
+real, executable ask prices (`to_price_event()` in `price_watcher.py`
+computes them correctly) — the bug is narrowly that
+`_check_s1_rebalancing` reads `.yes_bid`/`.no_bid` instead.
+
+### Verification against real data, not just algebra
+1. **Live market pulled directly from Kalshi's REST API this session**
+   (`KXWNBAMENTION-26JUL13PHXMIN-MVP`): `yes_bid=0.23`, `no_bid=0.30`.
+   Current code: `combined=0.53` → reports **+47% profit**. Real
+   executable cost: `yes_ask=1-0.30=0.70`, `no_ask=1-0.23=0.77`,
+   `total=1.47` → actually a **47% guaranteed loss**.
+2. **A "normal," non-outlier example** (`yes_bid=0.42`, `no_bid=0.40`,
+   which the current code scores as a clean +3.7% net edge after fees):
+   real cost comes out to `yes_ask=0.60 + no_ask=0.58 = 1.18` — an 18%
+   loss, not a profit. This wasn't cherry-picked — it's the "realistic
+   small edge" example from tonight's own sanity-ceiling test
+   (`tests/test_arb_scanner_s1_sanity_ceiling.py`), which passed and was
+   treated as evidence the ceiling fix was working correctly.
+3. **Corroborating evidence already in this project's own history**:
+   `SESSIONS.md` Session 2 records that the strategy's original spec
+   prices (YES=0.47, NO=0.51) were "unprofitable after fees" under
+   whatever formula existed at the time, so the team substituted
+   artificial 0.40/0.40 fixture prices to make the test pipeline fire.
+   Under the *correct* ask-based formula, 0.47/0.51 works out to
+   `yes_ask=1-0.51=0.49`, `no_ask=1-0.47=0.53`, `total=1.02` — a small
+   ~2% loss, exactly what you'd expect from a normal, roughly-efficient
+   market with an ordinary bid-ask spread. That the original, presumably
+   real/researched spec prices come out approximately break-even under
+   the corrected formula — while the buggy formula rejected them as
+   unprofitable and needed invented numbers instead — is strong
+   independent support that the sign has been wrong since Session 2
+   (2026-05-25), the very first working version of this strategy.
+
+### What this means
+If this holds, **every S1 "opportunity" the system has ever flagged as
+profitable was, by the corrected math, a computed loss with the sign
+flipped** — not a subset, not just the outliers caught by tonight's
+sanity ceiling. This is a distinct issue from the stale-order-book bug
+fixed earlier tonight (that bug made a wrong-but-plausible number look
+worse than it should; this one makes the entire strategy's profitability
+signal backwards regardless of data quality) and from the missing-depth
+issue (that one is about whether a real, correctly-priced edge is
+actually fillable at size). All three bugs were live simultaneously,
+independently discovered in the same session, each compounding the
+others' effect on the reported P&L.
+
+### Fix
+`_check_s1_rebalancing` should read `event.yes_ask` / `event.no_ask`
+(already correctly computed, just unused by this function) instead of
+`event.yes_bid` / `event.no_bid`, and the resulting opportunity's legs
+should quote the ask prices (the real prices a buy order would pay), not
+the bid prices. See the commit immediately following this one for the
+implementation and tests.
+
+### Why this wasn't caught by any of tonight's other fixes or the 83-92
+passing tests before this session
+None of the existing tests constructed a `PriceUpdateEvent` with
+independently-set `yes_ask`/`no_ask` values that diverged meaningfully
+from a naive `1 - other_side_bid` assumption in a way that would surface
+the sign error — the fixture prices used throughout (0.40/0.40, etc.)
+were chosen specifically to make the *existing* (buggy) formula produce
+a positive, testable result, which is exactly the trap: the tests were
+written to confirm the code did what it currently does, not to check
+that what it currently does is financially correct. This is a case
+where 100% passing tests provided false confidence — the tests were
+internally consistent with a wrong formula.
+
+---
+
 ## 2026-07-01 — Session 25: one event, one Telegram consumer — removed a duplicate/broken regulatory alert path
 
 ### RegulatoryAlertEvent stays a pure ComplianceOfficer logging signal; Telegram gets it only via the urgency-branched path

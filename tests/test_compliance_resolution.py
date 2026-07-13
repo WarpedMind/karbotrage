@@ -118,6 +118,8 @@ async def test_trade_resolved_updates_csv_gain_loss(tmp_path, monkeypatch):
         volume_24h=float(entry.get("volume_24h", 0.0)),
         open_interest=int(entry.get("open_interest", 0)),
         sequence_num=int(entry.get("sequence_num", 0)),
+        yes_ask_depth=[(float(entry["yes_ask"]), float(entry.get("yes_ask_size", 1000.0)))],
+        no_ask_depth=[(float(entry["no_ask"]), float(entry.get("no_ask_size", 1000.0)))],
     ))
     await asyncio.sleep(0.4)
 
@@ -380,6 +382,8 @@ async def test_trade_executed_inserts_db_row(tmp_path, monkeypatch):
         volume_24h=float(entry.get("volume_24h", 0.0)),
         open_interest=int(entry.get("open_interest", 0)),
         sequence_num=int(entry.get("sequence_num", 0)),
+        yes_ask_depth=[(float(entry["yes_ask"]), float(entry.get("yes_ask_size", 1000.0)))],
+        no_ask_depth=[(float(entry["no_ask"]), float(entry.get("no_ask_size", 1000.0)))],
     ))
     await asyncio.sleep(0.4)
 
@@ -454,6 +458,8 @@ async def test_trade_executed_then_resolved_db_lifecycle(tmp_path, monkeypatch):
         volume_24h=float(entry.get("volume_24h", 0.0)),
         open_interest=int(entry.get("open_interest", 0)),
         sequence_num=int(entry.get("sequence_num", 0)),
+        yes_ask_depth=[(float(entry["yes_ask"]), float(entry.get("yes_ask_size", 1000.0)))],
+        no_ask_depth=[(float(entry["no_ask"]), float(entry.get("no_ask_size", 1000.0)))],
     ))
     await asyncio.sleep(0.4)
 

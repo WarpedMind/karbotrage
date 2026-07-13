@@ -248,21 +248,28 @@ class ArbScannerAgent:
         S1: Single-market YES+NO rebalancing.
 
         Core logic:
-          YES_bid + NO_bid < 1.00 means you can buy both and guarantee $1 payout
-          Net profit = (1.00 - YES_bid - NO_bid) - fees - slippage
+          YES_ask + NO_ask < 1.00 means you can BUY both and guarantee $1 payout
+          Net profit = (1.00 - YES_ask - NO_ask) - fees - slippage
+
+        Uses ASK prices, not bid prices — bids are what other participants
+        are willing to pay, not prices this system can buy at. A prior
+        version of this function used yes_bid/no_bid directly, which
+        inverts the sign of the real, executable P&L (see DECISIONS.md,
+        Session 26, "S1 arb formula uses BID prices for both legs of a BUY
+        trade" — fixed 2026-07-13).
 
         This is the safest strategy: both legs on same platform, no leg risk.
         """
         if event.platform != "kalshi":
             return None   # S1 on Kalshi only for Phase 1
 
-        yes_bid = event.yes_bid
-        no_bid  = event.no_bid
+        yes_ask = event.yes_ask
+        no_ask  = event.no_ask
 
-        if yes_bid <= 0 or no_bid <= 0:
+        if yes_ask <= 0 or no_ask <= 0:
             return None
 
-        combined_cost = yes_bid + no_bid
+        combined_cost = yes_ask + no_ask
 
         # Gross profit
         gross_pct = (1.0 - combined_cost) * 100
@@ -271,7 +278,7 @@ class ArbScannerAgent:
             return None
 
         # Fee estimation
-        fee_pct = KalshiFeeModel.estimate_fee_pct(yes_bid, no_bid) * 100
+        fee_pct = KalshiFeeModel.estimate_fee_pct(yes_ask, no_ask) * 100
         slippage_pct = self.config.risk.max_slippage_pct
 
         net_pct = gross_pct - fee_pct - slippage_pct
@@ -281,15 +288,29 @@ class ArbScannerAgent:
 
         if net_pct > self._cfg_s.s1_max_net_profit_pct:
             # A real S1 arb on a liquid market doesn't exceed low single
-            # digits. This size almost always means the order book behind
-            # yes_bid/no_bid is stale or corrupt, not a genuine opportunity —
-            # log loudly and skip rather than trade on it blindly.
+            # digits. This size almost always means the order book is
+            # stale/corrupt or the quote is backed by negligible depth, not
+            # a genuine opportunity — log loudly and skip rather than trade
+            # on it blindly.
             log.warning("s1_opportunity_exceeds_sanity_ceiling",
                         market=event.market_id,
                         net_pct=net_pct,
-                        yes_bid=yes_bid,
-                        no_bid=no_bid,
+                        yes_ask=yes_ask,
+                        no_ask=no_ask,
                         ceiling=self._cfg_s.s1_max_net_profit_pct)
+            return None
+
+        # Liquidity: cap size to what's actually resting at the quoted ask
+        # price on each leg. Top-of-book only, not a multi-level walk —
+        # live-confirmed 2026-07-13 that a mathematically valid edge can be
+        # backed by as little as 1 contract; sizing off the quote alone
+        # (as this function previously did) trades against liquidity that
+        # doesn't exist.
+        yes_ask_size = event.yes_ask_depth[0][1] if event.yes_ask_depth else 0.0
+        no_ask_size  = event.no_ask_depth[0][1] if event.no_ask_depth else 0.0
+        max_fillable_qty = min(yes_ask_size, no_ask_size)
+
+        if max_fillable_qty <= 0:
             return None
 
         # Dedup check
@@ -301,8 +322,9 @@ class ArbScannerAgent:
         log.debug("s1_opportunity_found",
                   market=event.market_id,
                   net_pct=net_pct,
-                  yes_bid=yes_bid,
-                  no_bid=no_bid)
+                  yes_ask=yes_ask,
+                  no_ask=no_ask,
+                  max_fillable_qty=max_fillable_qty)
 
         return OpportunityEvent(
             source            = self.AGENT_NAME,
@@ -313,7 +335,7 @@ class ArbScannerAgent:
                     "platform":   "kalshi",
                     "market_id":  event.market_id,
                     "side":       "YES",
-                    "price":      yes_bid,
+                    "price":      yes_ask,
                     "quantity":   0,    # Sized by Risk Gate based on capital
                     "fee_estimate": fee_pct / 2 / 100,
                 },
@@ -321,7 +343,7 @@ class ArbScannerAgent:
                     "platform":   "kalshi",
                     "market_id":  event.market_id,
                     "side":       "NO",
-                    "price":      no_bid,
+                    "price":      no_ask,
                     "quantity":   0,
                     "fee_estimate": fee_pct / 2 / 100,
                 },
@@ -332,6 +354,7 @@ class ArbScannerAgent:
             net_profit_pct        = net_pct,
             confidence            = self._confidence_from_net(net_pct),
             detected_at           = datetime.now(timezone.utc),
+            max_fillable_qty      = max_fillable_qty,
         )
 
     def _check_s2_cross_platform(

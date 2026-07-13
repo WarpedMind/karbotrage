@@ -1,13 +1,13 @@
 [
   {
     "_scenario": "1_happy_path",
-    "_note": "YES+NO = 0.80 — wide spread clears Kalshi fee model (14%+0.3% = 14.3% needed; gross here is 20%). Spec requested 0.47/0.51 but combined 0.98 is not profitable after Kalshi fees (~14% per round trip).",
+    "_note": "yes_ask+no_ask = 0.80 (gross 20%) — clears Kalshi's ~14.3% fee+slippage AND the Kelly formula's ~5.26% breakeven threshold (p=0.95, q=0.05) net of ~5.7%. Uses ASK prices, the real executable buy cost — see DECISIONS.md Session 26 (2026-07-13) on why yes_bid/no_bid must not be used here.",
     "platform": "kalshi",
     "market_id": "KALSHI-TEST-001",
     "yes_bid": 0.40,
-    "yes_ask": 0.42,
+    "yes_ask": 0.40,
     "no_bid": 0.40,
-    "no_ask": 0.42,
+    "no_ask": 0.40,
     "volume_24h": 50000.0,
     "open_interest": 10000,
     "sequence_num": 1
@@ -18,9 +18,9 @@
     "platform": "kalshi",
     "market_id": "KALSHI-TEST-002",
     "yes_bid": 0.40,
-    "yes_ask": 0.42,
+    "yes_ask": 0.40,
     "no_bid": 0.40,
-    "no_ask": 0.42,
+    "no_ask": 0.40,
     "volume_24h": 45000.0,
     "open_interest": 9500,
     "sequence_num": 1

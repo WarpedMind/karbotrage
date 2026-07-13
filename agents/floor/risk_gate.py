@@ -470,6 +470,21 @@ class RiskGateAgent:
             reduction = 1 - (self._current_snapshot.correlation_score - 0.7) / 0.3
             size *= max(0.3, reduction)
 
+        # Cap to what the order book can actually fill (ArbScanner-computed,
+        # S1 only as of 2026-07-13 — 0.0 means the strategy didn't compute
+        # one, so no cap is applied). Note: `size` here is nominally USD
+        # (Kelly formula output) while max_fillable_qty is contract count —
+        # these units don't actually match, but this mirrors the existing,
+        # pre-existing convention throughout this codebase where
+        # approved_size is already consumed as a raw quantity by
+        # PaperExecutor (event.approved_size -> leg "quantity" directly,
+        # no dollar/contract conversion anywhere). Not fixed here — flagged
+        # as separate KNOWN DEBT in CLAUDE.md; this cap stays consistent
+        # with the existing (imperfect) unit handling rather than
+        # introducing a second, inconsistent convention.
+        if event.max_fillable_qty > 0:
+            size = min(size, event.max_fillable_qty)
+
         return round(size, 2)
 
     # ── Event Handlers ────────────────────────────────────────────────────────
