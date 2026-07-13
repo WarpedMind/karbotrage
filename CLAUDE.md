@@ -149,6 +149,58 @@ async def run(self): ...
 
 ## KNOWN DEBT
 
+### S1 arb detection has no upper-bound sanity check — HIGH PRIORITY, live-confirmed Session 26
+- `agents/floor/arb_scanner.py` rejects opportunities with `net_pct` below
+  `s1_min_net_profit_pct`, but nothing rejects a `net_pct` that's
+  implausibly *high*. Live Session 26 (2026-07-13): immediately after a
+  clean restart, `opportunity_approved` events showed `net_pct` of 20.7%,
+  31.7%, 54.7%, 61.7%, 47.7% — against a realistic S1 benchmark of 1–5% —
+  firing in the same seconds as multiple `sequence_gap_detected` warnings
+  for other markets. This is now understood to be the mechanism behind the
+  P&L-inflation KNOWN DEBT flagged since Session 25: a stale/corrupt order
+  book can trivially produce a fake huge spread, and nothing catches it.
+  Not fixed Session 26 — needs its own session (add an upper `net_pct`
+  ceiling and/or gate S1 pricing on order-book freshness). Top priority
+  before live trading. Full detail: SESSIONS.md Session 26.
+
+### Order-book reset loop never resolves for some markets — found Session 26, log-volume symptom fixed, root cause not fixed
+- Specific markets (e.g. `KXWORLDNEWSMENTION-26JUL10-WILD`) get stuck
+  logging `book_needs_reset` → `book_reset_throttled` on every WS delta
+  received, indefinitely — the Session 22/23 10s-throttle only blocks the
+  actual REST re-fetch, not this per-delta debug logging. 169 million such
+  lines accumulated over ~9 days and filled the VPS disk to 100%
+  (2026-07-04 to 2026-07-13), silently breaking `compliance.db` and
+  `audit_trail.jsonl` writes the entire time with zero alerting (see
+  SESSIONS.md Session 26 for the full outage writeup). Fixed this session:
+  `structlog.configure()` was never called anywhere in the codebase, so
+  every `log.debug()` rendered unconditionally regardless of
+  `logging.basicConfig(level=logging.INFO)` — added the missing
+  `structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.INFO))`
+  to `karbot_runner.py::setup_logging()`, confirmed live (no more DEBUG
+  output, disk growth back to normal). This stops the *symptom* (disk
+  fill); it does not explain *why* these specific books never complete
+  recovery. Needs its own investigation.
+
+### VPS deployment gap — "CONFIRMED LIVE" claims were not verified against actual VPS state
+- Found Session 26: the VPS was 4 git commits behind `main`
+  (`origin/main` was at `7057d8d`; missing `8a7e6ce`, `185dc6c`, `7d022b9`
+  — the Session 23 docs finalize, Session 24 `config_resolved` fix, and
+  Session 25 duplicate-Telegram-alert removal). This file and README.md
+  documented all three as "CONFIRMED LIVE." No prior session had actually
+  checked `git log` on the VPS before making that claim — it was inferred
+  from a local commit plus a plausible-looking log line seen once. Fixed
+  Session 26 (`git pull` on VPS, now at `9b210fe`) — but every other
+  "CONFIRMED LIVE" claim elsewhere in this file should be treated as
+  unverified until independently re-checked against the VPS directly.
+
+### Secrets policy violation on live VPS — found Session 26, not fixed
+- `karbot.service` has `EnvironmentFile=/home/ubuntu/karbotrage_v1/.env` —
+  this file's own VPS security rules (above) say secrets must come from a
+  systemd EnvironmentFile *outside* the repo directory (e.g.
+  `/etc/karbot/secrets/`), not a `.env` inside it. Not fixed Session 26
+  (avoided touching the live secrets path during an active outage
+  response) — needs a dedicated, careful session.
+
 - correlation_score in PositionSnapshot is permanently 0.0 — Phase 3 item
 - execution/engine.py — legacy monolithic path, intentionally deferred,
   must be removed or replaced before live trading; do not extend
@@ -404,55 +456,89 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **HIGHEST PRIORITY: re-verify P&L magnitude against the 1–5% benchmark**
-   (KNOWN DEBT, Session 25) — pull RESOLVED trades from `compliance.db`
-   timestamped after 2026-07-01 16:31 UTC (when the Session 23 book-reset
-   fix went live), compute PnL as a percentage of position size, and
-   determine whether the distribution is now realistic or still inflated.
-   Live Telegram figures observed tonight ($338.50, $343.50, $383.50,
-   $323.50) look comparable to or larger than the original inflated range —
-   do not assume the book-reset fix also fixed this. Do not continue
-   treating paper trading data as validated until checked.
-2. **Investigate paper-trade fee variance** (KNOWN DEBT, Session 25) — fee
+1. **HIGHEST PRIORITY: fix `ArbScanner`'s missing sanity ceiling / book-freshness gating** —
+   Session 26 (2026-07-13) reproduced the P&L inflation live, immediately
+   after a clean restart with fresh code and a fresh disk: `opportunity_approved`
+   events showed `net_pct` of 20.7%, 31.7%, 54.7%, 61.7%, 47.7% against a
+   realistic S1 benchmark of 1–5%, firing in the same seconds as multiple
+   `sequence_gap_detected` warnings. `agents/floor/arb_scanner.py` has a
+   lower-bound rejection (`net_pct < s1_min_net_profit_pct`) but no
+   upper-bound sanity check — nothing rejects an implausibly large spread,
+   which is exactly what a stale/corrupt order book produces. Add either
+   an upper `net_pct` ceiling (e.g. reject/flag above ~10-15%) or gate
+   S1 detection on order-book freshness (don't price off a book with an
+   unresolved sequence gap). This is the actual blocker before live
+   trading — not a measurement question anymore, a code bug. See
+   SESSIONS.md Session 26 for full detail.
+2. **Investigate the stuck order-book reset loop** (Session 26) — specific
+   markets (e.g. `KXWORLDNEWSMENTION-26JUL10-WILD`) get stuck logging
+   `book_needs_reset`/`book_reset_throttled` on every delta indefinitely,
+   never actually completing recovery via the Session 22/23 REST mechanism.
+   169 million such log lines accumulated over ~9 days and were the proximate
+   cause of the Session 26 disk-full outage. The Session 26 fix
+   (`structlog.configure` filtering) stops this from filling the disk again,
+   but does not fix why the loop happens.
+3. **Re-audit every "CONFIRMED LIVE" claim in this file against actual VPS
+   state** (Session 26) — the VPS was found 4 commits behind `main`,
+   silently missing the Session 23/24/25 fixes despite this file marking
+   them "CONFIRMED LIVE." Going forward, "confirmed live" must mean checked
+   against `git log -1` on the VPS itself and fresh log output, not just a
+   local commit plus a plausible-sounding log line from one prior check.
+4. **Move `.env` off the repo path on the VPS** (Session 26) — live
+   `karbot.service` has `EnvironmentFile=/home/ubuntu/karbotrage_v1/.env`,
+   which violates this file's own VPS security rule (secrets should come
+   from a systemd EnvironmentFile outside the repo directory, e.g.
+   `/etc/karbot/secrets/`). Not fixed Session 26 (didn't want to touch the
+   live secrets path mid-outage-response) — do it in a dedicated, careful
+   session.
+5. **Re-run the P&L benchmark check with clean post-fix data** — once #1 is
+   fixed, don't reuse the pre-2026-07-04 RESOLVED trades as a baseline;
+   they're now understood to already be tainted by the same phantom-spread
+   mechanism. Watch new trades after the ArbScanner fix instead.
+6. **Investigate paper-trade fee variance** (KNOWN DEBT, Session 25) — fee
    amounts observed live via Telegram vary unexplainably ($70.00 flat,
    $0.00, $42.78, $113.27, $56.64). Pull the fee calculation logic
    (`PaperExecutor` or wherever fees are computed) and cross-reference
    against `compliance.db` to determine if expected or a bug.
-3. **Continue live-verifying Telegram alerting** (Session 19/20/24/25) —
-   with tonight's duplicate/broken regulatory alert removed (Session 25),
+7. **Continue live-verifying Telegram alerting** (Session 19/20/24/25) —
    confirm: no `TypeError` on any real Kalshi WS disconnect with
    `kalshi_reconnect_retry` logs increasing (Session 19); a real "FEED
    DOWN"/"FEED RECOVERED" Telegram pair on any real disconnect/reconnect
    with no duplicates mid-outage (Session 20); the runner-restart AND
    CRITICAL "AUTO-RECOVERY EXHAUSTED" Telegram alert both fire if the
-   restart budget is ever exceeded (Session 20).
-4. **Monitor the book-reset recovery (Session 22/23)** — watch that
+   restart budget is ever exceeded (Session 20). Note: Session 26 added a
+   new, independent disk-space Telegram watchdog
+   (`/usr/local/bin/karbot-disk-alert.sh`, hourly-cron-adjacent via
+   `/etc/cron.d/karbot-disk-alert` every 15 min) — confirmed working live.
+8. **Monitor the book-reset recovery (Session 22/23)** — watch that
    `book_snapshot_applied` keeps firing at a healthy rate and the 429 rate
    (currently ~5.5% right after restart, KNOWN DEBT) stays a one-time
    post-restart surge rather than a sustained pattern.
-5. **Add a concurrency limiter on `_request_snapshot` REST calls** (KNOWN
+9. **Add a concurrency limiter on `_request_snapshot` REST calls** (KNOWN
    DEBT from Session 23, not urgent) — an `asyncio.Semaphore` or similar
    bounding in-flight REST snapshot fetches, to smooth the post-restart
    burst that produced the 429s. Only worth prioritizing if 429s become a
    recurring pattern rather than a one-time restart surge.
-6. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
+10. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
    so the bot can be silenced during high-volume paper trading without
    disabling the agent entirely. Scope: `TelegramNotificationAgent`
    command handler only; no changes to event bus or other agents. Note: the
    Session 20 feed-down alert is explicitly designed to keep bypassing mute
    once this is built — do not let it get silenced.
-7. **Monitor paper trading** — clock running since 2026-06-29, target
-   live date 2026-07-29. Review `logs/kalshi_trades.csv` and
+11. **Monitor paper trading** — clock running since 2026-06-29, target
+   live date 2026-07-29 (9 of the 14 elapsed days as of Session 26 had a
+   dead persistence layer — see Session 26 in SESSIONS.md, don't count
+   that window as clean data). Review `logs/kalshi_trades.csv` and
    `logs/compliance_actions.jsonl` periodically. Confirm resolved rows
    show nonzero `gain_loss` and `status=RESOLVED` after
    `paper_resolution_delay_seconds`.
-8. **Begin live executor spec** after 30-day paper run completes
+12. **Begin live executor spec** after 30-day paper run completes
    (2026-07-29). Design `live_executor.py` to replace `paper_executor.py`
    on the real Kalshi trading path.
-9. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
+13. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
    in VPS logs — no Health Monitor agent subscribed yet; confirm this
    isn't masking a real event-bus wiring issue.
-10. **Consider fixing the `data_feeds:` YAML-parsing gap** (KNOWN DEBT,
+14. **Consider fixing the `data_feeds:` YAML-parsing gap** (KNOWN DEBT,
    Session 24) if it becomes relevant to a near-term task.
 
 ## FUTURE ROADMAP (do not build yet — design required first)
