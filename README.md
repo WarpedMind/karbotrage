@@ -153,29 +153,89 @@ the sole source of regulatory Telegram alerts.
 
 See DECISIONS.md and SESSIONS.md for full session-by-session detail.
 
+## The VPS was silently dead for 9 days (found & fixed, 2026-07-13)
+
+No session had touched this project since 2026-07-01. Resuming work
+uncovered a real production outage that had been running invisibly the
+entire time:
+
+- **The VPS disk filled to 100% on 2026-07-04** and stayed full until
+  2026-07-13. `compliance.db`, `kalshi_trades.csv`, and `audit_trail.jsonl`
+  all silently stopped being written the moment it filled — `systemctl
+  status karbot` reported "active (running)" the whole time, so nothing
+  about this was visible without checking disk space directly. The existing
+  Telegram alerting only covers feed disconnects and restart-budget
+  exhaustion, not disk space, so it never fired either.
+- **Root cause**: `structlog.configure()` was never called anywhere in the
+  codebase. `logging.basicConfig(level=logging.INFO)` only filters the
+  stdlib root logger — every agent's `structlog.get_logger()` calls
+  rendered DEBUG output unconditionally regardless. A specific order-book
+  market got stuck permanently re-triggering `book_needs_reset` on every
+  single WebSocket delta (the 10s recovery throttle blocks the REST
+  re-fetch, but not this per-delta debug log) — **169 million log lines**
+  accumulated in `/var/log/syslog` over 9 days, filling the disk.
+- **Fixed**: `structlog.configure(wrapper_class=structlog.make_filtering_
+  bound_logger(logging.INFO))` added to `karbot_runner.py::setup_logging()`
+  — confirmed live, no more DEBUG output. VPS disk freed; `logrotate`
+  hardened with a `maxsize` cap plus an hourly size-check cron (the default
+  daily schedule was too slow to catch a fast-growing file); a new,
+  independent disk-space watchdog (`/usr/local/bin/karbot-disk-alert.sh`,
+  every 15 minutes via cron, reads Telegram credentials directly rather
+  than going through the app) now pages on 80% disk usage — deliberately
+  outside the karbot process so it can't fail the same silent way.
+- **Also found**: the VPS was 4 git commits behind `main` — three
+  previously-documented "CONFIRMED LIVE" fixes (Sessions 23–25) had never
+  actually been deployed. No prior session had checked the VPS's actual
+  `git log` before making that claim. Deployed and current as of
+  commit `9b210fe`.
+- **Underlying stuck order-book loop is not yet fixed** — only the
+  disk-filling symptom is. Why some specific books never complete recovery
+  via the existing REST mechanism still needs investigation.
+
+Full writeup: SESSIONS.md, Session 26 (2026-07-13).
+
 ## Open questions (flagged live, not yet resolved)
 
-- **P&L magnitude, high priority**: the book-reset recovery fix is
-  confirmed live, but the resulting P&L distribution hasn't been checked
-  against the realistic 1–5% benchmark since. Live figures observed
-  tonight look comparable to or larger than the originally-flagged
-  inflated range — not yet confirmed improved.
+- **P&L magnitude — now root-caused, HIGH PRIORITY, live-confirmed still
+  broken (2026-07-13)**: immediately after a clean restart with fresh code
+  and a fresh disk, live `opportunity_approved` events showed `net_pct` of
+  20.7%, 31.7%, 54.7%, 61.7%, 47.7% — against a realistic 1–5% S1 benchmark
+  — firing in the same seconds as `sequence_gap_detected` warnings.
+  `agents/floor/arb_scanner.py` has a lower-bound rejection on `net_pct`
+  but **no upper-bound sanity check at all**, so a stale/corrupt order book
+  can trivially produce a fake huge spread that gets traded on. This is now
+  understood to be the actual mechanism, not a measurement question. **Top
+  priority before live trading** — needs an upper `net_pct` ceiling and/or
+  order-book-freshness gating in `ArbScanner`. Not yet fixed.
 - **Paper trade fee variance**: fee amounts shown in Telegram trade
   messages vary in a way that hasn't been explained yet (flat $70, or
   $0–$113 depending on the trade) — needs a cross-check against the fee
-  calculation logic and `compliance.db` before assuming it's correct.
+  calculation logic and `compliance.db` before assuming it's correct. Not
+  investigated yet.
+- **Secrets policy deviation on the live VPS**: `karbot.service`'s
+  `EnvironmentFile=/home/ubuntu/karbotrage_v1/.env` violates this
+  project's own stated rule that secrets should be injected from outside
+  the repo directory (e.g. `/etc/karbot/secrets/`). Found 2026-07-13, not
+  yet fixed.
 
 ## Next up
 
-1. Re-verify P&L magnitude against the 1–5% benchmark using RESOLVED
-   trades in `compliance.db` from after the book-reset fix went live.
-2. Investigate the paper-trade fee variance noted above.
-3. Continue live-verifying Telegram alerting (feed-down/recovered,
+1. Fix `ArbScanner`'s missing upper-bound sanity check / add order-book
+   freshness gating — this is the real blocker on the P&L question above.
+2. Investigate the stuck order-book reset loop (why some markets never
+   complete recovery).
+3. Move `.env` off the repo path on the VPS to close the secrets-policy gap.
+4. Re-audit every other "CONFIRMED LIVE" claim in CLAUDE.md against actual
+   VPS state, not just prior session notes.
+5. Investigate the paper-trade fee variance noted above.
+6. Continue live-verifying Telegram alerting (feed-down/recovered,
    restart-budget-exhaustion) now that the duplicate regulatory message is gone.
-4. Add a concurrency limiter (`asyncio.Semaphore`) on `_request_snapshot`
+7. Add a concurrency limiter (`asyncio.Semaphore`) on `_request_snapshot`
    REST calls to smooth the post-restart burst noted above — not urgent.
-5. Telegram `/mute` `/unmute` operator commands.
-6. Begin live executor spec once the 30-day paper run completes (2026-07-29).
+8. Telegram `/mute` `/unmute` operator commands.
+9. Begin live executor spec once the 30-day paper run completes (2026-07-29)
+   — note the run has a confirmed dead zone from 2026-07-04 to 2026-07-13
+   where persistence was broken; don't count that window as clean data.
 
 ## License
 
