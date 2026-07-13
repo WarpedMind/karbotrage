@@ -149,31 +149,70 @@ async def run(self): ...
 
 ## KNOWN DEBT
 
-### S1 P&L inflation — ROOT-CAUSE FIXED AND CONFIRMED LIVE, Session 26 (2026-07-13)
-- Root cause found and fixed: `agents/floor/price_watcher.py`'s
-  `_handle_kalshi_delta` discarded `OrderBook.apply_delta`'s return value.
-  `apply_delta` returns `False` and sets `_gap_detected = True` the instant
-  it detects a sequence gap, but the function published a `PriceUpdateEvent`
-  from the book's stale pre-gap prices anyway on that exact delta — only
-  the *next* delta for the market was blocked by the existing
-  `needs_reset` early-return. `ArbScanner` then priced S1 "opportunities"
-  off that stale data with full confidence, producing the 20.7%-61.7%
-  `net_pct` figures observed live earlier in this session (realistic S1
-  benchmark: 1-5%). Fixed by checking `apply_delta`'s return value and
-  skipping the publish when a gap is detected. Added
-  `s1_max_net_profit_pct` (default 15%, `karbot/core/config.py`) to
-  `ArbScanner` as defense-in-depth — logs loudly
-  (`s1_opportunity_exceeds_sanity_ceiling`) and rejects rather than
-  silently discarding. 9 new tests, 92/92 total passing. **CONFIRMED
-  LIVE**: after deploying and restarting, `opportunity_approved` events
-  now show `net_pct` of 0.7%-10.7% (a plausible range), and the few
-  implausible spreads still detected (27.7%-42.7% observed) are correctly
-  caught and rejected with an auditable warning naming the market and
-  prices. Full detail: SESSIONS.md Session 26 addendum.
-- **New minor bug noticed while confirming this fix, not yet fixed**: some
+### S1 P&L inflation — THREE COMPOUNDING BUGS FOUND AND FIXED, ROOT CAUSE CONFIRMED LIVE, Session 26 (2026-07-13)
+Three independent, compounding bugs were live simultaneously, found in
+order across one session:
+
+1. **Stale price publish on sequence gap** (fixed first): `price_watcher.py`'s
+   `_handle_kalshi_delta` discarded `OrderBook.apply_delta`'s return value
+   and published a `PriceUpdateEvent` from stale pre-gap prices on the
+   delta that first detected a gap. Fixed by checking the return value.
+   Added `s1_max_net_profit_pct` (default 15%) to `ArbScanner` as
+   defense-in-depth.
+2. **No order-book depth anywhere in the pipeline** (fixed second, in
+   response to the operator asking why sanity-ceiling rejections were
+   *still* occurring after fix #1 — investigating that question is what
+   found #3 below): `RiskGate._calculate_position_size` sized positions
+   purely from Kelly criterion and capital, and `PaperExecutor` filled
+   the full size at the top-of-book quote regardless of real available
+   liquidity. A live-pulled Kalshi order book showed a "47% edge" backed
+   by exactly 1 contract. Fixed: `OrderBook.depth()` +
+   `PriceUpdateEvent.yes_ask_depth`/`no_ask_depth` expose real depth;
+   `OpportunityEvent.max_fillable_qty` caps S1 size to what's actually
+   resting at the quoted price (top-of-book only, not a multi-level walk
+   — deliberately conservative scope, see SESSIONS.md for why a full walk
+   was considered and deferred); `RiskGate` clips Kelly size to that cap.
+3. **THE ROOT CAUSE — S1 priced the wrong side of the book entirely**:
+   investigating the depth question required knowing which side of the
+   book a BUY order executes against, which surfaced that
+   `_check_s1_rebalancing` computed profitability from
+   `yes_bid + no_bid` — bid prices, what *other participants* will pay,
+   not prices this system can buy at. A real buy executes against the
+   **ask**. Verified against a live Kalshi market pulled directly from
+   the REST API: `yes_bid=0.23`/`no_bid=0.30` was reported as **+47%
+   profit** by the old formula; the real executable cost via asks
+   (`yes_ask=1-no_bid`, `no_ask=1-yes_bid`) is $1.47 for a guaranteed $1
+   payout — a **47% loss**. Cross-checked against this project's own
+   history: `SESSIONS.md` Session 2's original spec prices (0.47/0.51),
+   rejected as unprofitable by whatever formula existed then, come out to
+   a small ~2% loss under the corrected formula — exactly what a healthy,
+   efficient market should look like, and strong evidence the sign has
+   been backwards since the very first working version of this strategy
+   (2026-05-25). **This means every S1 "opportunity" this system has ever
+   flagged as profitable was very likely a computed loss with the sign
+   flipped, not a data-quality issue on top of a sound strategy.** Fixed:
+   `_check_s1_rebalancing` now reads `event.yes_ask`/`event.no_ask`
+   (already correctly computed by `price_watcher.py`, just previously
+   unused by this function). Full math and historical cross-check:
+   **DECISIONS.md, "S1 arb formula uses BID prices for both legs of a BUY
+   trade."**
+
+17 new/updated tests across all three fixes, 99/99 total passing.
+**CONFIRMED LIVE**: after deploying and restarting, zero
+`opportunity_approved` or ceiling-rejected events fired over ~4 minutes
+and 1,331 lines of book activity — a dramatic contrast with pre-fix
+behavior where nearly every price tick produced a "profitable" signal.
+Expected and correct: real markets rarely offer a genuine executable
+edge after fees. **Revert point if any of this needs to be backed out**:
+commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
+#3's formula fix).
+
+- **New minor bug noticed while confirming fix #1, not yet fixed**: some
   `opportunity_approved` events show `size_usd=0.0` — zero-size trades
   being approved and executed pointlessly. Separate issue, flagged for a
   future session.
+- **Not audited**: S2/S3/S4 strategies were not reviewed for similar
+  bid/ask or depth-blindness issues this session — only S1 was in scope.
 
 ### Order-book reset loop never resolves for some markets — found Session 26, log-volume symptom fixed, root cause not fixed
 - Specific markets (e.g. `KXWORLDNEWSMENTION-26JUL10-WILD`) get stuck
@@ -468,20 +507,32 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **HIGHEST PRIORITY: let clean post-fix data accumulate, then re-run the
-   P&L-as-%-of-position-size benchmark check** — the root cause (stale
-   price publish on sequence gap) is fixed and confirmed live as of
-   2026-07-13 (`opportunity_approved` now shows 0.7%-10.7% net_pct instead
-   of 20.7%-61.7%). Don't reuse pre-2026-07-13 RESOLVED trades as a
-   baseline — they're tainted by the same mechanism. Pull fresh RESOLVED
-   trades from `compliance.db` after this fix's deploy time and confirm
-   the distribution holds up over a real sample, not just the first few
-   minutes observed live.
+1. **HIGHEST PRIORITY: let real post-fix trades accumulate, watch for the
+   first genuine S1 trade, then re-run the P&L-as-%-of-position-size
+   benchmark check** — the actual root cause (S1 pricing bid instead of
+   ask prices, likely wrong since the strategy's first version) is fixed
+   and deployed as of 2026-07-13; live-confirmed zero opportunities of any
+   kind over ~4 minutes and 1,331 lines of book activity post-fix, versus
+   nearly every tick producing a false "opportunity" before. This is
+   correct and expected — real arbable edges after fees are rare, and the
+   Kelly formula itself won't size a position below ~5.26% net at p=0.95.
+   Don't reuse ANY pre-2026-07-13 RESOLVED trades as a baseline — all of
+   them are tainted (compounding: bid/ask sign error + no depth check +
+   stale-book leak). Watch live logs for the first real `opportunity_approved`
+   event, sanity-check it by hand, then start accumulating a real sample.
 2. **Investigate the `size_usd=0.0` approved-trade bug** (noticed Session
    26 while confirming the P&L fix) — some `opportunity_approved` events
    show zero size, meaning zero-size trades are being approved and
    executed pointlessly. Not yet root-caused.
-3. **Investigate the stuck order-book reset loop** (Session 26) — specific
+3. **Extend the S1 liquidity cap from top-of-book-only to a real
+   multi-level depth walk** (Session 26, deliberately deferred, not
+   unsafe) — `max_fillable_qty` currently caps at the single best ask
+   level; a full walk would let the strategy price in reasonable size
+   against a moderately deep book instead of hard-capping at level 1.
+4. **Audit S2/S3/S4 for similar bid/ask or depth-blindness issues**
+   (Session 26 only audited S1) — S2 is Phase 2 gated so lower urgency,
+   but worth checking before Phase 2 work begins.
+5. **Investigate the stuck order-book reset loop** (Session 26) — specific
    markets (e.g. `KXWORLDNEWSMENTION-26JUL10-WILD`) get stuck logging
    `book_needs_reset`/`book_reset_throttled` on every delta indefinitely,
    never actually completing recovery via the Session 22/23 REST mechanism.
@@ -489,25 +540,25 @@ async def run(self): ...
    cause of the Session 26 disk-full outage. The Session 26 fix
    (`structlog.configure` filtering) stops this from filling the disk again,
    but does not fix why the loop happens.
-4. **Re-audit every "CONFIRMED LIVE" claim in this file against actual VPS
+6. **Re-audit every "CONFIRMED LIVE" claim in this file against actual VPS
    state** (Session 26) — the VPS was found 4 commits behind `main`,
    silently missing the Session 23/24/25 fixes despite this file marking
    them "CONFIRMED LIVE." Going forward, "confirmed live" must mean checked
    against `git log -1` on the VPS itself and fresh log output, not just a
    local commit plus a plausible-sounding log line from one prior check.
-5. **Move `.env` off the repo path on the VPS** (Session 26) — live
+7. **Move `.env` off the repo path on the VPS** (Session 26) — live
    `karbot.service` has `EnvironmentFile=/home/ubuntu/karbotrage_v1/.env`,
    which violates this file's own VPS security rule (secrets should come
    from a systemd EnvironmentFile outside the repo directory, e.g.
    `/etc/karbot/secrets/`). Not fixed Session 26 (didn't want to touch the
    live secrets path mid-outage-response) — do it in a dedicated, careful
    session.
-6. **Investigate paper-trade fee variance** (KNOWN DEBT, Session 25) — fee
+8. **Investigate paper-trade fee variance** (KNOWN DEBT, Session 25) — fee
    amounts observed live via Telegram vary unexplainably ($70.00 flat,
    $0.00, $42.78, $113.27, $56.64). Pull the fee calculation logic
    (`PaperExecutor` or wherever fees are computed) and cross-reference
    against `compliance.db` to determine if expected or a bug.
-7. **Continue live-verifying Telegram alerting** (Session 19/20/24/25) —
+9. **Continue live-verifying Telegram alerting** (Session 19/20/24/25) —
    confirm: no `TypeError` on any real Kalshi WS disconnect with
    `kalshi_reconnect_retry` logs increasing (Session 19); a real "FEED
    DOWN"/"FEED RECOVERED" Telegram pair on any real disconnect/reconnect
@@ -517,11 +568,11 @@ async def run(self): ...
    new, independent disk-space Telegram watchdog
    (`/usr/local/bin/karbot-disk-alert.sh`, hourly-cron-adjacent via
    `/etc/cron.d/karbot-disk-alert` every 15 min) — confirmed working live.
-8. **Monitor the book-reset recovery (Session 22/23)** — watch that
+10. **Monitor the book-reset recovery (Session 22/23)** — watch that
    `book_snapshot_applied` keeps firing at a healthy rate and the 429 rate
    (currently ~5.5% right after restart, KNOWN DEBT) stays a one-time
    post-restart surge rather than a sustained pattern.
-9. **Add a concurrency limiter on `_request_snapshot` REST calls** (KNOWN
+11. **Add a concurrency limiter on `_request_snapshot` REST calls** (KNOWN
    DEBT from Session 23, not urgent) — an `asyncio.Semaphore` or similar
    bounding in-flight REST snapshot fetches, to smooth the post-restart
    burst that produced the 429s. Only worth prioritizing if 429s become a

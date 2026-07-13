@@ -194,39 +194,61 @@ entire time:
 
 Full writeup: SESSIONS.md, Session 26 (2026-07-13).
 
-## P&L inflation — root-caused, fixed, and confirmed live (2026-07-13)
+## P&L inflation — three compounding bugs found and fixed (2026-07-13)
 
-Same session: found the exact mechanism, not just a correlation.
-`agents/floor/price_watcher.py`'s `_handle_kalshi_delta` discarded
-`OrderBook.apply_delta`'s return value — `apply_delta` returns `False` and
-flags the book corrupt the instant it detects a sequence gap, but the
-function published a `PriceUpdateEvent` from the book's stale, pre-gap
-prices anyway on that exact delta. Only the *next* delta for that market
-was blocked by the existing `needs_reset` check. `ArbScanner` then priced
-S1 "opportunities" off that stale data with full confidence — that's what
-produced the 20.7%-61.7% `net_pct` figures against a realistic 1–5%
-benchmark.
+Same session, in order — each fix's investigation led to the next:
 
-Fixed by checking `apply_delta`'s return value and skipping the publish
-when a gap is detected. Added `s1_max_net_profit_pct` (default 15%) to
-`ArbScanner` as a defense-in-depth backstop — logs loudly and rejects
-rather than silently trading on an implausible spread. 9 new tests, 92/92
-total passing. **Confirmed live**: after deploying and restarting,
-`opportunity_approved` events now show `net_pct` in the 0.7%-10.7% range,
-and the few remaining implausible spreads (27.7%-42.7% observed) are
-correctly caught and rejected with an auditable warning.
+1. **Stale price publish on sequence gap**: `price_watcher.py`'s
+   `_handle_kalshi_delta` discarded `OrderBook.apply_delta`'s return value
+   and published a `PriceUpdateEvent` from stale pre-gap prices on the
+   delta that first detected a gap. Fixed by checking the return value.
+   Added `s1_max_net_profit_pct` (15%) to `ArbScanner` as a backstop.
+2. **No order-book depth anywhere in the pipeline**: `RiskGate` sized
+   positions purely off capital and Kelly criterion; `PaperExecutor`
+   filled the full size at the top-of-book quote regardless of real
+   liquidity. A live Kalshi order book pulled directly from the REST API
+   showed a "47% edge" backed by exactly 1 contract. Fixed: real book
+   depth now flows through `PriceUpdateEvent`, and `RiskGate` caps size
+   to what's actually resting at the quoted price.
+3. **The actual root cause**: investigating #2 required knowing which
+   side of the book a BUY order executes against, which surfaced that
+   `ArbScanner` was pricing S1 off **bid** prices — what other
+   participants will pay, not what this system can buy at. Verified
+   against a live market pulled from Kalshi's API: a "+47% profit" by the
+   old formula was actually a **47% loss** by the real, executable ask
+   price. Cross-checked against this project's own history — this
+   project's Session 2 (2026-05-25) original spec prices, rejected as
+   unprofitable back then, come out to a realistic small loss under the
+   corrected formula, suggesting this sign error dates back to the
+   strategy's first working version. **Every S1 "opportunity" this system
+   has ever flagged as profitable was very likely a computed loss with
+   the sign flipped.** Fixed: `_check_s1_rebalancing` now reads
+   `yes_ask`/`no_ask` instead of `yes_bid`/`no_bid`.
 
-Also fixed in the same pass: `TelegramNotificationAgent` never subscribed
-to `TradeResolvedEvent` — every message the operator saw was the
-pre-resolution *estimate*, never the actual realized outcome. Added a
+17 new/updated tests, 99/99 total passing. **Confirmed live**: after
+deploying and restarting, zero opportunities of any kind fired over ~4
+minutes and 1,331 lines of book activity — versus nearly every price tick
+producing a false "opportunity" before. Expected and correct: real
+markets rarely offer a genuine executable edge after fees. Full
+investigation and math: DECISIONS.md, "S1 arb formula uses BID prices for
+both legs of a BUY trade." Revert point if needed: commit `5348533`.
+
+Also fixed in the same session: `TelegramNotificationAgent` never
+subscribed to `TradeResolvedEvent` — every message the operator saw was
+the pre-resolution *estimate*, never the actual realized outcome. Added a
 resolution message, and made both messages include market/strategy/legs
 instead of a bare trade_id and dollar figure.
 
 ## Open questions (flagged live, not yet resolved)
 
-- **`size_usd=0.0` approved trades** (noticed 2026-07-13 while confirming
-  the P&L fix): some `opportunity_approved` events show zero size — zero-
-  size trades being approved and executed pointlessly. Not yet root-caused.
+- **`size_usd=0.0` approved trades** (noticed 2026-07-13): some
+  `opportunity_approved` events show zero size — zero-size trades being
+  approved and executed pointlessly. Not yet root-caused.
+- **S1's liquidity cap is top-of-book only**, not a full multi-level
+  depth walk — deliberately conservative scope for 2026-07-13, extending
+  it is a reasonable follow-up now that the pricing formula is correct.
+- **S2/S3/S4 not audited** for similar bid/ask or depth-blindness issues
+  — 2026-07-13's investigation only covered S1.
 - **Paper trade fee variance**: fee amounts shown in Telegram trade
   messages vary in a way that hasn't been explained yet (flat $70, or
   $0–$113 depending on the trade) — needs a cross-check against the fee

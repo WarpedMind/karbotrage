@@ -87,13 +87,90 @@ prices — auditable, not silent.
 being approved and executed pointlessly. Separate from tonight's work;
 flagged for a future session.
 
+### Second addendum — same session: operator pushed back on "why are we still seeing implausible numbers," which led to the actual root cause
+
+Operator asked directly why blocked events (27-42% net_pct) were still
+appearing after the sanity-ceiling fix, and whether that was evidence the
+"passing" 0.7-10.7% trades couldn't be trusted either. Right question —
+investigated rather than reassured:
+
+1. Pulled the real, live Kalshi order book for one flagged market
+   directly from the REST API (ground truth, no app code involved). Found
+   the quote was genuinely real, not stale — but backed by as little as 1
+   contract. Traced the fill pipeline (`RiskGate._calculate_position_size`
+   → `PaperExecutor`) and confirmed **no order-book depth was ever
+   considered anywhere** — positions were sized purely off Kelly
+   criterion and capital, then paper-filled in full at the top-of-book
+   quote regardless of actual available size. This meant even
+   "plausible"-looking trades could be simulating fills that never had
+   real liquidity behind them.
+2. Investigating how to size against real depth required understanding
+   which side of the book a BUY order actually executes against — bids
+   are prices *other participants* will pay, not prices this system can
+   buy at. That question exposed something much larger: **`agents/floor/
+   arb_scanner.py::_check_s1_rebalancing` computed profitability from
+   `yes_bid + no_bid`, not `yes_ask + no_ask`** — the wrong side of the
+   book for a BUY trade entirely. Verified against real numbers (not just
+   algebra): a live Kalshi market with `yes_bid=0.23`/`no_bid=0.30` was
+   reported as +47% profit by the old formula; the real executable cost
+   via asks is $1.47 for a guaranteed $1 payout — a 47% **loss**. A
+   second, unremarkable-looking example (`yes_bid=0.42`/`no_bid=0.40`,
+   reported as a clean +3.7% edge) comes out to an 18% loss under the
+   correct formula. Cross-checked against this project's own history:
+   `SESSIONS.md` Session 2 (2026-05-25) recorded that the strategy's
+   *original* spec prices (0.47/0.51) were rejected as unprofitable by
+   whatever formula existed then, requiring invented 0.40/0.40 fixture
+   prices instead — under the corrected ask-based formula, 0.47/0.51
+   comes out to a small ~2% loss, exactly what a healthy, efficient
+   market should look like. This is strong independent evidence the sign
+   has been backwards since the very first working version of this
+   strategy.
+3. **This means every S1 "opportunity" this system has ever flagged as
+   profitable was very likely a computed loss with the sign flipped** —
+   not a data-quality issue on top of a sound strategy, but the strategy
+   itself scoring the wrong side of the market since inception.
+
+Full mathematical writeup, live verification, and historical
+cross-check: **DECISIONS.md, "S1 arb formula uses BID prices for both
+legs of a BUY trade."** Fixed with operator approval after a pause to
+present the finding and confirm scope (`_check_s1_rebalancing` now reads
+`event.yes_ask`/`event.no_ask`), alongside the liquidity-depth fix
+designed together with it: `OrderBook.depth()` +
+`PriceUpdateEvent.yes_ask_depth`/`no_ask_depth` expose real book depth at
+the ask; `OpportunityEvent.max_fillable_qty` caps S1 size to what's
+actually resting at the quoted price (top-of-book only, not a multi-level
+walk — deliberately conservative scope); `RiskGate._calculate_position_size`
+clips Kelly-derived size to that cap. Test fixtures updated to use
+realistic ask-side prices large enough to clear both Kalshi's fee model
+and the Kelly formula's own ~5.26% breakeven threshold at p=0.95 (the old
+fixture's more modest ask prices were realistic but legitimately
+Kelly-negative — correct behavior, not a bug to route around). 17
+new/updated tests, 99/99 total passing.
+
+**Deployed and confirmed live**: after restart, zero `opportunity_approved`
+or ceiling-rejected events fired over ~4 minutes and 1,331 lines of book
+activity — a dramatic, clean contrast with the pre-fix behavior where
+nearly every price tick produced a "profitable" signal. This is the
+expected, healthy result: real markets rarely offer a genuine executable
+edge after fees, and the system was previously treating a near-universal
+bid-side coincidence as if it were one.
+
+**Revert point if this needs to be backed out**: commit `5348533`
+(depth plumbing only, predates the formula fix, fully unaffected by it).
+
 ### What to do first next session
-1. Investigate the `size_usd=0.0` approved-trade bug noticed above.
-2. Investigate the stuck order-book reset loop (why some books never complete recovery) — still open, only its disk-filling symptom was fixed.
-3. Re-audit every "CONFIRMED LIVE" claim in CLAUDE.md against actual VPS state.
-4. Move `.env` secrets off the repo path to `/etc/karbot/secrets/` per the documented (but currently violated) security policy.
-5. Let clean data accumulate post-fix, then re-run the P&L-as-%-of-position-size benchmark check — don't reuse pre-2026-07-13 resolved trades, they're tainted by the same stale-book mechanism.
+1. **Let real post-fix data accumulate and watch for the first genuine S1
+   trade** — with the corrected formula, expect trades to be rare (real
+   arbable edges after fees + Kelly's ~5.26% threshold don't come along
+   often). Zero trades over the first several minutes is expected, not a
+   bug; confirm the pipeline still fires when a real edge does appear.
+2. Investigate the `size_usd=0.0` approved-trade bug noticed earlier this session.
+3. Investigate the stuck order-book reset loop (why some books never complete recovery) — still open, only its disk-filling symptom was fixed.
+4. Re-audit every "CONFIRMED LIVE" claim in CLAUDE.md against actual VPS state.
+5. Move `.env` secrets off the repo path to `/etc/karbot/secrets/` per the documented (but currently violated) security policy.
 6. Investigate the paper-trade fee variance (Session 25 KNOWN DEBT, still open).
+7. Consider extending the S1 liquidity cap from top-of-book-only to a real multi-level depth walk (deliberately deferred tonight, not because it's unsafe post-fix, but to keep tonight's change reviewable) — would let the strategy price in reasonable size against a moderately deep book instead of capping hard at the first level.
+8. Consider whether S2/S3/S4 (not touched tonight) have similar bid/ask or depth-blindness issues — this session only audited S1.
 
 ---
 
