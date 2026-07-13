@@ -297,6 +297,26 @@ class ArbScannerAgent:
 
         net_pct = gross_pct - fee_pct - slippage_pct
 
+        # Viability visibility: log every candidate that clears zero gross
+        # spread, regardless of whether it clears the trading threshold.
+        # Added 2026-07-13 in response to the operator asking how long to
+        # wait before judging whether S1 is a viable strategy — before this,
+        # a near-miss (e.g. net_pct=3% against a ~5.3% Kelly floor) was
+        # silently discarded with zero visibility into how close real
+        # markets are getting. Real markets structurally keep
+        # yes_ask+no_ask >= 1 most of the time (see DECISIONS.md Session 26),
+        # so gross_pct>0 candidates should be rare — this should not be
+        # noisy in practice. INFO level (not DEBUG) so it's visible in
+        # production without re-enabling debug logging (see this same
+        # session's disk-fill outage for why DEBUG stays off in prod).
+        log.info("s1_candidate_seen",
+                 market=event.market_id,
+                 gross_pct=round(gross_pct, 3),
+                 fee_pct=round(fee_pct, 3),
+                 net_pct=round(net_pct, 3),
+                 cleared_min_profit=net_pct >= self._cfg_s.s1_min_net_profit_pct,
+                 min_required=self._cfg_s.s1_min_net_profit_pct)
+
         if net_pct < self._cfg_s.s1_min_net_profit_pct:
             return None
 
