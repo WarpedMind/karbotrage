@@ -239,6 +239,31 @@ the pre-resolution *estimate*, never the actual realized outcome. Added a
 resolution message, and made both messages include market/strategy/legs
 instead of a bare trade_id and dollar figure.
 
+**A fourth bug, found by asking "is this even viable"**: the operator
+pushed further — even if the fix is correct, is single-market arbitrage
+actually capable of making money? Checking that honestly required
+auditing `KalshiFeeModel`, which was flagged in its own code comments as
+"approximate." Kalshi's real, published taker fee (confirmed against
+their official fee schedule) is `0.07 × price × (1-price)` per contract
+— the code was using a flat 14% regardless of price, 4-8x too high for a
+typical contract, likely rejecting real small edges as "not enough to
+cover fees." Fixed. Deployed and confirmed live: even with the much
+lower, more accurate fee, zero opportunities fired over the observation
+window — a meaningful signal that the earlier zero-opportunity result
+wasn't an artifact of overly strict fees, real markets during this
+window genuinely aren't offering a crossable edge.
+
+**Honest viability read, not a verdict**: pure single-market S1 arb on
+an actively market-made exchange is a well-known, thin-margin, heavily
+competed strategy. The live order books checked tonight both sat just
+slightly on the unprofitable side of break-even — the signature of a
+functioning market, not a broken one. Expect S1 alone to fire rarely;
+whether that's worthwhile depends on real observed frequency over time,
+which needs the corrected code to run for real, not further code
+review. This project's roadmap already treats S1 as Phase 1's "safest
+starter" strategy, with S3/S4 expected to carry more real edge —
+tonight's findings are consistent with that framing.
+
 ## Open questions (flagged live, not yet resolved)
 
 - **`size_usd=0.0` approved trades** (noticed 2026-07-13): some
@@ -247,8 +272,8 @@ instead of a bare trade_id and dollar figure.
 - **S1's liquidity cap is top-of-book only**, not a full multi-level
   depth walk — deliberately conservative scope for 2026-07-13, extending
   it is a reasonable follow-up now that the pricing formula is correct.
-- **S2/S3/S4 not audited** for similar bid/ask or depth-blindness issues
-  — 2026-07-13's investigation only covered S1.
+- **S2/S3/S4 not audited** for similar bid/ask, depth-blindness, or fee
+  issues — 2026-07-13's investigation only covered S1.
 - **Paper trade fee variance**: fee amounts shown in Telegram trade
   messages vary in a way that hasn't been explained yet (flat $70, or
   $0–$113 depending on the trade) — needs a cross-check against the fee

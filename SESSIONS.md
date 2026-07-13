@@ -172,6 +172,62 @@ bid-side coincidence as if it were one.
 7. Consider extending the S1 liquidity cap from top-of-book-only to a real multi-level depth walk (deliberately deferred tonight, not because it's unsafe post-fix, but to keep tonight's change reviewable) — would let the strategy price in reasonable size against a moderately deep book instead of capping hard at the first level.
 8. Consider whether S2/S3/S4 (not touched tonight) have similar bid/ask or depth-blindness issues — this session only audited S1.
 
+### Third addendum — same session: operator asked whether S1 is even a viable strategy, which surfaced a fourth bug (the fee model)
+
+Operator's question wasn't "did you make a mistake" this time — it was
+"even if the fix is correct, is single-market S1 arbitrage actually
+capable of making money." Investigating that honestly required checking
+one more input to the profitability calculation: `KalshiFeeModel`,
+flagged in its own docstring as "approximate"/"simplified."
+
+Fetched Kalshi's real, published fee schedule via web search + fetch:
+taker fee = `0.07 * price * (1 - price)` per contract (peaks at 1.75% on
+a 50c contract, falls toward zero at the extremes). `KalshiFeeModel` was
+using a **flat 14% of trade value regardless of price** — roughly 4-8x
+too high for a typical near-the-money contract. This directly gates
+`s1_min_net_profit_pct`, meaning the system was very likely rejecting
+real, small, genuinely profitable edges as "not enough to cover fees,"
+compounding on top of the pricing and liquidity bugs found earlier
+tonight.
+
+Fixed: `KalshiFeeModel.taker_fee_fraction(price)` implements the real
+formula; `estimate_fee_pct` sums real per-leg fees instead of a flat
+constant; each `OpportunityEvent` leg now carries its own real fee
+instead of an even split of a flat total. Test fixtures retuned — the
+existing 0.40/0.40 fixture, calibrated against the old wrong 14%
+assumption, scored 16.34% net under the corrected (much lower) fee and
+would have been rejected by the sanity ceiling; retuned to 0.45/0.45
+(net ~6.2%) to clear both the real fee total and the Kelly formula's
+~5.26% breakeven threshold while staying under the ceiling. 8 new tests,
+107/107 total passing.
+
+**Deployed and confirmed live**: even with the much more accurate (and
+substantially lower) fee estimate, zero opportunities fired over the
+following observation window. This is a meaningful, honest data point
+for the viability question — it means the earlier "zero opportunities"
+result wasn't an artifact of an overly conservative fee assumption
+suppressing real edges; real Kalshi markets during this sample window
+genuinely aren't offering a crossable S1 edge after correcting for both
+pricing direction and real fees.
+
+### Honest viability assessment (not yet a verdict — needs real observation time)
+Pure single-market S1 arbitrage on an actively market-made exchange is
+a well-known, thin-margin, well-competed strategy — the two live order
+books checked tonight both sat just slightly on the unprofitable side of
+break-even ($1.01, $1.02 combined ask cost), which is the normal
+signature of a functioning, roughly efficient market, not a broken one.
+This means S1 alone should be expected to fire rarely — genuine
+risk-free gains show up during brief real mispricings (thin/niche
+markets, news-driven volatility), not constantly. Whether that's
+"viable" as a standalone strategy depends on real trade frequency and
+average edge size over a meaningful observation period, which requires
+letting the corrected code run for real, not further code review. S1 was
+always intended as Phase 1's "safest starter" strategy in this project's
+roadmap, with S3 (logical/semantic arb) and S4 (settlement arb) expected
+to carry more real edge — that framing was already baked into the
+project's design before tonight, and tonight's findings are consistent
+with it rather than contradicting it.
+
 ---
 
 ## 2026-07-01 (Session 25 — removed duplicate/broken regulatory Telegram alert; first live Telegram verification since Session 24's config fix)

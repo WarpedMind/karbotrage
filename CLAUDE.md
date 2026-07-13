@@ -214,6 +214,39 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
 - **Not audited**: S2/S3/S4 strategies were not reviewed for similar
   bid/ask or depth-blindness issues this session — only S1 was in scope.
 
+### FOURTH bug, same investigation: KalshiFeeModel used a flat 14% approximation instead of Kalshi's real per-price fee — FIXED, Session 26 (2026-07-13)
+- Operator asked, reasonably, whether S1 is even a viable strategy
+  regardless of whether tonight's fixes were correct. Checking that
+  required auditing one more input: `KalshiFeeModel`, self-documented as
+  "approximate." Kalshi's real, published taker fee (confirmed via
+  Kalshi's official fee schedule) is `0.07 * price * (1-price)` per
+  contract — peaks at 1.75% on a 50c contract, near zero at the extremes.
+  The old model used a flat 14% of trade value regardless of price,
+  roughly 4-8x too high for a typical near-the-money contract — directly
+  gating `s1_min_net_profit_pct` and very likely rejecting real, small,
+  profitable edges as "not enough to cover fees."
+- Fixed: `KalshiFeeModel.taker_fee_fraction(price)` implements the real
+  formula; each `OpportunityEvent` leg carries its own real per-leg fee
+  instead of an even split of a flat total. Test fixtures retuned (old
+  0.40/0.40 fixture now scores above the sanity ceiling under the
+  corrected, lower fee; retuned to 0.45/0.45). 8 new tests, 107/107 total
+  passing. **CONFIRMED LIVE**: deployed and restarted; even with the much
+  lower, more accurate fee estimate, zero opportunities fired over the
+  observation window — a meaningful data point that the earlier
+  zero-opportunity result wasn't an artifact of an overly strict fee
+  assumption.
+- **Honest viability read, not a verdict**: pure single-market S1 arb on
+  an actively market-made exchange is a well-known, thin-margin, heavily
+  competed strategy. The live order books checked tonight both sat just
+  slightly on the unprofitable side of break-even — the normal signature
+  of a functioning market, not a broken one. Expect S1 alone to fire
+  rarely; whether that's "worth it" depends on real observed frequency
+  and average edge size over time, which needs the corrected code to run
+  for real, not further code review. This project's own roadmap already
+  treats S1 as Phase 1's "safest starter" strategy, with S3/S4 expected
+  to carry more real edge — tonight's findings are consistent with that
+  framing, not a contradiction of it.
+
 ### Order-book reset loop never resolves for some markets — found Session 26, log-volume symptom fixed, root cause not fixed
 - Specific markets (e.g. `KXWORLDNEWSMENTION-26JUL10-WILD`) get stuck
   logging `book_needs_reset` → `book_reset_throttled` on every WS delta
