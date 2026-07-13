@@ -591,11 +591,22 @@ class PriceWatcherAgent:
         side   = payload.get("side", "")
 
         if side == "yes":
-            book.apply_delta("bid", price, delta, seq)
+            applied = book.apply_delta("bid", price, delta, seq)
         elif side == "no":
-            book.apply_delta("ask", round(1.0 - price, 2), delta, seq)
+            applied = book.apply_delta("ask", round(1.0 - price, 2), delta, seq)
         else:
             log.warning("kalshi_delta_unknown_side", market=market_id, side=side)
+            return
+
+        if not applied:
+            # apply_delta just detected the gap on THIS delta — book.bids/asks
+            # are untouched (stale, pre-gap) and must not be published as if
+            # current. The needs_reset early-return above only catches
+            # SUBSEQUENT deltas for this market; without this check, one
+            # stale-priced PriceUpdateEvent slips out on every gap, which
+            # ArbScanner then happily prices an "opportunity" against.
+            log.debug("book_needs_reset", market=market_id)
+            await self._request_snapshot(market_id)
             return
 
         if platform not in self._seen_first_delta:

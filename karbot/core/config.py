@@ -115,6 +115,13 @@ class StrategiesConfig:
     # S1: Single-market YES+NO rebalancing (Kalshi only, Phase 1 safe)
     s1_rebalancing_enabled: bool  = True
     s1_min_net_profit_pct: float  = 0.5
+    # Sanity ceiling, not a normal trading parameter: a real S1 arb on a
+    # liquid Kalshi market should be low single digits. Anything above this
+    # almost certainly means the order book feeding it is stale/corrupt
+    # (confirmed live 2026-07-13 — see CLAUDE.md KNOWN DEBT) rather than a
+    # genuine opportunity. Defense-in-depth on top of the book-freshness fix
+    # in price_watcher.py, not a substitute for it.
+    s1_max_net_profit_pct: float  = 15.0
 
     # S2: Cross-platform arbitrage (Phase 2 only)
     s2_cross_platform_enabled: bool = False   # Phase 1: always False

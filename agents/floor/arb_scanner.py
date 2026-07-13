@@ -279,6 +279,19 @@ class ArbScannerAgent:
         if net_pct < self._cfg_s.s1_min_net_profit_pct:
             return None
 
+        if net_pct > self._cfg_s.s1_max_net_profit_pct:
+            # A real S1 arb on a liquid market doesn't exceed low single
+            # digits. This size almost always means the order book behind
+            # yes_bid/no_bid is stale or corrupt, not a genuine opportunity —
+            # log loudly and skip rather than trade on it blindly.
+            log.warning("s1_opportunity_exceeds_sanity_ceiling",
+                        market=event.market_id,
+                        net_pct=net_pct,
+                        yes_bid=yes_bid,
+                        no_bid=no_bid,
+                        ceiling=self._cfg_s.s1_max_net_profit_pct)
+            return None
+
         # Dedup check
         opp_key = f"S1:{event.market_id}"
         if self._opp_cache.seen(opp_key):

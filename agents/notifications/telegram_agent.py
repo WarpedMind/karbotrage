@@ -34,6 +34,7 @@ from core.events import (
     TelegramPermissionRequestEvent,
     TelegramPermissionResponseEvent,
     TradeExecutedEvent,
+    TradeResolvedEvent,
 )
 from karbot.core.config import KarbotConfig
 
@@ -82,6 +83,7 @@ class TelegramNotificationAgent:
         self.bus.subscribe(TelegramPermissionRequestEvent, self._handle_permission_request)
         self.bus.subscribe(LegFailureEvent, self._handle_leg_failure)
         self.bus.subscribe(TradeExecutedEvent, self._handle_trade_executed)
+        self.bus.subscribe(TradeResolvedEvent, self._handle_trade_resolved)
         self.bus.subscribe(RejectedOpportunityEvent, self._handle_rejected_opportunity)
         self.bus.subscribe(FeedHealthEvent, self._handle_feed_health)
         logger.info("TelegramAgent subscriptions registered")
@@ -308,12 +310,41 @@ class TelegramNotificationAgent:
             return
         if not self.config.telegram.notify_on_trade:
             return
-        prefix = "📋 PAPER TRADE" if event.paper_mode else "✅ TRADE"
+        prefix = "📋 PAPER TRADE OPENED" if event.paper_mode else "✅ TRADE OPENED"
+        market_id = event.platform_legs[0]["market_id"] if event.platform_legs else "?"
+        legs_summary = " / ".join(
+            f"{leg.get('side', '?')} @{leg.get('filled_price', 0):.2f} x{leg.get('quantity', 0):.0f}"
+            for leg in event.platform_legs
+        ) or "?"
         text = (
             f"{prefix}\n"
-            f"ID: {event.trade_id}\n"
-            f"PnL: ${event.expected_pnl_usd:.2f}\n"
+            f"ID: {event.trade_id[:8]}\n"
+            f"Strategy: {event.strategy or '?'}\n"
+            f"Market: {market_id}\n"
+            f"Legs: {legs_summary}\n"
+            f"Expected PnL: ${event.expected_pnl_usd:.2f} (estimate, not final)\n"
             f"Fees: ${event.total_fee_paid:.2f}\n"
+            f"{self._et_timestamp()}"
+        )
+        await self._outbound_queue.put(text)
+
+    async def _handle_trade_resolved(self, event: TradeResolvedEvent):
+        """Tier 2 — respects notify_on_trade flag. The realized-outcome
+        counterpart to _handle_trade_executed's entry message; without this,
+        the operator only ever saw the pre-resolution *estimate*, never what
+        the trade actually settled at."""
+        if not self.config.telegram.enabled:
+            return
+        if not self.config.telegram.notify_on_trade:
+            return
+        emoji = "🟢" if event.realized_pnl >= 0 else "🔴"
+        text = (
+            f"{emoji} TRADE RESOLVED\n"
+            f"ID: {event.trade_id[:8]}\n"
+            f"Market: {event.market_id}\n"
+            f"Outcome: {event.resolution or '?'}\n"
+            f"Realized PnL: ${event.realized_pnl:.2f}\n"
+            f"Held: {event.holding_period_hours:.2f}h\n"
             f"{self._et_timestamp()}"
         )
         await self._outbound_queue.put(text)
