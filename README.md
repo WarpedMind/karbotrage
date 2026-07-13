@@ -194,19 +194,39 @@ entire time:
 
 Full writeup: SESSIONS.md, Session 26 (2026-07-13).
 
+## P&L inflation — root-caused, fixed, and confirmed live (2026-07-13)
+
+Same session: found the exact mechanism, not just a correlation.
+`agents/floor/price_watcher.py`'s `_handle_kalshi_delta` discarded
+`OrderBook.apply_delta`'s return value — `apply_delta` returns `False` and
+flags the book corrupt the instant it detects a sequence gap, but the
+function published a `PriceUpdateEvent` from the book's stale, pre-gap
+prices anyway on that exact delta. Only the *next* delta for that market
+was blocked by the existing `needs_reset` check. `ArbScanner` then priced
+S1 "opportunities" off that stale data with full confidence — that's what
+produced the 20.7%-61.7% `net_pct` figures against a realistic 1–5%
+benchmark.
+
+Fixed by checking `apply_delta`'s return value and skipping the publish
+when a gap is detected. Added `s1_max_net_profit_pct` (default 15%) to
+`ArbScanner` as a defense-in-depth backstop — logs loudly and rejects
+rather than silently trading on an implausible spread. 9 new tests, 92/92
+total passing. **Confirmed live**: after deploying and restarting,
+`opportunity_approved` events now show `net_pct` in the 0.7%-10.7% range,
+and the few remaining implausible spreads (27.7%-42.7% observed) are
+correctly caught and rejected with an auditable warning.
+
+Also fixed in the same pass: `TelegramNotificationAgent` never subscribed
+to `TradeResolvedEvent` — every message the operator saw was the
+pre-resolution *estimate*, never the actual realized outcome. Added a
+resolution message, and made both messages include market/strategy/legs
+instead of a bare trade_id and dollar figure.
+
 ## Open questions (flagged live, not yet resolved)
 
-- **P&L magnitude — now root-caused, HIGH PRIORITY, live-confirmed still
-  broken (2026-07-13)**: immediately after a clean restart with fresh code
-  and a fresh disk, live `opportunity_approved` events showed `net_pct` of
-  20.7%, 31.7%, 54.7%, 61.7%, 47.7% — against a realistic 1–5% S1 benchmark
-  — firing in the same seconds as `sequence_gap_detected` warnings.
-  `agents/floor/arb_scanner.py` has a lower-bound rejection on `net_pct`
-  but **no upper-bound sanity check at all**, so a stale/corrupt order book
-  can trivially produce a fake huge spread that gets traded on. This is now
-  understood to be the actual mechanism, not a measurement question. **Top
-  priority before live trading** — needs an upper `net_pct` ceiling and/or
-  order-book-freshness gating in `ArbScanner`. Not yet fixed.
+- **`size_usd=0.0` approved trades** (noticed 2026-07-13 while confirming
+  the P&L fix): some `opportunity_approved` events show zero size — zero-
+  size trades being approved and executed pointlessly. Not yet root-caused.
 - **Paper trade fee variance**: fee amounts shown in Telegram trade
   messages vary in a way that hasn't been explained yet (flat $70, or
   $0–$113 depending on the trade) — needs a cross-check against the fee
@@ -220,20 +240,23 @@ Full writeup: SESSIONS.md, Session 26 (2026-07-13).
 
 ## Next up
 
-1. Fix `ArbScanner`'s missing upper-bound sanity check / add order-book
-   freshness gating — this is the real blocker on the P&L question above.
-2. Investigate the stuck order-book reset loop (why some markets never
-   complete recovery).
-3. Move `.env` off the repo path on the VPS to close the secrets-policy gap.
+1. Let clean post-fix data accumulate, then re-run the P&L-as-%-of-position-size
+   benchmark check against a real sample (not just the first few minutes
+   observed live) — the fix above needs to hold up over time.
+2. Investigate the `size_usd=0.0` approved-trade bug noted above.
+3. Investigate the stuck order-book reset loop (why some markets never
+   complete recovery — the disk-filling symptom is fixed, the loop itself
+   isn't).
 4. Re-audit every other "CONFIRMED LIVE" claim in CLAUDE.md against actual
    VPS state, not just prior session notes.
-5. Investigate the paper-trade fee variance noted above.
-6. Continue live-verifying Telegram alerting (feed-down/recovered,
+5. Move `.env` off the repo path on the VPS to close the secrets-policy gap.
+6. Investigate the paper-trade fee variance noted above.
+7. Continue live-verifying Telegram alerting (feed-down/recovered,
    restart-budget-exhaustion) now that the duplicate regulatory message is gone.
-7. Add a concurrency limiter (`asyncio.Semaphore`) on `_request_snapshot`
+8. Add a concurrency limiter (`asyncio.Semaphore`) on `_request_snapshot`
    REST calls to smooth the post-restart burst noted above — not urgent.
-8. Telegram `/mute` `/unmute` operator commands.
-9. Begin live executor spec once the 30-day paper run completes (2026-07-29)
+9. Telegram `/mute` `/unmute` operator commands.
+10. Begin live executor spec once the 30-day paper run completes (2026-07-29)
    — note the run has a confirmed dead zone from 2026-07-04 to 2026-07-13
    where persistence was broken; don't count that window as clean data.
 

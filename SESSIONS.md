@@ -33,12 +33,67 @@ No session or commit had touched this project since Session 25 (2026-07-01). Ope
 - Fee variance (Session 25 KNOWN DEBT) — not investigated this session; still open.
 - 30-day paper trading clock (`started 2026-06-29, target 2026-07-29`) has a confirmed dead zone from 2026-07-04 to 2026-07-13 (9 of the 14 elapsed days had broken persistence) — any "30 days of clean paper data" claim needs to account for this gap.
 
+### Addendum — same session, P&L root cause fixed and deployed
+Operator asked a sharp clarifying question before letting this proceed:
+could the 20-62% net_pct figures be genuine (if unusual) opportunities
+rather than a bug? Investigated properly rather than asserting: (1)
+mathematically, 60% net implies buying YES+NO for ~$0.40 total against a
+guaranteed $1 payout — a mispricing that large would be arbed away by
+Kalshi's own market makers in seconds, not persist; (2) it was happening
+simultaneously across many unrelated markets (MLB, weather, geopolitics)
+in the same few seconds, which rules out an isolated real dislocation;
+(3) most conclusively, found the exact code defect: `_handle_kalshi_delta`
+in `agents/floor/price_watcher.py` called `book.apply_delta(...)` and
+**discarded its return value**. `apply_delta` returns `False` and sets
+`_gap_detected = True` the instant a sequence gap is detected, but the
+function fell straight through to `await self.bus.publish(book.to_price_event(...))`
+regardless — publishing a `PriceUpdateEvent` built from the book's stale,
+pre-gap prices on the exact delta that first revealed the book was
+corrupt. Only the *next* delta for that market was blocked by the
+existing `needs_reset` early-return; the triggering delta always leaked
+through. `ArbScanner` then priced an "opportunity" off that stale data
+with total confidence.
+
+**Fixed**: check `apply_delta`'s return value; skip the publish (request a
+fresh snapshot instead) when it reports a gap. Added
+`s1_max_net_profit_pct` (default 15%, `karbot/core/config.py`) to
+`ArbScanner` as defense-in-depth — logs loudly and rejects rather than
+silently discarding, so any future data-quality issue is auditable instead
+of invisible. 9 new tests (`test_price_watcher_gap_publish.py`,
+`test_arb_scanner_s1_sanity_ceiling.py`), all passing alongside the
+existing suite (92/92 total).
+
+**Also fixed while in there**: operator noted the Telegram trade messages
+were hard to interpret (bare trade_id + one dollar figure) and, worse,
+`TelegramNotificationAgent` never subscribed to `TradeResolvedEvent` at
+all — every message the operator ever saw was the pre-resolution
+*estimate* (`expected_pnl_usd`, the same number driven by the bug above),
+never the actual realized outcome. Added `_handle_trade_resolved`;
+expanded both messages to include market_id, strategy, and per-leg
+side/price/quantity, and labeled the entry message's PnL as "(estimate,
+not final)" so it can't be mistaken for a settled result again. 3 new
+tests (`test_telegram_trade_resolved.py`).
+
+**Deployed and confirmed live**: pushed (`eb230ca`), pulled and restarted
+on the VPS. Watched `opportunity_approved` events immediately after
+restart: every approved trade now shows net_pct in the 0.7%-10.7% range
+(vs. 20.7%-61.7% before the fix), while implausible spreads (27.7%,
+38.7%-42.7% observed) are now correctly caught and rejected with a loud
+`s1_opportunity_exceeds_sanity_ceiling` warning naming the market and
+prices — auditable, not silent.
+
+**New minor bug noticed while watching, not fixed**: several
+`opportunity_approved` events show `size_usd=0.0` — zero-size trades
+being approved and executed pointlessly. Separate from tonight's work;
+flagged for a future session.
+
 ### What to do first next session
-1. Fix `ArbScanner`'s missing sanity ceiling and/or add order-book-freshness gating — this is the actual blocker on the inflated-P&L KNOWN DEBT item, not just a measurement question.
-2. Investigate the stuck order-book reset loop (why some books never complete recovery).
+1. Investigate the `size_usd=0.0` approved-trade bug noticed above.
+2. Investigate the stuck order-book reset loop (why some books never complete recovery) — still open, only its disk-filling symptom was fixed.
 3. Re-audit every "CONFIRMED LIVE" claim in CLAUDE.md against actual VPS state.
 4. Move `.env` secrets off the repo path to `/etc/karbot/secrets/` per the documented (but currently violated) security policy.
-5. Once 1-2 are fixed, restart the P&L benchmark check with clean data going forward — the pre-2026-07-04 data is now understood to already be tainted by the same phantom-spread mechanism, so don't just re-check the old resolved trades, watch new ones after the fix.
+5. Let clean data accumulate post-fix, then re-run the P&L-as-%-of-position-size benchmark check — don't reuse pre-2026-07-13 resolved trades, they're tainted by the same stale-book mechanism.
+6. Investigate the paper-trade fee variance (Session 25 KNOWN DEBT, still open).
 
 ---
 

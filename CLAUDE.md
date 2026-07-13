@@ -149,19 +149,31 @@ async def run(self): ...
 
 ## KNOWN DEBT
 
-### S1 arb detection has no upper-bound sanity check — HIGH PRIORITY, live-confirmed Session 26
-- `agents/floor/arb_scanner.py` rejects opportunities with `net_pct` below
-  `s1_min_net_profit_pct`, but nothing rejects a `net_pct` that's
-  implausibly *high*. Live Session 26 (2026-07-13): immediately after a
-  clean restart, `opportunity_approved` events showed `net_pct` of 20.7%,
-  31.7%, 54.7%, 61.7%, 47.7% — against a realistic S1 benchmark of 1–5% —
-  firing in the same seconds as multiple `sequence_gap_detected` warnings
-  for other markets. This is now understood to be the mechanism behind the
-  P&L-inflation KNOWN DEBT flagged since Session 25: a stale/corrupt order
-  book can trivially produce a fake huge spread, and nothing catches it.
-  Not fixed Session 26 — needs its own session (add an upper `net_pct`
-  ceiling and/or gate S1 pricing on order-book freshness). Top priority
-  before live trading. Full detail: SESSIONS.md Session 26.
+### S1 P&L inflation — ROOT-CAUSE FIXED AND CONFIRMED LIVE, Session 26 (2026-07-13)
+- Root cause found and fixed: `agents/floor/price_watcher.py`'s
+  `_handle_kalshi_delta` discarded `OrderBook.apply_delta`'s return value.
+  `apply_delta` returns `False` and sets `_gap_detected = True` the instant
+  it detects a sequence gap, but the function published a `PriceUpdateEvent`
+  from the book's stale pre-gap prices anyway on that exact delta — only
+  the *next* delta for the market was blocked by the existing
+  `needs_reset` early-return. `ArbScanner` then priced S1 "opportunities"
+  off that stale data with full confidence, producing the 20.7%-61.7%
+  `net_pct` figures observed live earlier in this session (realistic S1
+  benchmark: 1-5%). Fixed by checking `apply_delta`'s return value and
+  skipping the publish when a gap is detected. Added
+  `s1_max_net_profit_pct` (default 15%, `karbot/core/config.py`) to
+  `ArbScanner` as defense-in-depth — logs loudly
+  (`s1_opportunity_exceeds_sanity_ceiling`) and rejects rather than
+  silently discarding. 9 new tests, 92/92 total passing. **CONFIRMED
+  LIVE**: after deploying and restarting, `opportunity_approved` events
+  now show `net_pct` of 0.7%-10.7% (a plausible range), and the few
+  implausible spreads still detected (27.7%-42.7% observed) are correctly
+  caught and rejected with an auditable warning naming the market and
+  prices. Full detail: SESSIONS.md Session 26 addendum.
+- **New minor bug noticed while confirming this fix, not yet fixed**: some
+  `opportunity_approved` events show `size_usd=0.0` — zero-size trades
+  being approved and executed pointlessly. Separate issue, flagged for a
+  future session.
 
 ### Order-book reset loop never resolves for some markets — found Session 26, log-volume symptom fixed, root cause not fixed
 - Specific markets (e.g. `KXWORLDNEWSMENTION-26JUL10-WILD`) get stuck
@@ -456,21 +468,20 @@ async def run(self): ...
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **HIGHEST PRIORITY: fix `ArbScanner`'s missing sanity ceiling / book-freshness gating** —
-   Session 26 (2026-07-13) reproduced the P&L inflation live, immediately
-   after a clean restart with fresh code and a fresh disk: `opportunity_approved`
-   events showed `net_pct` of 20.7%, 31.7%, 54.7%, 61.7%, 47.7% against a
-   realistic S1 benchmark of 1–5%, firing in the same seconds as multiple
-   `sequence_gap_detected` warnings. `agents/floor/arb_scanner.py` has a
-   lower-bound rejection (`net_pct < s1_min_net_profit_pct`) but no
-   upper-bound sanity check — nothing rejects an implausibly large spread,
-   which is exactly what a stale/corrupt order book produces. Add either
-   an upper `net_pct` ceiling (e.g. reject/flag above ~10-15%) or gate
-   S1 detection on order-book freshness (don't price off a book with an
-   unresolved sequence gap). This is the actual blocker before live
-   trading — not a measurement question anymore, a code bug. See
-   SESSIONS.md Session 26 for full detail.
-2. **Investigate the stuck order-book reset loop** (Session 26) — specific
+1. **HIGHEST PRIORITY: let clean post-fix data accumulate, then re-run the
+   P&L-as-%-of-position-size benchmark check** — the root cause (stale
+   price publish on sequence gap) is fixed and confirmed live as of
+   2026-07-13 (`opportunity_approved` now shows 0.7%-10.7% net_pct instead
+   of 20.7%-61.7%). Don't reuse pre-2026-07-13 RESOLVED trades as a
+   baseline — they're tainted by the same mechanism. Pull fresh RESOLVED
+   trades from `compliance.db` after this fix's deploy time and confirm
+   the distribution holds up over a real sample, not just the first few
+   minutes observed live.
+2. **Investigate the `size_usd=0.0` approved-trade bug** (noticed Session
+   26 while confirming the P&L fix) — some `opportunity_approved` events
+   show zero size, meaning zero-size trades are being approved and
+   executed pointlessly. Not yet root-caused.
+3. **Investigate the stuck order-book reset loop** (Session 26) — specific
    markets (e.g. `KXWORLDNEWSMENTION-26JUL10-WILD`) get stuck logging
    `book_needs_reset`/`book_reset_throttled` on every delta indefinitely,
    never actually completing recovery via the Session 22/23 REST mechanism.
@@ -478,23 +489,19 @@ async def run(self): ...
    cause of the Session 26 disk-full outage. The Session 26 fix
    (`structlog.configure` filtering) stops this from filling the disk again,
    but does not fix why the loop happens.
-3. **Re-audit every "CONFIRMED LIVE" claim in this file against actual VPS
+4. **Re-audit every "CONFIRMED LIVE" claim in this file against actual VPS
    state** (Session 26) — the VPS was found 4 commits behind `main`,
    silently missing the Session 23/24/25 fixes despite this file marking
    them "CONFIRMED LIVE." Going forward, "confirmed live" must mean checked
    against `git log -1` on the VPS itself and fresh log output, not just a
    local commit plus a plausible-sounding log line from one prior check.
-4. **Move `.env` off the repo path on the VPS** (Session 26) — live
+5. **Move `.env` off the repo path on the VPS** (Session 26) — live
    `karbot.service` has `EnvironmentFile=/home/ubuntu/karbotrage_v1/.env`,
    which violates this file's own VPS security rule (secrets should come
    from a systemd EnvironmentFile outside the repo directory, e.g.
    `/etc/karbot/secrets/`). Not fixed Session 26 (didn't want to touch the
    live secrets path mid-outage-response) — do it in a dedicated, careful
    session.
-5. **Re-run the P&L benchmark check with clean post-fix data** — once #1 is
-   fixed, don't reuse the pre-2026-07-04 RESOLVED trades as a baseline;
-   they're now understood to already be tainted by the same phantom-spread
-   mechanism. Watch new trades after the ArbScanner fix instead.
 6. **Investigate paper-trade fee variance** (KNOWN DEBT, Session 25) — fee
    amounts observed live via Telegram vary unexplainably ($70.00 flat,
    $0.00, $42.78, $113.27, $56.64). Pull the fee calculation logic
