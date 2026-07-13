@@ -40,25 +40,35 @@ log = structlog.get_logger(__name__)
 
 class KalshiFeeModel:
     """
-    Kalshi fee schedule (approximate — varies by contract price).
-    CRITICAL: fees must be included in profitability calculation.
-    An opportunity that doesn't cover fees is NOT an opportunity.
+    Kalshi's real published taker fee schedule (confirmed 2026-07-13 against
+    Kalshi's official fee schedule/help center): fee per contract =
+    round(0.07 * price * (1 - price), 2) dollars, where price is the
+    contract price in dollars. Peaks at 1.75% on a 50c contract, falls
+    toward zero at the extremes (near 1c or 99c). Maker orders (resting
+    limit orders) pay ~25% of the taker rate — not modeled here, since S1
+    always crosses the spread (prices off the ask — see DECISIONS.md
+    Session 26, "S1 arb formula uses BID prices for both legs of a BUY
+    trade"), a taker action, so the taker rate applies.
+
+    Replaces a prior flat-14%-of-trade-value approximation (found
+    2026-07-13 while assessing strategy viability after the S1 pricing
+    fix) that overstated real fees by roughly 4-8x for a typical
+    near-the-money contract, likely causing the system to reject
+    genuinely profitable small edges as "not enough to cover fees."
     """
-    # Kalshi uses a tiered fee based on the contract price
-    # This is a simplified model — production should use Kalshi's exact formula
-    BASE_FEE_PER_CONTRACT = 0.07   # $0.07 per contract (approximate)
-    TAKER_FEE_PCT = 0.03           # 3% taker fee (approximate)
+    TAKER_FEE_MULTIPLIER = 0.07
+
+    @classmethod
+    def taker_fee_fraction(cls, price: float) -> float:
+        """Fee as a fraction of $1 face value for one contract at `price`."""
+        if price <= 0.0 or price >= 1.0:
+            return 0.0
+        return cls.TAKER_FEE_MULTIPLIER * price * (1.0 - price)
 
     @classmethod
     def estimate_fee_pct(cls, yes_price: float, no_price: float) -> float:
-        """Estimate total fee as percentage of trade value."""
-        # Combined cost of YES + NO
-        total_cost = yes_price + no_price
-        if total_cost <= 0:
-            return 1.0  # 100% fee = not viable
-        # Fee is roughly 7 cents on a $1 contract pair
-        fee_fraction = (cls.BASE_FEE_PER_CONTRACT * 2) / 1.0  # 14 cents on $1 payout
-        return fee_fraction
+        """Estimate total taker fee (both legs) as a fraction of $1 face value."""
+        return cls.taker_fee_fraction(yes_price) + cls.taker_fee_fraction(no_price)
 
 
 class PolymarketFeeModel:
@@ -277,8 +287,12 @@ class ArbScannerAgent:
         if gross_pct <= 0:
             return None
 
-        # Fee estimation
-        fee_pct = KalshiFeeModel.estimate_fee_pct(yes_ask, no_ask) * 100
+        # Fee estimation — per-leg, since Kalshi's real fee is price-dependent
+        # (peaks near a 50c price, falls toward zero at the extremes) and the
+        # two legs are rarely priced the same.
+        yes_fee_frac = KalshiFeeModel.taker_fee_fraction(yes_ask)
+        no_fee_frac  = KalshiFeeModel.taker_fee_fraction(no_ask)
+        fee_pct = (yes_fee_frac + no_fee_frac) * 100
         slippage_pct = self.config.risk.max_slippage_pct
 
         net_pct = gross_pct - fee_pct - slippage_pct
@@ -337,7 +351,7 @@ class ArbScannerAgent:
                     "side":       "YES",
                     "price":      yes_ask,
                     "quantity":   0,    # Sized by Risk Gate based on capital
-                    "fee_estimate": fee_pct / 2 / 100,
+                    "fee_estimate": yes_fee_frac,
                 },
                 {
                     "platform":   "kalshi",
@@ -345,7 +359,7 @@ class ArbScannerAgent:
                     "side":       "NO",
                     "price":      no_ask,
                     "quantity":   0,
-                    "fee_estimate": fee_pct / 2 / 100,
+                    "fee_estimate": no_fee_frac,
                 },
             ],
             gross_profit_pct      = gross_pct,

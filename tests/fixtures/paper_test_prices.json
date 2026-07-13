@@ -1,13 +1,13 @@
 [
   {
     "_scenario": "1_happy_path",
-    "_note": "yes_ask+no_ask = 0.80 (gross 20%) — clears Kalshi's ~14.3% fee+slippage AND the Kelly formula's ~5.26% breakeven threshold (p=0.95, q=0.05) net of ~5.7%. Uses ASK prices, the real executable buy cost — see DECISIONS.md Session 26 (2026-07-13) on why yes_bid/no_bid must not be used here.",
+    "_note": "yes_ask+no_ask = 0.90 (gross 10%) — Kalshi's real taker fee is 0.07*p*(1-p) per contract (~3.47% total for a 0.45/0.45 pair, not the old flat-14% approximation), clearing both fees+slippage and the Kelly formula's ~5.26% breakeven threshold (p=0.95, q=0.05) at a net of ~6.2%. Uses ASK prices, the real executable buy cost — see DECISIONS.md Session 26 (2026-07-13) on why yes_bid/no_bid must not be used here, and on the real fee formula.",
     "platform": "kalshi",
     "market_id": "KALSHI-TEST-001",
-    "yes_bid": 0.40,
-    "yes_ask": 0.40,
-    "no_bid": 0.40,
-    "no_ask": 0.40,
+    "yes_bid": 0.45,
+    "yes_ask": 0.45,
+    "no_bid": 0.45,
+    "no_ask": 0.45,
     "volume_24h": 50000.0,
     "open_interest": 10000,
     "sequence_num": 1
@@ -17,10 +17,10 @@
     "_note": "Different market_id from scenario 1. Same profitable prices but test injects a saturated PositionSnapshot (90% deployed) so RiskGate rejects with MAX_CAPITAL_LOCKED.",
     "platform": "kalshi",
     "market_id": "KALSHI-TEST-002",
-    "yes_bid": 0.40,
-    "yes_ask": 0.40,
-    "no_bid": 0.40,
-    "no_ask": 0.40,
+    "yes_bid": 0.45,
+    "yes_ask": 0.45,
+    "no_bid": 0.45,
+    "no_ask": 0.45,
     "volume_24h": 45000.0,
     "open_interest": 9500,
     "sequence_num": 1
