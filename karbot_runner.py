@@ -27,6 +27,8 @@ import time
 from pathlib import Path
 from typing import Callable, Awaitable, List
 
+import structlog
+
 # Core infrastructure
 from core.events import EventBus, TelegramNotificationEvent
 from karbot.core.config import KarbotConfig
@@ -337,6 +339,16 @@ def setup_logging():
         handlers=[
             logging.StreamHandler(sys.stdout),
         ]
+    )
+    # structlog.get_logger() ignores logging.basicConfig's level entirely
+    # unless structlog itself is configured with a filtering wrapper class —
+    # every agent's log.debug() call has been rendering unconditionally since
+    # this was written. Confirmed live: a single stuck order-book market
+    # logged book_needs_reset/book_reset_throttled at DEBUG on every delta
+    # (multiple times per second, indefinitely) and filled a 49GB disk in
+    # under two weeks.
+    structlog.configure(
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
     )
 
 
