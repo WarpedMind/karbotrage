@@ -160,6 +160,19 @@ class RiskGateAgent:
         # All checks passed — calculate approved position size
         approved_size = self._calculate_position_size(event)
 
+        # Nothing upstream checks _calculate_position_size's output —
+        # Kelly criterion returns 0 for edges too thin to size positively
+        # (see _calculate_position_size), and the 2026-07-13 liquidity cap
+        # can independently zero it out. Without this check, a "0 size"
+        # trade was still logged as opportunity_approved and executed
+        # pointlessly (live-confirmed 2026-07-13, KNOWN DEBT). Reject
+        # instead of approving nothing.
+        if approved_size <= 0:
+            await self._reject(event, "ZERO_APPROVED_SIZE",
+                                "Position sizing (Kelly criterion and/or "
+                                "liquidity cap) computed a non-positive size")
+            return
+
         self._approved += 1
         log.info("opportunity_approved",
                  strategy  = event.strategy,
