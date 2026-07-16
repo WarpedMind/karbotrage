@@ -353,6 +353,21 @@ class ArbScannerAgent:
             return None
         self._opp_cache.mark(opp_key)
 
+        if self._cfg_s.s1_canary_mode:
+            # See DECISIONS.md/CLAUDE.md Session 28: S1 is structurally
+            # impossible on a real Kalshi book (a resting yes_ask+no_ask<1
+            # is a crossed book, which cannot rest). This is real data —
+            # useful for spotting book-reconstruction bugs — but not a
+            # tradeable opportunity. Log it and stop here; never publish
+            # an OpportunityEvent that RiskGate/PaperExecutor could act on.
+            log.info("s1_opportunity_found_canary_only",
+                     market=event.market_id,
+                     net_pct=net_pct,
+                     yes_ask=yes_ask,
+                     no_ask=no_ask,
+                     max_fillable_qty=max_fillable_qty)
+            return None
+
         log.debug("s1_opportunity_found",
                   market=event.market_id,
                   net_pct=net_pct,

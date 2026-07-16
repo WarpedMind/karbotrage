@@ -122,6 +122,23 @@ class StrategiesConfig:
     # genuine opportunity. Defense-in-depth on top of the book-freshness fix
     # in price_watcher.py, not a substitute for it.
     s1_max_net_profit_pct: float  = 15.0
+    # CANARY MODE (default True) — found Session 28 (2026-07-16): S1 is
+    # structurally impossible on a real Kalshi order book. A resting state
+    # where yes_ask+no_ask < 1 is algebraically a crossed book
+    # (yes_bid+no_bid > 1), which Kalshi's matching engine mints into
+    # contract pairs the instant it forms — it cannot rest. Verified
+    # live: 0/778 real markets ever show a crossed book via REST, and all
+    # 5 of Session 27's "profitable" paper trades correlate exactly (same
+    # second) with a sequence_gap_detected event on that market — every
+    # signal so far has been a book-reconstruction artifact, not a real
+    # opportunity. With this True, _check_s1_rebalancing still detects and
+    # logs candidates (a genuinely useful data-quality canary — a signal
+    # here means the local book disagrees with a state the exchange
+    # permits) but never returns a real OpportunityEvent, so nothing
+    # downstream executes a trade on it. Do not set False until the
+    # underlying reconstruction bug (stuck reset loops / mid-match
+    # multi-delta races) is actually fixed and independently re-verified.
+    s1_canary_mode: bool = True
 
     # S2: Cross-platform arbitrage (Phase 2 only)
     s2_cross_platform_enabled: bool = False   # Phase 1: always False

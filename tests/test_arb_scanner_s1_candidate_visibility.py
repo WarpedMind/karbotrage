@@ -26,6 +26,10 @@ from karbot.core.config import KarbotConfig
 
 def _make_scanner() -> ArbScannerAgent:
     config = KarbotConfig()
+    # Session 28: S1 is off by default (canary mode) — this file covers
+    # the candidate-visibility logging itself, a separate concern from
+    # canary mode (see test_arb_scanner_s1_canary_mode.py).
+    config.strategies.s1_canary_mode = False
     return ArbScannerAgent(config=config, event_bus=MagicMock())
 
 

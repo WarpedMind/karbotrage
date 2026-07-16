@@ -80,6 +80,7 @@ async def test_trade_resolved_updates_csv_gain_loss(tmp_path, monkeypatch):
     monkeypatch.setattr("agents.management.compliance.LOGS_DIR", logs_dir)
 
     config = KarbotConfig(system=SystemConfig(paper_mode=True, paper_resolution_delay_seconds=1))
+    config.strategies.s1_canary_mode = False  # Session 28: S1 off by default; this test exercises the full pipeline
     bus = EventBus()
 
     arb   = ArbScanner(bus=bus, config=config)
@@ -343,6 +344,7 @@ async def test_trade_executed_inserts_db_row(tmp_path, monkeypatch):
     monkeypatch.setattr("agents.management.compliance.LOGS_DIR", logs_dir)
 
     config = KarbotConfig(system=SystemConfig(paper_mode=True, paper_resolution_delay_seconds=300))
+    config.strategies.s1_canary_mode = False  # Session 28: S1 off by default; this test exercises the full pipeline
     bus = EventBus()
 
     arb   = ArbScanner(bus=bus, config=config)
@@ -419,6 +421,7 @@ async def test_trade_executed_then_resolved_db_lifecycle(tmp_path, monkeypatch):
     monkeypatch.setattr("agents.management.compliance.LOGS_DIR", logs_dir)
 
     config = KarbotConfig(system=SystemConfig(paper_mode=True, paper_resolution_delay_seconds=1))
+    config.strategies.s1_canary_mode = False  # Session 28: S1 off by default; this test exercises the full pipeline
     bus = EventBus()
 
     arb   = ArbScanner(bus=bus, config=config)

@@ -119,6 +119,7 @@ async def test_scenario1_happy_path(tmp_path, monkeypatch):
     monkeypatch.setattr("agents.management.compliance.LOGS_DIR", logs_dir)
 
     config = KarbotConfig()  # paper_mode=True, phase=1
+    config.strategies.s1_canary_mode = False  # Session 28: S1 off by default; this test exercises the full pipeline
     bus = EventBus()
 
     arb  = ArbScanner(bus=bus, config=config)
@@ -179,6 +180,7 @@ async def test_scenario2_rejection(tmp_path, monkeypatch):
     monkeypatch.setattr("agents.management.compliance.LOGS_DIR", logs_dir)
 
     config = KarbotConfig()
+    config.strategies.s1_canary_mode = False  # Session 28: S1 off by default; this test exercises the full pipeline
     bus = EventBus()
 
     arb  = ArbScanner(bus=bus, config=config)
@@ -289,6 +291,7 @@ async def test_paper_trade_resolves_after_delay(tmp_path, monkeypatch):
     monkeypatch.setattr("agents.management.compliance.LOGS_DIR", logs_dir)
 
     config = KarbotConfig(system=SystemConfig(paper_mode=True, paper_resolution_delay_seconds=1))
+    config.strategies.s1_canary_mode = False  # Session 28: S1 off by default; this test exercises the full pipeline
     bus = EventBus()
 
     tracker = PositionTracker(bus=bus, config=config)
@@ -370,6 +373,7 @@ async def test_full_paper_pnl_cycle(tmp_path, monkeypatch):
     monkeypatch.setattr("agents.management.compliance.LOGS_DIR", logs_dir)
 
     config = KarbotConfig(system=SystemConfig(paper_mode=True, paper_resolution_delay_seconds=1))
+    config.strategies.s1_canary_mode = False  # Session 28: S1 off by default; this test exercises the full pipeline
     bus = EventBus()
 
     tracker = PositionTracker(bus=bus, config=config)

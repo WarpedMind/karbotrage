@@ -33,6 +33,10 @@ from karbot.core.config import KarbotConfig
 
 def _make_scanner() -> ArbScannerAgent:
     config = KarbotConfig()
+    # Session 28: S1 is off by default (canary mode) — these tests cover
+    # the pricing/ceiling/liquidity mechanics themselves, which is a
+    # separate concern from canary mode (see test_arb_scanner_s1_canary_mode.py).
+    config.strategies.s1_canary_mode = False
     return ArbScannerAgent(config=config, event_bus=MagicMock())
 
 

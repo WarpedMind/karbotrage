@@ -1,6 +1,402 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-07-16 — Session 28 (review-only): S1 single-market arbitrage is structurally impossible on Kalshi — every S1 signal, including Session 27's 5 "hand-verified" trades, is almost certainly a book-reconstruction artifact
+
+### Status: FOUND, ARGUED, NOT YET LIVE-VERIFIED. No code changed this session (review-only mandate). Verification plan below is cheap and specific — run it before trusting any S1 paper P&L, and before building anything else on top of S1.
+
+### The structural argument
+Kalshi runs ONE central limit order book per market, with price-time
+priority matching. The book stores only bids per side (confirmed live,
+Session 15), because on a binary contract the two sides are the same
+instrument viewed from opposite ends:
+
+```
+a resting NO bid at price p  ≡  an offer to sell YES at (1 - p)
+a resting YES bid at price q ≡  an offer to sell NO  at (1 - q)
+```
+
+The corrected S1 condition (Session 26) is `yes_ask + no_ask < 1`.
+Substituting the identities above:
+
+```
+yes_ask + no_ask = (1 - no_bid) + (1 - yes_bid) = 2 - (yes_bid + no_bid)
+yes_ask + no_ask < 1   ⟺   yes_bid + no_bid > 1
+```
+
+But `yes_bid + no_bid > 1` is a **crossed book**: the YES bid at q and
+the NO bid at p are, in Kalshi's own unified representation, a bid at q
+resting above an ask at (1-p) < q. A price-time-priority matching engine
+executes crossed orders against each other **at match time — they never
+rest**. Kalshi's help center states this directly: complementary
+positions are automatically paired and redeemed ("Kalshi automatically
+exchanges every pair you own and credits $1"); two bids summing over $1
+are matched and minted into a contract pair the moment the second order
+arrives. A resting state where buying YES+NO costs less than $1 cannot
+exist on the exchange, even transiently, from the exchange's point of
+view.
+
+So under a CORRECT, CURRENT view of a Kalshi order book, S1 can never
+fire. Not "rarely" — never. Every S1 candidate this system has ever seen,
+before or after the Session 26 sign fix, was a view of the book that the
+exchange itself never had.
+
+### Independent corroboration
+1. **Third-party**: botforkalshi.com's arbitrage guide states it
+   outright — "buying NO is mechanically the same trade as selling YES,"
+   the two sides "straddle 100¢ with a spread," and there is "never a
+   harvestable gap" in a single market; the apparent gap "is the bid-ask
+   spread itself: the price of crossing the book, not an edge."
+2. **This project's own data**: every real, live-pulled book documented
+   in this file sums the bids BELOW $1, exactly as the structural
+   argument requires: 0.23+0.30=0.53, 0.42+0.40=0.82, 0.47+0.51=0.98
+   (Session 26's three examples). Nobody has ever pulled a live Kalshi
+   book via REST — outside our own WS reconstruction — that showed
+   yes_bid + no_bid > 1.
+3. **The shape of the observed "edges"** (Session 27: 5.99%, 8.95%,
+   12.91%, 11.89%, 8.30% net) sits exactly in the window the pipeline
+   filters for: above the hidden ~5.26% Kelly sizing floor (see the
+   RiskGate entry below) and below the 15% sanity ceiling. Genuine
+   competed arb would cluster near zero; artifacts have no reason to.
+
+### Where the artifacts come from (two known-live mechanisms)
+1. **Mid-match multi-delta transitions.** A single Kalshi match event
+   (e.g. a taker crossing the spread, or two bids being minted into a
+   pair) changes both derived sides of our book, and arrives as MORE THAN
+   ONE WS delta message. Between message 1 and message 2 of an atomic
+   server-side event, our reconstructed book holds a state the exchange
+   never had — frequently a crossed one. `ArbScanner._on_price_update`
+   evaluates S1 on EVERY delta, so it reads these half-applied states at
+   full confidence. Session 15's own confirmed evidence (a level move
+   arriving as a matched +523/−523 pair) is this exact mechanism.
+   RiskGate's 2s staleness check and the depth cap don't help: the event
+   is fresh and the phantom level carries real-looking size.
+2. **Unrecovered sequence gaps leaving stale phantom bids** — the
+   known-live, still-unfixed stuck book-reset loops (Session 26 KNOWN
+   DEBT). A bid that was matched or cancelled during a gap stays in our
+   book; any later opposite-side bid can then "cross" it.
+
+### What Session 27's hand-verification actually verified
+The dollar-exact checks verified the ARITHMETIC from the recorded
+prices, and PaperExecutor fills unconditionally at recorded prices —
+so agreement is guaranteed regardless of whether those prices were ever
+simultaneously executable. In paper mode there is no step at which the
+exchange gets to say "no." The verification was internally consistent
+and still proves nothing about fillability — the same trap as Session
+26's tests that were "internally consistent with a wrong formula."
+
+### Verification plan (run before anything else is built on S1)
+1. **Rest-state scan**: pull ~200 live order books via the existing REST
+   snapshot endpoint and count how many show `yes_bid + no_bid >= 1.00`.
+   Structural prediction: zero.
+2. **Trade/gap correlation**: for each of the 5 Session 27 trades, grep
+   VPS logs for `sequence_gap_detected` / `book_needs_reset` on that
+   market within ±60s of the fill. Prediction: most or all correlate.
+3. **Persistence test**: log how many `s1_candidate_seen` events survive
+   to the NEXT delta on the same market (or 500ms, whichever is later).
+   Prediction: approximately none survive.
+
+### What this means for the strategy (decision)
+- S1 as a profit strategy on Kalshi is **dead by construction**, not
+  thin. Keep the detector running as a **data-quality canary** (an S1
+  signal = our book disagrees with a state the exchange permits = a
+  reconstruction bug or gap), but stop treating its paper P&L as
+  strategy evidence. The 30-day paper clock, already compromised by the
+  9-day dead zone, measures artifact frequency for S1 — not edge.
+- The REAL generalization survives: Kalshi does **not** atomically match
+  across DIFFERENT markets within an event. Sum-to-one arbitrage across
+  an event's N outcome markets, and logical-ladder arbitrage across
+  threshold markets, can genuinely rest and are the correct successors —
+  see the strategy-roadmap entry below.
+
+---
+
+## 2026-07-16 — Session 28 (review-only): strategy audit — S2/S3/S4 all price the wrong side of the book; S3 and S4 have no working input path; S2 cannot match a market
+
+Session 26 fixed the bid/ask sign error in S1 only and explicitly
+flagged S2/S3/S4 as unaudited. Audited all three this session
+(`agents/floor/arb_scanner.py`). All share S1's original bug class, and
+each is additionally dead or broken upstream. None of this is deployed
+risk today (S2 is phase-gated off; S3/S4 never receive events) — but
+none of it should be built on without these fixes.
+
+### S2 `_check_s2_cross_platform` — four independent defects
+1. **Bid-side pricing** (same class as the Session 26 S1 bug):
+   `cost_a = event.yes_bid + other_event.no_bid` and
+   `cost_b = event.no_bid + other_event.yes_bid` — bid prices for a BUY
+   on both legs, and the legs quote those bids as execution prices. Real
+   cost is ask-side on both platforms; the computed "profit" has the
+   same optimistic bias S1 had.
+2. **Market matching can never succeed**: it looks up
+   `self._prices["polymarket"][event.market_id]` — an EXACT id match.
+   Kalshi tickers (`KXWNBAMENTION-26JUL13...`) and Polymarket condition
+   ids share no namespace; this lookup will never hit. S2 as written is
+   unreachable even in Phase 2 with feeds on. A real market-matching
+   layer (semantic, LLM-assisted, human-confirmed) is a prerequisite.
+3. **Fee model is a placeholder**: Kalshi fee hardcoded at worst-case
+   `estimate_fee_pct(0.5, 0.5)` regardless of actual prices;
+   `PolymarketFeeModel` (2% winner fee + $0.15 gas) does not match
+   Polymarket's current fee schedule and must be re-verified against
+   their current docs before any S2 work (their fee structure has
+   changed repeatedly; the US-access entity question matters too — see
+   SESSIONS.md Session 28, cross-platform assessment).
+4. **No depth/liquidity cap** — predates the Session 26 depth work;
+   `max_fillable_qty` is never set for S2.
+   Note the existing failsafe that makes all this latent rather than
+   live: `resolution_criteria_match` is always `None`, and RiskGate
+   check 6 rejects cross-platform trades with `None` — so even if S2
+   fired, nothing would execute. Three of the four defects must still be
+   fixed before Phase 2.
+
+### S3 `_check_s3_logical` — wrong side of book, empty-book edge inflation, and a silently dead input pipeline
+1. **Dead input pipeline — why "S3 live, zero candidates" is not a
+   market observation**: `MarketAnalystAgent._analysis_loop` skips every
+   cycle when `self._active_markets` is empty, and `update_markets()` —
+   the only thing that populates it — **has zero callers anywhere in the
+   codebase** (the docstring says "Called by Price Watcher when market
+   list is refreshed"; PriceWatcher never does). S3 has never analyzed a
+   single market, never made an LLM call in production, and never could
+   have produced a candidate. Zero candidates is a wiring fact, not a
+   market fact.
+2. **Bid-side pricing**: `_get_current_price` returns `yes_bid`; the
+   check both computes the edge from bids and quotes the leg at the bid.
+   A buy executes at `yes_ask`; same fix as S1.
+3. **Empty-book edge inflation**: `to_price_event()` publishes
+   `yes_bid=0.0` when a book has no bids. `_get_current_price` returns
+   that 0.0 (not None — the None path only triggers when the market has
+   never ticked), so a market-B book that is merely EMPTY yields
+   `edge_pct = market_a_price * 100` — the thinner the book, the bigger
+   the phantom edge. Must guard `price <= 0`.
+4. **Single-leg S3 is statistical, not arbitrage** — it buys only
+   underpriced B and waits for convergence; `net = edge * 0.7` is an
+   arbitrary haircut, not a fee/slippage computation. The riskless
+   version of an A⇒B violation is TWO legs: buy YES(B) at ask + buy
+   NO(A) at ask; payoff is ≥ $1 in every logically-possible outcome
+   (A∧B → 1+0; ¬A∧B → 1+1; ¬A∧¬B → 0+1; A∧¬B impossible if A⇒B), so
+   cost < $1 − fees is a true arb **conditional on the implication
+   actually holding at settlement** — which is an LLM/semantic judgment,
+   i.e. residual tail risk lives in the relationship, not the prices.
+   Classify paired-S3 as riskless-if-relation-holds, single-leg-S3 as
+   statistical; never blur them.
+
+### S4 `_check_s4_settlement` — unreachable, and directional by nature
+No `NewsSignalEvent` publisher exists (News Analyst agent was never
+built), so S4 is dead code behind an enabled-by-default flag
+(`s4_settlement_arb_enabled=True` — should default False until real).
+When it does run it prices off `yes_bid`, hardcodes a 0.95 repricing
+target, 1.0% fees, 0.5% slippage, and takes one directional leg on a
+news judgment — that is speculation with a stopwatch, not arbitrage,
+and should be specced as such (position limits, confidence calibration)
+when News Analyst is actually designed.
+
+### Also found: the learning loop's output is a dead knob
+`ReflectionAgent` publishes `StrategyWeightUpdateEvent`; `ArbScanner`
+stores the weights in `_strategy_weights` and **never reads them in any
+strategy check** — they appear only in `stats`. The vision docs say
+weights "adjust strategy activation thresholds"; nothing does. Decide:
+either wire weights into thresholds or delete the plumbing — a knob that
+looks connected but isn't is how the telegram.enabled class of bug
+happens (Session 24 precedent).
+
+---
+
+## 2026-07-16 — Session 28 (review-only): RiskGate sizing — Kelly-dollars are consumed as contract-quantity downstream, and Kelly is the wrong model for riskless arb (it imposes a silent ~5.26% net floor)
+
+### The unit mismatch, traced end-to-end
+`RiskGate._calculate_position_size` computes `size = total_capital *
+kelly_fraction` — **dollars** — and caps it against
+`event.max_fillable_qty` — **contracts** (`size = min(size,
+event.max_fillable_qty)`, comparing incompatible units). The result
+flows into `ApprovedOpportunityEvent.approved_size`, which
+`PaperExecutor` writes directly into every leg's `"quantity"` and uses
+as the fee multiplier (`fee_estimate * approved_size`), and
+`PositionTracker` then computes `capital_used = Σ(filled_price ×
+quantity)` — i.e. the same number is dollars at birth and contracts
+everywhere after.
+
+### Why 63 hours of live trades didn't expose it
+For S1 specifically, one YES+NO pair costs ≈ $1 (`yes_ask + no_ask ≈
+1`), so N dollars ≈ N contracts and `capital_used ≈ approved_size` —
+the two unit systems coincide numerically **by coincidence of the
+strategy's shape**. Per-contract profit is `net_pct/100` dollars, so
+`expected_pnl = net_pct/100 × approved_size` is also self-consistent
+under the contracts reading. The books balance for S1 while the units
+are still wrong. They stop balancing the moment any single-leg strategy
+(S3/S4) trades: at a 0.30 leg price, "size 100" deploys $30 as 100
+contracts — the Kelly intent is off by 1/price (3.3x here).
+
+### The deeper problem: Kelly with p=0.95 silently overrides the configured minimum edge
+```
+kelly_full = (b·p − q)/b  >  0   ⟺   b > q/p = 0.05/0.95 ≈ 5.26%
+```
+Any S1/S2 opportunity with net edge below ~5.26% sizes to ≤ 0 and is
+rejected as `ZERO_APPROVED_SIZE`. So `s1_min_net_profit_pct = 0.5` is a
+dead letter — the REAL floor is 5.26%, ten times higher, set implicitly
+by a probability parameter nobody tuned for this purpose. This inverts
+the risk logic of an arbitrage system: the safest signals (small edges,
+which on a competed exchange are the only real ones) are all rejected,
+and only implausibly-large edges (which per the S1 structural finding
+are data artifacts) get sized. Kelly models repeated bets with
+meaningful loss probability; a filled riskless basket has ~zero
+variance, where Kelly's answer is "bet the maximum the caps allow" —
+the caps (per-trade %, free capital, depth) should be the binding
+constraint, not a pseudo-probability.
+
+### Also: three adjacent correctness gaps for live trading
+1. `OpportunityEvent.capital_required_usd` is never set by any strategy
+   (defaults 0.0), and RiskGate check 2 only binds when `required > 0` —
+   the per-trade position-size check has never actually run.
+2. Kalshi quantities are **integer contracts, minimum 1** — the pipeline
+   happily trades 0.05 contracts (Session 27's fifth trade), which
+   cannot exist live. Sizes must floor to int and reject at < 1.
+3. Kalshi's real fee is **rounded UP to the next cent** on the order
+   (`ceil(0.07 × C × P × (1−P))` — formula confirmed against Kalshi's
+   published schedule; per-order-vs-per-contract rounding granularity
+   should be re-confirmed when implementing). `KalshiFeeModel`'s
+   continuous fraction underestimates exactly where this system trades
+   most — tiny, liquidity-capped orders, where the 1¢ minimum is a large
+   fraction of face value (a 1-contract fill at 10¢ pays 1¢ = ~10% of
+   price vs the model's 0.63%). Small-basket profitability must be
+   computed with ceil'd per-order fees or it will be systematically
+   optimistic. (Related, for the market-making analysis: maker orders
+   pay NO fee on most Kalshi markets.)
+
+### Recommended fix direction (implementation session — not done here)
+Standardize the pipeline unit as **integer contract count**: strategies
+emit per-contract economics; RiskGate sizes in contracts as
+`min(depth_cap, floor(per_trade_cap_usd / basket_cost_per_contract),
+floor(0.9·free_capital / basket_cost_per_contract))`; set
+`capital_required_usd = qty × basket_cost` so check 2 finally binds;
+keep fractional Kelly ONLY for statistical strategies (paired-S3, S6,
+S7) where a genuine loss probability exists.
+
+---
+
+## 2026-07-16 — Session 28 (review-only): SECURITY — the Telegram operator channel trusts any sender on Earth; chat_id is never checked
+
+### The finding (HIGH severity for a system that gates trading halts through this channel)
+`TelegramNotificationAgent._poll_updates` processes every `getUpdates`
+message and dispatches ANY text from ANY chat to
+`_handle_operator_reply` — `msg["chat"]["id"]` is never compared to the
+configured `TELEGRAM_CHAT_ID` (which the code holds and uses for
+OUTBOUND messages only). Telegram bots are publicly addressable: anyone
+who finds or guesses the bot's username can message it. As wired today,
+a stranger's message can:
+1. Resolve the oldest pending permission request — any text containing
+   "yes"/"approve" approves it (FIFO, no request id needed);
+2. **Clear an urgency-5 regulatory trading halt** — the clear phrase is
+   checked against `response_text` of every operator message, and the
+   default phrase ("CLEAR REGULATORY HOLD") is committed in
+   `karbot/core/config.py` in a public repo;
+3. Drive any future operator command (`/mute`, kill switch) added to
+   this channel.
+This has been latent since the agent was built and became live-relevant
+the day Telegram was actually enabled (Session 24). Paper mode caps the
+damage today; it must be fixed before live trading, and preferably now —
+it is a ~5-line fix.
+
+### Fix (implementation session)
+In `_poll_updates`, drop (and log at warning, with the sender id) any
+update whose `message.chat.id` does not equal
+`config.secrets.telegram_chat_id` (string-compare after str() — Telegram
+ids are ints). Additionally: set a non-default
+`regulatory_clear_phrase` in the VPS config.yaml, since the default is
+public.
+
+### Secondary security findings (same pass, lower severity — full list in SESSIONS.md Session 28)
+- **Bot token can leak into logs via exception text**: `_send_message` /
+  `_poll_updates` build URLs embedding the token and then log raw
+  exceptions (`f"...error: {e}"`); several aiohttp exception classes
+  include the request URL in `str(e)`. Redact token from any logged
+  error, or log only `type(e).__name__`.
+- **VPS service user**: runs as `ubuntu` (default sudo-capable user),
+  not the dedicated non-privileged `karbot_user` CLAUDE.md's own rules
+  require. Deviation accepted so far; tighten before live.
+- **`/usr/local/bin/karbot-disk-alert.sh` may be broken since Session
+  26's own secrets move**: it was written to read Telegram credentials
+  from the repo `.env` — which Session 26 deleted later that same
+  session. VERIFY on the VPS that the script points at
+  `/etc/karbot/secrets/karbot.env`; if not, the disk watchdog is
+  currently silent — the exact failure mode it exists to prevent.
+- **Kill switch has no trigger path**: `KillSwitchEvent` has zero
+  publishers and `activate_kill_switch()` zero callers; the vision docs
+  require CLI + dashboard + Telegram paths, none exist. The
+  "non-bypassable" risk gate's strongest control is currently
+  unreachable. Related dead inputs: `AnnouncementWarningEvent` and
+  `GeopoliticalRiskEvent` also have no publishers (checks 4/5 can never
+  trigger from real data), and `ResolutionVerificationResult` has no
+  publisher (correct failsafe for S2, but means Resolution Verifier is a
+  hard prerequisite for Phase 2).
+- Positive findings, for the record: secrets handling itself is clean
+  (env-only via `SecretsConfig`, nothing sensitive in `config.yaml`,
+  both `config.yaml` and `.env` confirmed gitignored; no secret values
+  logged anywhere found); the REST/WS auth code signs correctly and
+  never logs key material; `compliance.db`/CSV carry trade data only.
+
+---
+
+## 2026-07-16 — Session 28 (review-only): strategy roadmap — event-basket sum-to-one and threshold-ladder arbitrage are the correct Phase-1-compatible successors to S1; S2 cross-platform stays deferred
+
+Full menu with risk categorization in SESSIONS.md Session 28. The
+decision-relevant core:
+
+### Why these two (both TRUE riskless arbitrage, same guarantee class as S1 was believed to have, both Kalshi-only)
+Kalshi's matching engine unifies YES/NO **within one market** (which is
+what kills S1) but does **not** atomically match across the N separate
+markets of a multi-outcome event, nor across logically-linked markets in
+different events. Mispricings there CAN rest. Third-party corroboration
+(botforkalshi.com) agrees real candidates exist but are thin and often
+longshot-heavy — expectations should be "S1-like frequency, real this
+time," not a gold mine.
+
+1. **S5a — event sum-to-one basket**: for an event with N
+   mutually-exclusive outcome markets:
+   - YES-basket: buy YES on all N at ask; cost `Σ yes_ask_i`; pays
+     exactly $1 **iff the event is also exhaustive** (one outcome must
+     resolve YES). Arb iff `Σ yes_ask_i < 1 − Σ fees`.
+   - NO-basket: buy NO on all N at ask; cost `Σ no_ask_i`; pays
+     `$(N−1)` if exactly one outcome occurs; robust to
+     "none-of-the-above" (pays $N, better) but requires mutual
+     exclusivity (two YES outcomes would pay $(N−2)). Arb iff
+     `Σ no_ask_i < (N−1) − Σ fees`.
+   - Kalshi's event API exposes `event_ticker` grouping and a
+     `mutually_exclusive` flag — use them; exhaustiveness must be
+     verified per event series (some events have no catch-all bucket:
+     YES-basket forbidden there, NO-basket still valid).
+   - Real risks that remain (this is not S2-style leg risk, but it is
+     not zero): N legs fill independently (no atomic basket order on
+     Kalshi — confirmed) → partial-fill exposure for seconds; ceil'd
+     per-order fees × N legs crush thin baskets (a 10-leg basket pays
+     ≥10¢/contract-set in fee minimums); capital locked until
+     resolution.
+2. **S5b — threshold/date-ladder arb** (deterministic S3, no LLM): for
+   same-underlying markets A = "metric > x_hi", B = "metric > x_lo",
+   x_hi > x_lo, logic guarantees A⇒B. If priced backwards, buy YES(B)
+   at ask + buy NO(A) at ask; payout ≥ $1 in every possible outcome
+   (=$2 when the metric lands between the strikes); arb iff
+   `yes_ask_B + no_ask_A < 1 − fees`. The implication comes from ticker
+   structure / `floor_strike`-`cap_strike` fields — machine-checkable,
+   zero semantic risk, unlike LLM-derived S3 relations. Same for date
+   ladders ("by June" ⇒ "by July").
+
+### Sequencing decision
+Build S5a/S5b scanners in DETECT-AND-LOG mode first (no trading), run
+them live for 1-2 weeks to measure real frequency/size/fee-adjusted
+edge, then wire to RiskGate — after the unit-mismatch fix lands, since
+basket sizing is exactly where dollars-vs-contracts confusion would do
+damage. S2 cross-platform remains deferred: it adds genuine
+unhedged-leg risk (non-atomic across venues), requires a Resolution
+Verifier and a market matcher that don't exist, and Polymarket's US
+legal-access status and current fee schedule must be verified first —
+full assessment in SESSIONS.md. Market-making (S8) is the most
+promising NON-riskless idea (maker fees are zero on most Kalshi
+markets; observed books sit just outside break-even for takers, i.e.
+just INSIDE it for makers) but requires a live order-management layer
+that doesn't exist yet — statistical inventory risk, flag it clearly as
+a departure from pure arb if pursued.
+
+---
+
 ## 2026-07-13 — Session 26: S1 arb formula uses BID prices for both legs of a BUY trade — likely inverts P&L sign on every trade since inception
 
 ### Revert point: commit `5348533` — before this fix. Everything below it (all Session 26 work up to and including the disk outage fix, stale-publish fix, sanity ceiling, depth plumbing) is unaffected by this finding and does not need to be reverted if this fix is backed out.

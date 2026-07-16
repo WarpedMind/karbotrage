@@ -157,8 +157,27 @@ class TelegramNotificationAgent:
                                     self._last_update_id, update["update_id"]
                                 )
                                 msg = update.get("message", {})
-                                if "text" in msg:
-                                    await self._handle_operator_reply(msg["text"])
+                                if "text" not in msg:
+                                    continue
+                                if not self._is_authorized_sender(msg):
+                                    # SECURITY (found Session 28): this poller
+                                    # previously processed a message from
+                                    # ANY Telegram user as an authoritative
+                                    # operator command — including resolving
+                                    # pending permission requests and, via
+                                    # RegulatoryIntelligenceAgent checking
+                                    # response_text, clearing a regulatory
+                                    # trading halt. The default clear phrase
+                                    # is committed in this public repo, so
+                                    # anyone who found the bot could send it.
+                                    logger.warning(
+                                        f"TelegramAgent: dropped message from "
+                                        f"unauthorized chat_id="
+                                        f"{msg.get('chat', {}).get('id')} "
+                                        f"(expected {self._chat_id})"
+                                    )
+                                    continue
+                                await self._handle_operator_reply(msg["text"])
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
@@ -184,6 +203,12 @@ class TelegramNotificationAgent:
                         f"TelegramAgent: request {req_id} timed out — "
                         f"resolved {default_approved} (default)"
                     )
+
+    def _is_authorized_sender(self, msg: dict) -> bool:
+        """True only if `msg` came from the configured operator's chat_id.
+        Added Session 28 (2026-07-16) — previously any Telegram sender's
+        message was processed as an operator command."""
+        return str(msg.get("chat", {}).get("id", "")) == str(self._chat_id)
 
     async def _handle_operator_reply(self, text: str):
         """

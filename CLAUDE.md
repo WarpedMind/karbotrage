@@ -149,7 +149,86 @@ async def run(self): ...
 
 ## KNOWN DEBT
 
+### Session 28 (2026-07-16) strategy/architecture review — full findings in DECISIONS.md (5 entries) and SESSIONS.md Session 28; summary here
+Review-only session (no code changed). Headline findings, each with a
+full DECISIONS.md entry:
+1. **S1 single-market arb is structurally impossible on Kalshi — CONFIRMED LIVE, Session 29 (2026-07-16)**.
+   the opportunity condition `yes_ask+no_ask<1` is algebraically
+   identical to `yes_bid+no_bid>1`, a crossed book, which Kalshi's
+   unified price-time-priority matching engine never lets rest (a NO
+   bid IS a YES ask in the same book). Session 29 ran the verification
+   plan: (1) 0/778 real markets pulled live via REST show a crossed
+   book; (2) all 5 of Session 27's paper trades correlate at 100% (same
+   second) with a `sequence_gap_detected` event on that exact market.
+   Not "argued" anymore — confirmed. **Fixed same session**: S1 is now
+   canary-mode-only by default (`s1_canary_mode=True` in
+   `StrategiesConfig`) — still detects and logs candidates as a
+   data-quality signal, never publishes a tradeable `OpportunityEvent`.
+   Do not set `s1_canary_mode=False` until the underlying
+   reconstruction bug (stuck reset loops / mid-match multi-delta races)
+   is actually fixed and independently re-verified.
+2. **S2/S3/S4 audit**: all three price the wrong side of the book (same
+   class as Session 26's S1 bug — S2 sums bids for a buy, S3/S4 buy at
+   `yes_bid`); S3's input pipeline has never run
+   (`MarketAnalyst.update_markets()` has zero callers → `_active_markets`
+   always empty → zero LLM calls ever — "0 candidates" is a wiring fact,
+   not a market fact) and inflates edges on empty books (`yes_bid=0.0`
+   reads as a giant edge); S2's exact-`market_id` cross-platform match
+   can never hit and its Polymarket fee model is outdated; S4 is dead
+   code behind an enabled-by-default flag (no NewsSignalEvent publisher)
+   and is directional, not arb. Also: `ReflectionAgent`'s strategy
+   weights are stored by ArbScanner and never read — the learning loop's
+   output is a dead knob.
+3. **RiskGate unit mismatch confirmed and traced**: Kelly outputs
+   dollars; PaperExecutor/PositionTracker consume the same number as
+   contract quantity; it only balanced because an S1 pair costs ≈ $1.
+   Worse: Kelly at p=0.95 imposes a hidden **~5.26% minimum net edge**
+   (making `s1_min_net_profit_pct=0.5` a dead letter) — exactly
+   backwards for arb, where small edges are the real ones. Plus:
+   `capital_required_usd` is never set (RiskGate check 2 has never
+   run), quantities must be integer ≥1 live (0.05-contract paper trades
+   are impossible on Kalshi), and Kalshi fees round UP to the next cent
+   (the continuous fee model is optimistic exactly on the tiny
+   liquidity-capped orders this system does).
+4. **SECURITY — Telegram accepts commands from any sender — sender-auth FIXED, Session 29 (2026-07-16)**:
+   chat_id was never checked on inbound messages; anyone who found the
+   bot could approve pending permission requests and clear an
+   urgency-5 regulatory halt (default clear phrase is committed in the
+   public repo). Fixed: `_is_authorized_sender()` checks `msg.chat.id`
+   against `TELEGRAM_CHAT_ID` before dispatching to
+   `_handle_operator_reply`; unauthorized messages are dropped and
+   logged. 4 new tests. **Not yet fixed**: the VPS's `config.yaml`
+   still uses the default, publicly-known clear phrase — confirmed live
+   Session 29, needs rotating to a non-default value. **Also confirmed
+   and fixed Session 29**: `karbot-disk-alert.sh` was indeed still
+   pointing at the `.env` path Session 26 deleted — the disk-space
+   watchdog had been silently non-functional since then (grep-on-missing-
+   file swallowed by `|| true`). Fixed on the VPS directly, verified
+   live with a real test send. **Still open**: token can leak into logs
+   via raw aiohttp exception text; kill switch has no trigger path
+   anywhere (no publisher, no caller); VPS runs as `ubuntu`, not the
+   dedicated user these rules require.
+5. **Strategy roadmap**: the real successors to S1 are **S5a event
+   sum-to-one baskets** (Kalshi does NOT atomically match across an
+   event's N markets — YES-basket needs exhaustiveness, NO-basket only
+   mutual exclusivity) and **S5b threshold/date-ladder arb** (A⇒B from
+   ticker/strike structure, no LLM; buy YES(B)+NO(A) at ask, payout
+   ≥$1). Both true riskless arb, both Kalshi-only/Phase-1-compatible.
+   Build detect-and-log first. Market-making is the best statistical
+   candidate (maker fee = 0 on most markets) but needs a live order
+   layer. S2 cross-platform stays deferred (real unhedged-leg risk +
+   two missing prerequisites + Polymarket US-access/fee verification).
+6. Smaller: `karbot_runner.py --mode` flag is parsed but never applied
+   (config.yaml alone decides paper/live); `from_yaml()` also never
+   parses `capital:`/`risk:`/`strategies:` sections (generalizes the
+   Session 24 `data_feeds:` finding — capital is ALWAYS the $10k paper
+   default on the VPS; strategy thresholds are not YAML-tunable);
+   Telegram `_et_timestamp` hardcodes UTC-4 (wrong half the year);
+   PaperExecutor resolves every trade at `expected_pnl` by construction
+   (paper P&L is tautological for directional strategies).
+
 ### S1 is real and working — first live trades observed and hand-verified, Session 27 (2026-07-16)
+### → SUPERSEDED, Session 29 (2026-07-16): CONFIRMED WRONG. Session 28's challenge was independently live-verified (0/778 real markets crossed; all 5 trades below correlate 100% with a sequence gap on their exact market at their exact second). These were not real trades — see KNOWN DEBT item 1 above and DECISIONS.md. Keeping this entry for the historical record only; do not use it as evidence of anything.
 5 real trades fired over the first ~63 hours after Session 26's fixes
 went live: $10.79 total realized paper profit, roughly 2 trades/day,
 sizes ranging $0.05-$81.36. Two were hand-verified dollar-exact
@@ -589,32 +668,40 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. **HIGHEST PRIORITY: let real post-fix trades accumulate, watch for the
-   first genuine S1 trade, then re-run the P&L-as-%-of-position-size
-   benchmark check** — the actual root cause (S1 pricing bid instead of
-   ask prices, likely wrong since the strategy's first version) is fixed
-   and deployed as of 2026-07-13; live-confirmed zero opportunities of any
-   kind over ~4 minutes and 1,331 lines of book activity post-fix, versus
-   nearly every tick producing a false "opportunity" before. This is
-   correct and expected — real arbable edges after fees are rare, and the
-   Kelly formula itself won't size a position below ~5.26% net at p=0.95.
-   Don't reuse ANY pre-2026-07-13 RESOLVED trades as a baseline — all of
-   them are tainted (compounding: bid/ask sign error + no depth check +
-   stale-book leak). Watch live logs for the first real `opportunity_approved`
-   event, sanity-check it by hand, then start accumulating a real sample.
-2. **Investigate the `size_usd=0.0` approved-trade bug** (noticed Session
-   26 while confirming the P&L fix) — some `opportunity_approved` events
-   show zero size, meaning zero-size trades are being approved and
-   executed pointlessly. Not yet root-caused.
-3. **Extend the S1 liquidity cap from top-of-book-only to a real
-   multi-level depth walk** (Session 26, deliberately deferred, not
-   unsafe) — `max_fillable_qty` currently caps at the single best ask
-   level; a full walk would let the strategy price in reasonable size
-   against a moderately deep book instead of hard-capping at level 1.
-4. **Audit S2/S3/S4 for similar bid/ask or depth-blindness issues**
-   (Session 26 only audited S1) — S2 is Phase 2 gated so lower urgency,
-   but worth checking before Phase 2 work begins.
-5. **Investigate the stuck order-book reset loop** (Session 26) — specific
+1. ~~Fix the Telegram sender-authentication hole~~ — **DONE, Session 29
+   (2026-07-16)**: `_is_authorized_sender()` checks `message.chat.id`
+   against `TELEGRAM_CHAT_ID`. ~~Set a non-default `regulatory_clear_phrase`
+   on the VPS~~ — **still open**, confirmed the VPS still uses the
+   default value, needs rotating. ~~Verify `karbot-disk-alert.sh`
+   reads the right secrets path~~ — **DONE**: it didn't, fixed and
+   verified live with a real test send.
+2. ~~Run the S1 structural-impossibility verification plan~~ — **DONE,
+   Session 29**: confirmed (0/778 real markets crossed; 5/5 trades
+   correlate 100% with a gap event). S1 demoted to canary mode
+   (`s1_canary_mode=True`, default). Session 27's claims marked
+   superseded.
+3. **Build S5a (event sum-to-one basket) + S5b (threshold/date-ladder)
+   scanners in detect-and-log mode** (Session 28, DECISIONS.md entry 5)
+   — the real riskless successors to S1, Kalshi-only, Phase-1
+   compatible. Group by `event_ticker`, honor `mutually_exclusive` +
+   exhaustiveness rules (YES-basket needs exhaustive; NO-basket only
+   needs mutual exclusivity), price at ask via existing depth fields,
+   apply ceil'd per-order fees × N legs. No RiskGate wiring yet — log
+   candidates for 1-2 weeks to measure real frequency/size first.
+4. **Fix the RiskGate/PaperExecutor unit system** (Session 28,
+   DECISIONS.md entry 3): standardize on integer contract count
+   end-to-end; set `capital_required_usd = qty × basket_cost` so check
+   2 finally binds; floor quantities to int, reject < 1; replace Kelly
+   with cap/depth-based sizing for riskless strategies (keep fractional
+   Kelly only for statistical ones); make `KalshiFeeModel` ceil to the
+   next cent. Prerequisite for trading S5a/S5b.
+5. **Fix or explicitly disable the S3 pipeline** (Session 28, DECISIONS.md
+   entry 2): wire `update_markets()` from PriceWatcher's market fetch (or
+   delete the loop), switch pricing to asks, guard zero/empty-book
+   prices, and decide single-leg (statistical) vs paired-leg (riskless-
+   if-relation-holds) semantics. Flip `s4_settlement_arb_enabled`
+   default to False until a News Analyst exists.
+6. **Investigate the stuck order-book reset loop** (Session 26) — specific
    markets (e.g. `KXWORLDNEWSMENTION-26JUL10-WILD`) get stuck logging
    `book_needs_reset`/`book_reset_throttled` on every delta indefinitely,
    never actually completing recovery via the Session 22/23 REST mechanism.
@@ -622,19 +709,19 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
    cause of the Session 26 disk-full outage. The Session 26 fix
    (`structlog.configure` filtering) stops this from filling the disk again,
    but does not fix why the loop happens.
-6. **Re-audit every "CONFIRMED LIVE" claim in this file against actual VPS
+7. **Re-audit every "CONFIRMED LIVE" claim in this file against actual VPS
    state** (Session 26) — the VPS was found 4 commits behind `main`,
    silently missing the Session 23/24/25 fixes despite this file marking
    them "CONFIRMED LIVE." Going forward, "confirmed live" must mean checked
    against `git log -1` on the VPS itself and fresh log output, not just a
    local commit plus a plausible-sounding log line from one prior check.
-7. ~~Move `.env` off the repo path on the VPS~~ — **DONE, Session 26
-   (2026-07-13)**, see KNOWN DEBT above.
 8. **Investigate paper-trade fee variance** (KNOWN DEBT, Session 25) — fee
    amounts observed live via Telegram vary unexplainably ($70.00 flat,
-   $0.00, $42.78, $113.27, $56.64). Pull the fee calculation logic
-   (`PaperExecutor` or wherever fees are computed) and cross-reference
-   against `compliance.db` to determine if expected or a bug.
+   $0.00, $42.78, $113.27, $56.64). Session 28 note: the flat $70.00
+   entries are almost certainly the pre-Session-26 flat-14% fee model (7%
+   per leg × ~$500 size × 2 legs = $70) and the variance since is the
+   price-dependent real formula — cross-reference against `compliance.db`
+   to confirm, then close this item.
 9. **Continue live-verifying Telegram alerting** (Session 19/20/24/25) —
    confirm: no `TypeError` on any real Kalshi WS disconnect with
    `kalshi_reconnect_retry` logs increasing (Session 19); a real "FEED
@@ -654,27 +741,38 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
    bounding in-flight REST snapshot fetches, to smooth the post-restart
    burst that produced the 429s. Only worth prioritizing if 429s become a
    recurring pattern rather than a one-time restart surge.
-10. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
+12. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
    so the bot can be silenced during high-volume paper trading without
    disabling the agent entirely. Scope: `TelegramNotificationAgent`
    command handler only; no changes to event bus or other agents. Note: the
    Session 20 feed-down alert is explicitly designed to keep bypassing mute
-   once this is built — do not let it get silenced.
-11. **Monitor paper trading** — clock running since 2026-06-29, target
+   once this is built — do not let it get silenced. Prerequisite: the
+   sender-authentication fix (priority 1) — operator commands must not be
+   world-writable.
+13. **Monitor paper trading** — clock running since 2026-06-29, target
    live date 2026-07-29 (9 of the 14 elapsed days as of Session 26 had a
    dead persistence layer — see Session 26 in SESSIONS.md, don't count
-   that window as clean data). Review `logs/kalshi_trades.csv` and
+   that window as clean data; Session 28: S1 trades in this data are
+   suspected artifacts pending the verification plan — don't count them as
+   edge evidence either). Review `logs/kalshi_trades.csv` and
    `logs/compliance_actions.jsonl` periodically. Confirm resolved rows
    show nonzero `gain_loss` and `status=RESOLVED` after
    `paper_resolution_delay_seconds`.
-12. **Begin live executor spec** after 30-day paper run completes
+14. **Begin live executor spec** after 30-day paper run completes
    (2026-07-29). Design `live_executor.py` to replace `paper_executor.py`
-   on the real Kalshi trading path.
-13. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
+   on the real Kalshi trading path. Session 28 gate: do NOT go live on S1
+   under any circumstances until the structural-impossibility verification
+   is resolved; the first live candidate strategy should be S5a/S5b with
+   measured detect-and-log data behind it.
+15. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
    in VPS logs — no Health Monitor agent subscribed yet; confirm this
    isn't masking a real event-bus wiring issue.
-14. **Consider fixing the `data_feeds:` YAML-parsing gap** (KNOWN DEBT,
-   Session 24) if it becomes relevant to a near-term task.
+16. **Fix the `from_yaml()` config-parsing gaps** (KNOWN DEBT, Session
+   24 + Session 28) — `data_feeds:`, `capital:`, `risk:`, and
+   `strategies:` YAML sections are all silently unparsed; capital is
+   permanently the $10k paper default and strategy thresholds are not
+   operator-tunable without a code change. Also make `--mode` actually
+   override, or remove it from the documented commands.
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 
