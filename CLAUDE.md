@@ -149,6 +149,38 @@ async def run(self): ...
 
 ## KNOWN DEBT
 
+### S1 is real and working — first live trades observed and hand-verified, Session 27 (2026-07-16)
+5 real trades fired over the first ~63 hours after Session 26's fixes
+went live: $10.79 total realized paper profit, roughly 2 trades/day,
+sizes ranging $0.05-$81.36. Two were hand-verified dollar-exact
+(including by the operator independently). Every trade so far has been
+liquidity-capped, not capital-capped, confirming real order-book depth
+— not account size — is the actual bottleneck. See SESSIONS.md Session
+27 for the full trade table and math. Still a small sample; 5 trades
+isn't a verdict, just real, positive, consistent evidence the corrected
+formula and depth cap are working as designed.
+
+### Telegram display rounding hid a real trade as a fake "zero-size bug" — FIXED, Session 27 (2026-07-16)
+A genuine, liquidity-capped `size_usd=0.05` trade displayed in Telegram
+as "x0" / "$0.00" (`:.0f` / `:.2f` formatting), looking exactly like the
+`ZERO_APPROVED_SIZE` bug from Session 26 had regressed. Investigated via
+VPS logs before assuming either way — confirmed 0 `ZERO_APPROVED_SIZE`
+rejections in the window and the real `size_usd=0.05` in the log line;
+the fix from Session 26 was working correctly, this was purely a display
+issue. Fixed: `TelegramNotificationAgent._fmt_qty()`/`_fmt_usd()` show
+enough precision to keep real small values visibly nonzero (`.4g` for
+quantities, extra decimals under 1 cent for dollars). 8 new tests,
+120/120 total passing.
+
+### Scheduled tasks in this environment are not guaranteed to complete — found Session 27 (2026-07-16)
+A one-time scheduled task fired on time and auto-disabled correctly, but
+its actual execution stopped after 2 tool calls with no final report
+ever written (confirmed by tracing the task's transcript file directly).
+Not a Karbot Rage bug — a harness/environment limitation. Don't rely on
+a scheduled task's completion notification alone; if a report doesn't
+show up, check directly (SSH/logs) rather than assume the task didn't
+run.
+
 ### S1 P&L inflation — THREE COMPOUNDING BUGS FOUND AND FIXED, ROOT CAUSE CONFIRMED LIVE, Session 26 (2026-07-13)
 Three independent, compounding bugs were live simultaneously, found in
 order across one session:
@@ -348,7 +380,7 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
   "Telegram feed-down alert + capped runner-level auto-restart" entry below
   and SESSIONS.md Session 20 / DECISIONS.md for full framing.
 
-### Telegram feed-down alert + capped runner-level auto-restart — enabled live Session 24/25, feed-down/restart-cap events themselves still unconfirmed
+### Telegram feed-down alert + capped runner-level auto-restart — feed-down/recovered CONFIRMED LIVE Session 27 (2026-07-16), restart-budget-exhaustion still unconfirmed
 - **Feed-down/recovery Telegram alert (Session 20)**: `FeedHealthEvent`
   gained an additive `error: str = ""` field; `TelegramNotificationAgent`
   subscribes to `FeedHealthEvent` and alerts (Tier 1, bypasses
@@ -388,6 +420,11 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
   no duplicate alerts mid-outage; (2) if `PriceWatcher`'s internal retry is
   ever exhausted, both the runner-restart behavior AND the CRITICAL
   "AUTO-RECOVERY EXHAUSTED" Telegram alert actually fire.
+  **(1) CONFIRMED LIVE Session 27 (2026-07-16)**: operator received a real
+  `FEED DOWN` → `FEED RECOVERED` → `FEED DOWN` sequence in Telegram with no
+  duplicate alerts mid-outage — the first real confirmation since this was
+  built. **(2) still unconfirmed** — no restart-budget exhaustion has been
+  observed live yet.
 
 ### Duplicate/broken regulatory Telegram alert — REMOVED (Session 25)
 - `TelegramNotificationAgent` had its own subscription to

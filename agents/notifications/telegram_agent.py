@@ -223,6 +223,25 @@ class TelegramNotificationAgent:
         et = utc_now.astimezone(datetime.timezone(datetime.timedelta(hours=-4)))
         return et.strftime("%Y-%m-%d %H:%M ET")
 
+    @staticmethod
+    def _fmt_qty(qty: float) -> str:
+        """Format a leg quantity. Fixed 2026-07-16: `:.0f` rounded a real,
+        liquidity-capped 0.05-contract trade to "x0", which read as if a
+        zero-size trade had somehow executed despite the ZERO_APPROVED_SIZE
+        rejection (it hadn't — see DECISIONS.md/SESSIONS.md Session 26).
+        `.4g` shows whole quantities cleanly (10 -> "10") while keeping real
+        sub-1 quantities visible (0.05 -> "0.05")."""
+        return f"{qty:.4g}"
+
+    @staticmethod
+    def _fmt_usd(amount: float) -> str:
+        """Format a dollar amount. Sub-cent amounts are legitimate on very
+        small liquidity-capped trades (e.g. $0.0042) — `:.2f` alone would
+        collapse them to a misleading "$0.00"."""
+        if amount != 0 and abs(amount) < 0.01:
+            return f"{amount:.4f}"
+        return f"{amount:.2f}"
+
     # ── Event handlers ─────────────────────────────────────────────────────────
 
     async def _handle_notification(self, event: TelegramNotificationEvent):
@@ -313,7 +332,7 @@ class TelegramNotificationAgent:
         prefix = "📋 PAPER TRADE OPENED" if event.paper_mode else "✅ TRADE OPENED"
         market_id = event.platform_legs[0]["market_id"] if event.platform_legs else "?"
         legs_summary = " / ".join(
-            f"{leg.get('side', '?')} @{leg.get('filled_price', 0):.2f} x{leg.get('quantity', 0):.0f}"
+            f"{leg.get('side', '?')} @{leg.get('filled_price', 0):.2f} x{self._fmt_qty(leg.get('quantity', 0))}"
             for leg in event.platform_legs
         ) or "?"
         text = (
@@ -322,8 +341,8 @@ class TelegramNotificationAgent:
             f"Strategy: {event.strategy or '?'}\n"
             f"Market: {market_id}\n"
             f"Legs: {legs_summary}\n"
-            f"Expected PnL: ${event.expected_pnl_usd:.2f} (estimate, not final)\n"
-            f"Fees: ${event.total_fee_paid:.2f}\n"
+            f"Expected PnL: ${self._fmt_usd(event.expected_pnl_usd)} (estimate, not final)\n"
+            f"Fees: ${self._fmt_usd(event.total_fee_paid)}\n"
             f"{self._et_timestamp()}"
         )
         await self._outbound_queue.put(text)
@@ -343,7 +362,7 @@ class TelegramNotificationAgent:
             f"ID: {event.trade_id[:8]}\n"
             f"Market: {event.market_id}\n"
             f"Outcome: {event.resolution or '?'}\n"
-            f"Realized PnL: ${event.realized_pnl:.2f}\n"
+            f"Realized PnL: ${self._fmt_usd(event.realized_pnl)}\n"
             f"Held: {event.holding_period_hours:.2f}h\n"
             f"{self._et_timestamp()}"
         )

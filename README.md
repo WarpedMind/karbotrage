@@ -253,16 +253,22 @@ window — a meaningful signal that the earlier zero-opportunity result
 wasn't an artifact of overly strict fees, real markets during this
 window genuinely aren't offering a crossable edge.
 
-**Honest viability read, not a verdict**: pure single-market S1 arb on
-an actively market-made exchange is a well-known, thin-margin, heavily
-competed strategy. The live order books checked tonight both sat just
-slightly on the unprofitable side of break-even — the signature of a
-functioning market, not a broken one. Expect S1 alone to fire rarely;
-whether that's worthwhile depends on real observed frequency over time,
-which needs the corrected code to run for real, not further code
-review. This project's roadmap already treats S1 as Phase 1's "safest
-starter" strategy, with S3/S4 expected to carry more real edge —
-tonight's findings are consistent with that framing.
+**Update, 2026-07-16 — first real trades observed**: over the first ~63
+hours after the fixes above went live, **5 real trades fired, totaling
+$11.79 realized paper profit** (sizes $0.05-$81.36, net edges 6-13%).
+Two were hand-verified dollar-exact independently. Every trade so far
+has been capped by real order-book liquidity, not account capital —
+confirms the earlier read that depth, not capital, is the actual
+constraint. Still a small sample (5 trades), but real, positive,
+internally consistent evidence the corrected formula works as intended.
+Full trade table: SESSIONS.md, Session 27.
+
+Also fixed the same day: a real, legitimate `size_usd=0.05` trade
+displayed in Telegram as "x0"/"$0.00" (rounding, not a bug — confirmed
+via VPS logs that the zero-size rejection never fired), which looked
+exactly like a regression of the fix above. `TelegramNotificationAgent`
+now shows enough precision to keep small-but-real trades visibly
+nonzero.
 
 ## Open questions (flagged live, not yet resolved)
 

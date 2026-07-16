@@ -1,6 +1,97 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-07-16 (Session 27 — first real trades under corrected math observed and hand-verified; scheduled viability-check task found broken; a display bug found and fixed)
+
+### Context
+Operator scheduled a one-time task (`karbot-s1-viability-check`, fireAt
+2026-07-15T09:00 EDT) at the end of Session 26 to check S1 viability data
+after ~2 days of real operation. Operator returned unable to find the
+report.
+
+### The scheduled task fired but never completed — found and diagnosed
+`list_scheduled_tasks` confirmed it fired on time (`lastRunAt:
+2026-07-15T13:00:03Z`) and auto-disabled correctly. But its transcript
+(found by tracing `scheduledTaskId` → session file → `cliSessionId` →
+the actual `.jsonl` transcript under `~/.claude/projects/`) showed it
+only got through 2 tool calls (an SSH status check, a local git log
+comparison) before the session simply stopped — no final report was ever
+written. Root cause not investigated further (infrastructure/harness
+issue, not a Karbot Rage bug) — noted for awareness that scheduled tasks
+in this environment aren't guaranteed to complete, not relied upon as a
+sole reporting mechanism going forward.
+
+### Real viability data pulled live instead (2026-07-13 20:04 UTC → 2026-07-16 11:17 UTC, ~63 hours)
+- `s1_candidate_seen`: 244 (positive gross spread candidates)
+- Cleared the trading threshold: 61
+- `opportunity_approved` (real trades): **5**
+- `ZERO_APPROVED_SIZE` rejections: 0 (the 2026-07-13 fix never needed to fire — good sign, not evidence it's broken)
+- Sanity-ceiling rejections (implausible spreads still caught): 3
+- Feed health transitions (down/recovered): 3
+
+All 5 real trades, with dollar-exact hand-verified math on two of them (by the operator, independently, on paper):
+
+| Time (UTC) | Size | Net % | Realized PnL |
+|---|---|---|---|
+| 7/13 23:54 | $10.00 | 5.99% | $0.60 |
+| 7/15 18:04 | $1.00 | 8.95% | $0.09 |
+| 7/15 19:33 | $81.36 | 12.91% | $10.50 |
+| 7/16 09:00 | $5.00 | 11.89% | $0.59 |
+| 7/16 11:12 | $0.05 | 8.30% | $0.00 (real, see below) |
+
+Total: **$11.79 realized paper profit, 5 trades in ~2.6 days (~2/day)**.
+Checked the Kelly math on the two biggest trades: both were liquidity-
+capped, not capital-capped — e.g. the $81.36 trade's real edge would
+have sized to ~$844 under pure Kelly on a $10k account, but only ~$81
+of real order-book depth existed at the quoted price. Consistent
+pattern across every trade so far: real depth, not capital, is the
+binding constraint. This is real, positive, if modest, evidence that
+the corrected S1 strategy works — genuine small edges are showing up at
+roughly 2/day, not zero and not constant, exactly the "thin, rare,
+liquidity-limited" shape predicted.
+
+### A live "regression" that wasn't — Telegram display bug found and fixed
+The 2026-07-16 11:12 trade showed in Telegram as "YES @0.17 x0 / NO
+@0.72 x0", "Expected PnL: $0.00", "Fees: $0.00" — looked exactly like
+the `size_usd=0.0` bug fixed in Session 26 had regressed. Investigated
+via VPS logs before assuming either way: `ZERO_APPROVED_SIZE` count was
+0 for the whole window, and the actual log line showed
+`size_usd=0.05` — a real, legitimate, liquidity-capped 5-cent trade,
+correctly *not* rejected (0.05 > 0). The zero-size fix worked exactly as
+intended; the confusion was purely `telegram_agent.py` formatting
+(`:.0f` for quantity, `:.2f` for dollars) rounding small-but-real values
+down to what looked like zero.
+
+Fixed: `TelegramNotificationAgent._fmt_qty()` (uses `.4g` — "10" stays
+"10", "0.05" stays "0.05") and `_fmt_usd()` (extra precision under 1
+cent, e.g. "0.0042" instead of "0.00") wired into both the trade-opened
+and trade-resolved messages. 8 new tests, 120/120 total passing.
+
+### Also confirmed live for the first time: Telegram feed-health alerting
+The 3 feed-health transitions in the operator's Telegram (`FEED DOWN` /
+`FEED RECOVERED` / `FEED DOWN`) are the first real disconnect/reconnect
+pair ever observed firing correctly in production — this was flagged as
+unconfirmed since Session 19 across multiple sessions. Closing that out.
+
+### What to do next
+1. Operator has limited access to a more capable model (Fable) for "a
+   couple more days" — plan is to use it for: independently re-verifying
+   the S1 bid/ask and fee math from Session 26, auditing S2/S3/S4 for
+   the same class of bugs, the RiskGate dollar/quantity unit mismatch
+   (flagged Session 26, not fixed), a security-focused pass, and
+   brainstorming strategies not yet in the codebase (e.g. multi-way
+   "sum-to-one" arbitrage generalizing S1 beyond 2-outcome markets;
+   market-making instead of only taking liquidity, given real spreads
+   observed sitting just slightly in the market's favor).
+2. Continue letting real S1 (and S3, already running, 0 candidates
+   observed so far) trades accumulate — 5 trades is still a small
+   sample.
+3. Everything else from Session 26's next-priorities list is still open
+   (stuck order-book reset loop, re-audit "CONFIRMED LIVE" claims, paper
+   fee variance, S1 multi-level depth walk).
+
+---
+
 ## 2026-07-13 (Session 26 — VPS silently dead for 9 days: disk-full outage found and fixed; VPS discovered 4 commits behind main; P&L inflation reproduced live with a concrete root-cause candidate)
 
 ### Context
