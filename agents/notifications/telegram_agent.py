@@ -28,6 +28,7 @@ import aiohttp
 from core.events import (
     EventBus,
     FeedHealthEvent,
+    KillSwitchEvent,
     LegFailureEvent,
     RejectedOpportunityEvent,
     TelegramNotificationEvent,
@@ -216,6 +217,21 @@ class TelegramNotificationAgent:
         subscribers (e.g. RegulatoryIntelligenceAgent) can inspect response_text.
         When a FIFO permission request is pending, also resolve it with yes/no.
         """
+        if text.strip().upper() == self.config.telegram.kill_switch_phrase.upper():
+            # Session 28/29: KillSwitchEvent/RiskGate._on_kill_switch existed
+            # with no trigger anywhere. This is the operator-facing "nuclear
+            # option" — only reachable here after _is_authorized_sender()
+            # already passed in _poll_updates.
+            await self.bus.publish(KillSwitchEvent(
+                triggered_by="TELEGRAM",
+                reason="operator command via Telegram",
+            ))
+            await self._outbound_queue.put(
+                "🛑 KILL SWITCH ACTIVATED — all trading halted."
+            )
+            logger.warning("TelegramAgent: KILL SWITCH triggered by operator")
+            return
+
         reply = text.strip().lower()
         approved = reply in ("yes", "y", "approve", "approved")
 

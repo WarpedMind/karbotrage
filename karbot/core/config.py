@@ -145,12 +145,24 @@ class StrategiesConfig:
     s2_min_net_profit_pct: float    = 1.0
 
     # S3: Logical/semantic arbitrage (LLM-detected)
-    s3_logical_arb_enabled: bool = True
+    # Disabled by default — Session 28 audit (DECISIONS.md entry 2): prices
+    # the wrong side of the book (yes_bid instead of yes_ask, same bug
+    # class as S1's Session 26 fix), MarketAnalyst.update_markets() has
+    # zero callers so _active_markets is always empty (never analyzes a
+    # single real market — "0 candidates" was a wiring fact, not a market
+    # fact), and empty-book prices (yes_bid=0.0) read as a giant fake edge.
+    # Re-enable only after all three are fixed.
+    s3_logical_arb_enabled: bool = False
     s3_min_edge_pct: float       = 1.0
     s3_min_confidence: str       = "HIGH"   # HIGH | MEDIUM | LOW
 
     # S4: Settlement arbitrage (news-triggered)
-    s4_settlement_arb_enabled: bool = True
+    # Disabled by default — Session 28 audit: no agent in the current
+    # 10-agent runner ever publishes NewsSignalEvent, so this has been
+    # unreachable dead code regardless of this flag. Re-enable only once
+    # a real News Analyst agent exists and this strategy's pricing is
+    # also audited for the same bug class as S1/S3.
+    s4_settlement_arb_enabled: bool = False
 
 
 @dataclass
@@ -167,6 +179,16 @@ class TelegramConfig:
     notify_on_trade: bool = True        # Tier 2: live always True; paper follows this flag
     notify_on_rejection: bool = False   # Tier 2: off by default to reduce noise
     permission_timeout_seconds: int = 300
+    # Kill switch trigger phrase — found Session 28 (2026-07-16): KillSwitchEvent
+    # and RiskGate._on_kill_switch were fully implemented but nothing in the
+    # codebase ever published the event or called activate_kill_switch(). This
+    # was the "TELEGRAM" trigger source the event's own field comment
+    # anticipated, just never wired. Unlike regulatory_clear_phrase, a
+    # predictable default is fine here — an unauthorized sender triggering
+    # this halts trading (a safe failure), it doesn't clear a safety gate.
+    # sender-auth (Session 28/29 fix) still applies before this is ever
+    # reached, so only the real operator can trigger it either way.
+    kill_switch_phrase: str = "EMERGENCY KILL SWITCH"
     # bot_token and chat_id come from environment variables only:
     # TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
     # Never stored in config.yaml
