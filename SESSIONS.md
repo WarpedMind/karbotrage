@@ -72,6 +72,73 @@ remaining Session 28 items (kill switch has no trigger path, RiskGate
 unit mismatch, S2/S3/S4 all need fixing or disabling, S5a/S5b build-out)
 are substantial and not yet started. Prioritized in CLAUDE.md.
 
+### Addendum, same session — Phase 1 safety cleanup completed, Phase 2 empirical check on S5a/S5b run BEFORE writing any strategy code
+Operator asked directly whether continuing was worth the effort, or
+whether this project was "trying to make a square peg fit into a round
+hole." Answered honestly rather than defaulting to optimism: proceed to
+a cheap empirical check first, gate any real building on what it shows.
+
+**Phase 1 (done)**: wired `KillSwitchEvent` to a real trigger for the
+first time — the Telegram operator channel, gated behind the Session
+28/29 sender-auth fix, listening for `TelegramConfig.kill_switch_phrase`
+(default `"EMERGENCY KILL SWITCH"` — a predictable default is fine here,
+unlike the regulatory phrase, since an unauthorized trigger only *halts*
+trading, a safe failure). 6 new tests. Also disabled S3/S4 by default
+(both confirmed broken/unreachable per the Session 28 audit) and rotated
+the VPS's `regulatory_clear_phrase` off the public default — confirmed
+`from_yaml()` actually parses the `regulatory_intelligence` section
+(unlike the known `strategies:` gap) before trusting the change took
+effect, verified live via clean restart. All deployed, 133/133 tests
+passing.
+
+**Phase 2 (done) — the actual answer to "is this worth it," checked
+empirically rather than argued**:
+- **S5a (event sum-to-one basket)**: pulled 1,600 real open markets,
+  grouped into 313 multi-market events, found 78 that looked like naive
+  sum-to-one candidates (`Σyes_ask < 1` or `Σno_ask < N-1`). Checked
+  every single one's actual `mutually_exclusive` flag via the events
+  endpoint (the exact check Fable's own spec called for and that a
+  first-pass naive scan skips) — **0 of 78 are real basket candidates**.
+  Every one turned out to be a threshold/spread/total ladder (team
+  totals, player props, temperature ranges) misidentified as a
+  mutually-exclusive outcome set by summing markets that share an
+  `event_ticker` without checking the flag — the same class of
+  "too-good-to-be-true, verify before trusting" trap S1 fell into,
+  just caught before any code was written this time. Does not rule out
+  S5a existing on genuine winner-take-all events (elections, award
+  winners) not well-represented in this particular sample — not yet
+  checked.
+- **S5b (threshold/date-ladder arb)**: took the real ladder families
+  the S5a scan surfaced (which are exactly S5b's intended target) and
+  computed the actual arbitrage condition properly — `yes_ask(low
+  strike) + no_ask(high strike) < 1` — across every strike pair, not
+  just adjacent ones, on 8 diverse real live ladders (temperature ×5,
+  gold, silver, oil). **Closest any of them got to a real arbitrage was
+  1.01; none crossed below 1.00.** Same efficient-market signature as
+  S1's real (non-fake) order books.
+
+**Honest read given this**: neither S5a nor S5b shows a *currently
+sitting, obviously exploitable* opportunity in this real, live sample.
+This doesn't prove they never will — real arb (if it exists) is
+inherently sporadic, and a single point-in-time snapshot can't rule out
+rare windows during volatility or thin off-hours trading — but it does
+mean there's no free lunch quietly waiting to be scooped up right now
+either. This matches the third-party-corroborated expectation from
+Session 28 ("thin... not a gold mine") almost exactly, just confirmed
+with real numbers instead of taken on faith.
+
+### Revised recommendation
+Given this, building full S5a/S5b scanners immediately is a judgment
+call, not an obvious next step — detect-and-log mode over 1-2 weeks
+(Fable's original sequencing) would still be needed to catch the rare
+real windows this snapshot can't see, but that's a real time investment
+for something not yet confirmed to pay off, versus the cheap, decisive
+checks that killed S1 and (so far) haven't found anything to build on
+for S5a/S5b either. Operator should decide whether to invest that time
+or reconsider direction (e.g. market-making, per Session 28's "S8" note,
+or a broader S5a search across genuine winner-take-all events) before
+committing more building effort.
+
 ---
 
 ## 2026-07-16 (Session 28 — strategy/architecture review, ANALYSIS ONLY, no code changed: S1 found structurally impossible on Kalshi; S2/S3/S4 audited and all defective; Telegram security hole; new strategy roadmap)

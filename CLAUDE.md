@@ -149,6 +149,25 @@ async def run(self): ...
 
 ## KNOWN DEBT
 
+### S5a/S5b checked against real live data BEFORE building — neither shows a currently-exploitable edge, Session 29 (2026-07-16)
+Before writing any S5a/S5b code, ran the same empirical-first discipline
+that killed S1: pulled 1,600 real open markets, checked all 78 naive
+sum-to-one candidates against the actual `mutually_exclusive` event
+flag — **0 of 78 are real** (all are threshold/spread/total ladders
+misidentified as basket markets by summing same-`event_ticker` markets
+without checking the flag, the exact trap Fable's own spec warned
+against). Then computed S5b's real arb condition properly across 8
+diverse live threshold ladders (temperature ×5, gold, silver, oil) —
+closest any got to a real crossing was 1.01, none went below 1.00.
+Neither strategy has an obviously-sitting opportunity right now. Doesn't
+rule out either existing rarely (a snapshot can't see time-varying
+windows) or S5a existing on genuine winner-take-all events not sampled
+here — but there's no free lunch quietly waiting either. Full numbers:
+SESSIONS.md Session 29 addendum. **Decision needed before more building
+effort**: invest in detect-and-log mode over 1-2 weeks to catch rare
+windows, search more specifically for real mutually-exclusive events, or
+reconsider direction (market-making per Session 28's S8 note).
+
 ### Session 28 (2026-07-16) strategy/architecture review — full findings in DECISIONS.md (5 entries) and SESSIONS.md Session 28; summary here
 Review-only session (no code changed). Headline findings, each with a
 full DECISIONS.md entry:
@@ -680,14 +699,21 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
    correlate 100% with a gap event). S1 demoted to canary mode
    (`s1_canary_mode=True`, default). Session 27's claims marked
    superseded.
-3. **Build S5a (event sum-to-one basket) + S5b (threshold/date-ladder)
-   scanners in detect-and-log mode** (Session 28, DECISIONS.md entry 5)
-   — the real riskless successors to S1, Kalshi-only, Phase-1
-   compatible. Group by `event_ticker`, honor `mutually_exclusive` +
+3. **S5a/S5b — decision point, not a straightforward build** (Session 28
+   spec in DECISIONS.md entry 5; Session 29 empirical check in KNOWN
+   DEBT above and SESSIONS.md). Neither showed a currently-exploitable
+   edge against a real 1,600-market live sample — 0/78 genuine
+   mutually-exclusive S5a candidates, closest S5b ladder crossing was
+   1.01 (not <1.00). Before building the full scanners, operator should
+   decide: (a) invest in detect-and-log mode over 1-2 weeks anyway to
+   catch rare/time-varying windows a snapshot can't see, (b) search more
+   specifically for genuine winner-take-all events (elections, award
+   winners) not well-represented in the sample checked, or (c)
+   reconsider direction (market-making, Session 28's S8 note). If (a) is
+   chosen: group by `event_ticker`, honor `mutually_exclusive` +
    exhaustiveness rules (YES-basket needs exhaustive; NO-basket only
    needs mutual exclusivity), price at ask via existing depth fields,
-   apply ceil'd per-order fees × N legs. No RiskGate wiring yet — log
-   candidates for 1-2 weeks to measure real frequency/size first.
+   apply ceil'd per-order fees × N legs, no RiskGate wiring yet.
 4. **Fix the RiskGate/PaperExecutor unit system** (Session 28,
    DECISIONS.md entry 3): standardize on integer contract count
    end-to-end; set `capital_required_usd = qty × basket_cost` so check

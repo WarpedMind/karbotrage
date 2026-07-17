@@ -270,13 +270,64 @@ exactly like a regression of the fix above. `TelegramNotificationAgent`
 now shows enough precision to keep small-but-real trades visibly
 nonzero.
 
+## CORRECTION, 2026-07-16 (Session 28/29): S1 is structurally impossible on Kalshi — the "5 real trades" above were not real
+
+The section above's "first real trades observed" claim did not hold up.
+A fresh review found — and this session independently verified against
+real live data before accepting it — that S1's win condition
+(`yes_ask+no_ask<1`) is algebraically identical to a **crossed order
+book**, a state Kalshi's own matching engine physically cannot let rest
+(it mints crossed bids into contract pairs instantly). Verified two
+ways: pulled 778 real live markets via REST — zero show a crossed book;
+checked all 5 of the "hand-verified" trades against gap-detection logs
+— all 5 fired in the exact same second as a `sequence_gap_detected`
+event on that exact market. Every S1 signal to date was a
+book-reconstruction artifact, not a real opportunity.
+
+**S1 is now canary-mode-only by default** (`s1_canary_mode=True`) — it
+still detects and logs candidates as a data-quality signal, but can
+never execute a trade, paper or real, until the underlying
+reconstruction bug is fixed and re-verified.
+
+**Also fixed the same pass**: a real security hole (Telegram accepted
+commands from any sender, not just the operator — fixed with sender-auth
+checking `chat_id`), the disk-space watchdog silently reading a deleted
+secrets path since Session 26 (fixed), a kill switch that existed in
+code but had no trigger anywhere (wired to a Telegram operator command),
+and S2/S3/S4 disabled by default (all confirmed broken per the same
+review).
+
+**Then, before building anything new**: checked Fable's proposed
+successor strategies (S5a event-basket, S5b threshold-ladder arbitrage)
+against real live data the same way S1 was checked. Neither shows a
+currently-exploitable edge — 0 of 78 naive S5a candidates are genuine
+mutually-exclusive events (all were threshold ladders misidentified as
+baskets), and the closest real S5b ladder crossing found across 8
+diverse live markets was 1.01 (need <1.00). Full numbers and math:
+SESSIONS.md Session 29, DECISIONS.md.
+
+**Honest current state**: no confirmed-viable strategy is trading right
+now. The infrastructure (order book, risk gate, paper executor,
+compliance, alerting) is solid and reusable regardless of which strategy
+runs on it — but the specific strategy logic built so far (S1) is dead,
+and the proposed replacements (S5a/S5b) are unconfirmed, not yet
+disproven. Next step is a deliberate choice, not a default continuation:
+detect-and-log S5a/S5b over a longer real window, search more
+specifically for genuine winner-take-all markets, or reconsider
+direction entirely (e.g. market-making).
+
 ## Open questions (flagged live, not yet resolved)
 
+- **S5a/S5b viability** — checked against one real snapshot, not yet
+  disproven but not yet confirmed either. Needs either a longer
+  detect-and-log window or a more targeted search (see correction above).
 - **S1's liquidity cap is top-of-book only**, not a full multi-level
-  depth walk — deliberately conservative scope for 2026-07-13, extending
-  it is a reasonable follow-up now that the pricing formula is correct.
-- **S2/S3/S4 not audited** for similar bid/ask, depth-blindness, or fee
-  issues — 2026-07-13's investigation only covered S1.
+  depth walk — moot while S1 is canary-mode-only, but relevant again if
+  the reconstruction bug is ever fixed.
+- **RiskGate dollar/quantity unit mismatch** — Kelly outputs dollars,
+  consumed downstream as contract quantity; only ever balanced because an
+  S1 pair costs ≈$1. Must be fixed before any basket strategy (S5a) is
+  trusted to size correctly.
 - **Paper trade fee variance**: fee amounts shown in Telegram trade
   messages vary in a way that hasn't been explained yet (flat $70, or
   $0–$113 depending on the trade) — needs a cross-check against the fee
@@ -299,24 +350,23 @@ hours of logs instead of waiting days for an actual trade.
 
 ## Next up
 
-1. Let clean post-fix data accumulate, then re-run the P&L-as-%-of-position-size
-   benchmark check against a real sample (not just the first few minutes
-   observed live) — the fix above needs to hold up over time. Watch
-   `s1_candidate_seen` logs for near-miss frequency in the meantime.
-2. Investigate the stuck order-book reset loop (why some markets never
+1. **Decide on S5a/S5b direction** (see correction above) — detect-and-log
+   over a longer window, search more specifically for genuine
+   winner-take-all events, or reconsider strategy direction entirely.
+   This is the actual next decision, not a default "keep building."
+2. Fix the RiskGate dollar/quantity unit mismatch — prerequisite before
+   any basket strategy (S5a) can be trusted to size correctly.
+3. Investigate the stuck order-book reset loop (why some markets never
    complete recovery — the disk-filling symptom is fixed, the loop itself
    isn't).
-3. Re-audit every other "CONFIRMED LIVE" claim in CLAUDE.md against actual
-   VPS state, not just prior session notes.
-4. Investigate the paper-trade fee variance noted above.
-5. Continue live-verifying Telegram alerting (feed-down/recovered,
-   restart-budget-exhaustion) now that the duplicate regulatory message is gone.
-8. Add a concurrency limiter (`asyncio.Semaphore`) on `_request_snapshot`
-   REST calls to smooth the post-restart burst noted above — not urgent.
-9. Telegram `/mute` `/unmute` operator commands.
-10. Begin live executor spec once the 30-day paper run completes (2026-07-29)
-   — note the run has a confirmed dead zone from 2026-07-04 to 2026-07-13
-   where persistence was broken; don't count that window as clean data.
+4. Re-audit every "CONFIRMED LIVE" claim in CLAUDE.md against actual VPS
+   state, not just prior session notes.
+5. Investigate the paper-trade fee variance noted in earlier sessions.
+6. Add a concurrency limiter (`asyncio.Semaphore`) on `_request_snapshot`
+   REST calls — not urgent.
+7. Telegram `/mute` `/unmute` operator commands.
+8. Live executor spec — on hold until a confirmed-viable strategy exists;
+   the original 2026-07-29 target assumed S1 would be that strategy.
 
 ## License
 
