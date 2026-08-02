@@ -191,6 +191,36 @@ as new items are learned; never thin it out.**
   than assuming it is understood.
 - **Proactively surface issues and contradictions**, not just the assigned
   task. Most of Session 30's real finds were not the task.
+- **Ask for the time budget at the start if it isn't stated.** "Quick one"
+  versus "I have a few hours" changes scoping from the first move — whether
+  to open a large build at all, or to take a bounded piece and hand off. One
+  question, asked once, in the first `AskUserQuestion` of the session.
+
+### Decide these yourself — do NOT spend a question on them
+The operator has explicitly delegated these. Asking about them wastes a
+round-trip and trains them to skim the options:
+- **Test changes** — adding tests, and updating existing ones when behaviour
+  legitimately changed. (Always say *why* a test changed, in the commit and
+  in SESSIONS.md, so it can't look like fudging a failure — see the Session
+  30 liquidity-cap tests for the right pattern.)
+- **Documentation structure** — section placement, headings, wording, which
+  of the four docs a fact belongs in.
+- **Commit granularity and messages.**
+- **Repo hygiene** — `.gitignore` entries, untracking build/OS artifacts,
+  removing stray temp or backup files you created.
+- **Implementation choices** among equivalent options, and refactors
+  confined to code you are already changing.
+- **Adding comments** that record a subtlety or a past bug.
+
+### Still ask about these
+- Direction/strategy forks with a real trade-off, and scope calls that
+  change what gets built.
+- Anything that spends money, sends something outward, or goes live.
+- Deleting or gutting existing work (the arb substrate especially — see
+  "what must NOT be touched" above).
+- Production/VPS changes beyond a routine verified deploy.
+- Any case where two readings of the request produce materially different
+  work — and ask *before* doing the work, not after.
 - Keep all four docs current (CLAUDE.md, DECISIONS.md, SESSIONS.md,
   README.md), commit and push, and confirm `git status` clean +
   `git log origin/main -1` matching local before signing off.
