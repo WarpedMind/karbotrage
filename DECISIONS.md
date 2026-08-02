@@ -1,6 +1,240 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-08-02 — Session 32: the S5a/S5b canary is built as a SEPARATE PROCESS, and its arbitrage relations are gated on settled history rather than on strike arithmetic or Kalshi's own event flag
+
+### Status of each claim, labeled up front
+- **CONFIRMED LIVE this session** (measured against `api.elections.kalshi.com`,
+  unauthenticated): the depth-field mapping, the snapshot-staleness window, the
+  `strike_type` census, the non-binary settlement rate, the qualification
+  verdicts for 60 real series, and the basket arithmetic on real open events.
+- **MEASURED, one snapshot only**: zero candidates. One sweep is not a verdict —
+  that is the entire reason this thing runs for weeks.
+- **ARGUED, not measured**: that a separate process is safer than an in-runner
+  agent. The Session 23 outage it reasons from is confirmed; the claim that the
+  canary would reproduce it is not, and is not tested.
+- **OPEN, deliberately not guessed at**: whether Kalshi refunds voided positions
+  at cost. Decisive for whether the 4.1% non-binary settlement rate on ATP is a
+  fee-sized drag or a principal-sized one.
+
+### Decision 1 — separate process, not an agent in `karbot_runner.py`
+The project's convention is that everything is an agent on the event bus. This
+deliberately is not, and the operator asked for the reasoning rather than the
+recommendation, so it is recorded here in full.
+
+The decisive argument is not safety, it is **reuse**. `backtest/kalshi_history.py`
+and `backtest/costs.py` already do settled-market fetching with cursor
+pagination and backoff, and the ceil'd Kalshi fee with a live cross-check
+against the trading path's own `KalshiFeeModel`. All of it is blocking
+`requests`. Inside `karbot_runner.py` none of it is callable: a blocking call in
+that event loop **is** the Session 23 outage verbatim — it stalled the loop past
+PriceWatcher's 10s WebSocket ping deadline, Kalshi tore down the transport, and
+the agent crashed three times in eight minutes until it exhausted its restart
+budget. Going in-runner therefore means rewriting the fetch layer in `aiohttp`
+(two code paths that will drift — and the drifting one decides whether a trade
+looks profitable), or wrapping every call in a thread executor. In a separate
+process the reuse is an import.
+
+The secondary argument, fault isolation, is real but was **sized honestly rather
+than overstated**: a sweep is ~45 seconds wall-clock but only a few hundred
+milliseconds of CPU spread across awaits, which a 10s ping timeout would very
+likely survive even done badly. It is the same shape of risk as Session 23, not
+the same magnitude.
+
+**The strongest argument against, given equal weight**: a separate unit is more
+likely to die silently. This project is specifically bad at that —
+`karbot-disk-alert.sh`, the watchdog built to prevent a silent outage, was
+itself silently non-functional from Session 26 to Session 29. An in-runner agent
+would inherit `_run_supervised`, boot-start and a Telegram path for free.
+Mitigated with `Restart=always` and a per-sweep heartbeat line in the JSONL, and
+**recorded as a known gap rather than claimed as parity**.
+
+### Decision 2 — a relation is licensed by settled history, never by strike arithmetic alone
+This is the load-bearing design decision and it came from a live counterexample,
+not from caution.
+
+`KXMLBSPREAD-26AUG021340CWSTB` holds eight markets in one event, all
+`strike_type=greater`, covering **two different metrics** — Tampa Bay's winning
+margin and Chicago's — at overlapping strikes (`TB4` and `CWS4` both at
+`floor_strike=3.5`). Interval arithmetic will cheerfully prove that Tampa Bay
+winning by 4+ implies Chicago winning by 3+, and then price a riskless
+arbitrage on it. This is Session 29's trap with a sharper edge: Session 29 found
+78 apparent sum-to-one baskets and confirmed **0 of 78** were real, all ladders
+misidentified by grouping on `event_ticker` without checking comparability.
+
+Two text-based tests for metric identity were tried and **both rejected on
+evidence**:
+- Stripping numbers from `rules_primary` separates the two teams correctly but
+  also splits a legitimate weather ladder, because `less`/`between`/`greater`
+  markets phrase their rules differently ("is less than 78" vs "is between
+  78-79").
+- An `expiration_value` identity test is simply **wrong**: measured across 123
+  settled `KXMLBSPREAD` events, all markets in an event share one
+  `expiration_value` despite being on different metrics.
+
+So: **structure proposes, history disposes.** Interval arithmetic generates
+candidate relations; a relation is usable only if the series' settled record has
+never once violated it. On KXMLBSPREAD that is **2,267 measured violations** and
+the series is disqualified. Verdicts are `confirmed` / `refuted` /
+`insufficient_evidence`, and **zero tests is never `confirmed`** — a vacuous
+pass is exactly the shape of Session 31's bug, a validation reporting success
+over a sample it had quietly emptied.
+
+Disqualification is at series granularity, which is coarse: one mixed-metric
+event disqualifies a series even for its well-behaved pairs. Deliberate. A false
+positive here manufactures a confident stream of fake arbitrage; a false
+negative costs coverage in a process whose only output is a log file.
+
+Kalshi's own `mutually_exclusive` flag is **recorded alongside** the empirical
+verdict rather than used as the gate, so a disagreement between the two is
+visible rather than silently trusted.
+
+### Decision 3 — `MIN_SETTLED_EVENTS` is a logging filter, not a risk control
+Stated explicitly so it cannot be quietly promoted into one later. A relation
+that held in *n* independent settled events with zero violations still carries a
+rule-of-three upper 95% bound of ~`3/n` on its failure probability. At the
+default of 30 that is **~10% — nowhere near "riskless"**. The bound is computed
+and written into every profile and every logged candidate precisely so nobody
+can read "qualified" as "proven". Nothing in this package trades, so the
+threshold's only job is to keep the log from filling with noise.
+
+### Decision 4 — the YES-basket requires a partition, not merely exhaustiveness
+Strictly, "at least one leg must resolve YES" is all the YES-basket's dollar
+needs. The implementation requires exactly-one, and the extra condition is
+deliberate.
+
+"At least one YES in n settled events" means different things for different
+shapes. On a temperature partition it is structural — the buckets tile the
+outcome space. On a **nested** ladder ("over 1 run", "over 2 runs", …) it is a
+coincidence of the sample: the bottom rung is almost always YES, so 40 clean
+events look identical to a structural guarantee right up until a 0-0 game
+settles every leg NO. Measured live: `KXMLBTOTAL` comes back
+`exhaustive: confirmed` for exactly this reason. Requiring a partition costs the
+nested-ladder YES-basket — never economically plausible anyway, since eleven
+nested YES legs cost $5.61 for the dollar they pay — and removes a concrete,
+foreseeable failure.
+
+### What was confirmed live, and the three things that were nearly missed
+**The depth-field mapping.** There is no `no_ask_size_fp`. A NO ask is a resting
+YES bid at `1 − price`, so the quantity available for buying NO at `no_ask` is
+**`yes_bid_size_fp`** — the field with the opposite name. Verified in both
+directions against `/markets/{t}/orderbook` on a real market: derived
+`yes_ask` = 1 − no_bid = 0.13 with depth = no_bid_qty = 5, derived
+`no_ask` = 1 − yes_bid = 0.92 with depth = yes_bid_qty = 32, both matching the
+`/markets` snapshot exactly. Reading the same-named field for both sides is the
+Session 26 bug class and would have sized every NO leg off the wrong side of the
+book.
+
+**The snapshot goes stale in seconds.** Read back-to-back against the order
+book, the bulk list agreed **16/16** on price and size. Held ~10 seconds while
+other requests ran, an actively traded market moved underneath it
+(`KXMLBSPREAD-…-CWS6`: yes_bid 0.10 → 0.14, size 3 → 2071). A full sweep takes
+~45 seconds, so the earliest pages describe a book that no longer exists. Hence
+a mandatory second stage: **every candidate is re-priced leg by leg from
+`/orderbook` before it is logged as real**, and candidates that evaporate are
+kept as `vanished_on_recheck` because that survival rate is itself the
+measurement — it separates "real resting arbitrage" from "our view of the book is
+noisy", which is the exact question Session 29 could not answer.
+
+**The `strike_type` census**, across 12,000 live open markets: `greater` 6438,
+`structured` 3282, `between` 1408, `custom` 569, `less` 105, none 100,
+`greater_or_equal` 98. Two findings in that. Session 31's `less`/`cap_strike`
+convention is reconfirmed at 105/105. And **`structured` is not one thing** —
+with a `floor_strike` it is a threshold ("2+ RBIs"), without one it is
+categorical ("Los Angeles D wins"). Intervals derived from the former are marked
+`inferred` and **barred from disjointness claims**: a wrong inference cannot
+create a false implication between two upper rays, but it could create a false
+disjointness against a bounded interval.
+
+Three things were nearly missed and are worth recording as process, not trivia:
+
+1. **The first live sweep evaluated nothing at all.** 8,608 events seen, zero
+   evaluated. The profile budget of 60 series was spent entirely on the 60 the
+   events endpoint happens to return first — `KXNEXTNATOSECGEN`, `KXNEWPOPE`,
+   `KXXISUCCESSOR` and the like — every one a long-horizon "who will be next"
+   market with **zero settled events**, so none could qualify. Fixed by ranking
+   unqualified series by their open markets' 24h volume, which is principled
+   rather than arbitrary: a series with no volume cannot be traded even if a
+   mispricing appeared in it. Nothing errored; it would have looked like a
+   working scanner finding nothing.
+
+2. **The reconciliation check caught a real bug on its first live run.** 8,608
+   events accounted for as 8,631. Cause: per-event evaluation *notes* (a basket
+   leg with a one-sided book) were being counted in the same bucket as event
+   *dispositions*, and an evaluated event can raise several notes or none. Split
+   into `event_skips` (must reconcile) and `evaluation_notes` (informational).
+   This is Session 31's "reconcile totals, do not report a rate" lesson paying
+   for itself immediately.
+
+3. **A settlement outcome that is neither YES nor NO.** Kalshi finalizes a
+   postponed game or an unplayed match as `result: "scalar"`,
+   `status: "finalized"`, `market_type: "binary"`, empty `expiration_value`, on
+   every leg of the event. Measured: **6 of 884 KXMLBGAME events (0.7%) and 37
+   of 910 KXATPMATCH events (4.1%)**. The first implementation filed these under
+   "unsettled" and dropped them — so the profile reported `exhaustive:
+   confirmed` while the basket's guaranteed dollar quietly failed on 4% of real
+   ATP events. **That is the Session 31 failure mode reproduced in new code**: an
+   inconvenient case dropped under a benign label, leaving a clean-looking rate.
+   Now split, measured, stored on the profile and attached to every candidate.
+   **Left as an open question rather than resolved by assumption**: whether
+   Kalshi refunds voided positions at cost — in which case the cost is only the
+   fees — is a settlement-policy question the API cannot answer. It must be read
+   from Kalshi's own rules before any basket candidate is ever traded.
+
+### First live result: zero candidates, and every near miss is one spread wide
+**12 consecutive sweeps, 13,094 event-evaluations, zero candidates, zero errors,
+and every sweep reconciling.** Coverage climbed 725 → 1,284 evaluated events per
+sweep as the profile cache filled (720 series qualified across the run), so the
+run is also a working demonstration that the deferred-qualification design
+converges rather than stalling.
+
+8,598 open events, 76,483 markets, 3,086 distinct series. Of the first 60
+qualified, 26 qualified for something: winner-take-all events (MLB, ATP/WTA/ITF
+tennis, CS2, LoL, Dota, Valorant, soccer) come back `exclusive + exhaustive
+confirmed` — **these are exactly the genuine mutually-exclusive events Session 29
+noted were absent from its sample**, so that gap is now closed. Nested totals
+ladders (KXMLBTOTAL, KXWTI oil) come back `implication confirmed` on tens of
+thousands of pair tests. Weather (KXHIGHLAX) comes back exclusive + exhaustive +
+disjoint, independently matching Session 31's 1,261/1,261. Player-prop series
+(KXMLBHIT, KXMLBHRR) are `implication refuted` — the multi-metric trap in a
+family nobody had flagged.
+
+| event | legs | basket cost | guaranteed payout |
+|---|---|---|---|
+| KXATPMATCH | 2 | $1.01 | $1.00 |
+| KXCS2GAME | 2 | $1.02 | $1.00 |
+| KXMLBGAME | 2 | $1.07 | $1.00 |
+| KXHIGHLAX (weather ladder) | 6 | $1.09 | $1.00 |
+
+That is a functioning market, and it reproduces Session 29's ladder check
+(closest 1.01) exactly. Worth stating what would be needed for the tightest of
+them: ATP at $1.01 is one cent away, but the taker fee on two near-the-money
+legs is ~3.5¢ per contract-set, so it would have to reach **$0.965** to be real.
+
+A useful negative control fell out of this. Running the arithmetic with the
+qualification gate **deliberately bypassed**, `KXMLBTOTAL` prices as a "+$4.36
+riskless NO-basket". It is not: buying NO on eleven nested "over N runs" legs
+pays `11 − (number of YES)`, and on a nested ladder several are YES at once. The
+gate refutes the series and the scanner never logs it. Session 29's trap,
+reproduced on live data, caught.
+
+### Cost, and what this does not claim
+One session. No order layer, no capital, no paper trades, no live exposure, and
+no change to the trading path — enforced by `tests/test_canary_isolation.py`,
+which fails if anything under `agents/`, `karbot/`, `core/` or `karbot_runner.py`
+imports `canary` or `backtest`.
+
+**This does not show that S5a/S5b arbitrage exists.** 13,094 event-evaluations
+over ~25 minutes found nothing, which is a stronger version of what Session 29
+already found and is not a verdict — real arbitrage, if it exists, is sporadic,
+and twenty-five minutes on a Sunday afternoon is not weeks. The claim is
+narrower and worth stating precisely: the instrument that could detect it now
+exists, has been verified against real books rather than fixtures, converges its
+own coverage, and refuses the specific false positives that killed S1 and that
+Session 29 caught by hand.
+
+---
+
 ## 2026-08-02 — Session 31: S6 weather divergence FAILS gate G2 — NOAA/NBM is measurably WORSE calibrated than the Kalshi price, and the reason is the forecast itself, not the probability conversion
 
 ### Status of each claim, labeled up front

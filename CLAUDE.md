@@ -109,6 +109,20 @@ async def run(self): ...
   **No `DivergenceScannerAgent` and no `FairValueEngineAgent` were built**,
   and no live-path code was touched. Market-making (S8) and the S5a/S5b
   canary are untouched by this result — see "Next session priorities".
+- `canary/`: **NEW, COMPLETE (Session 32)** — the S5a/S5b passive arbitrage
+  canary. A **standalone process**, not an agent: it polls Kalshi's public REST
+  API, prices multi-leg positions whose payout is guaranteed regardless of
+  outcome, and appends to `logs/basket_candidates.jsonl`. It publishes no
+  events, sizes no positions and places no orders. Modules: `kalshi_rest`
+  (sweep primitive + authoritative order-book top), `strikes` (Kalshi strike
+  conventions as intervals; implication and disjointness), `qualify` (what a
+  series' **settled history** proves), `economics` (one basket evaluator — ask
+  prices, ceil'd per-order fees × N legs, depth-capped integer size), `scan`
+  (two-stage sweep), `run_canary` (loop + JSONL + heartbeat). Run:
+  `karbotrage_env/bin/python -m canary.run_canary --once`. See
+  `canary/README.md` for the full traps list and **DECISIONS.md Session 32**
+  for why it is a separate process and why relations are gated on settled
+  history. `scripts/karbot-canary.service` exists but is **NOT deployed**.
 - `backtest/`: **NEW, COMPLETE** — offline calibration harness, never
   imported by the live path, zero new dependencies (stdlib + `requests`).
   Modules: `nbm_text` (NOAA NBM station bulletins), `kalshi_history`
@@ -127,12 +141,13 @@ async def run(self): ...
   for weather and later strategies, with a hard statistical methodology gate
   (Bonferroni, n≥20, 3-period replication, market-price baseline) that any
   candidate must clear before it can influence a position.
-- Full test suite: **226/226 passing** (157 through Session 30 + 69 Session 31
-  `backtest/` tests: 17 NBM-parser, 28 probability/price-extraction, 24
-  scoring/costs). Runner smoke test (`--mock-prices --exit-after-test`) exits
-  cleanly. Note two of the Session 31 tests caught real defects while being
-  written — a parser sign flip on packed 3-digit rows, and the `less`/
-  `cap_strike` field convention.
+- Full test suite: **301/301 passing** (226 through Session 31 + 75 Session 32
+  `canary/` tests: strike conventions, basket economics, series qualification,
+  sweep/re-confirmation, and a live-path isolation guard). Runner smoke test
+  (`--mock-prices --exit-after-test`) exits cleanly. Note that in both Session
+  31 and Session 32 the expensive findings came from **counting**, not from
+  tests — Session 32's void-settlement gap and its failed sweep reconciliation
+  both had a fully green suite next to them.
 - Kalshi market volume filter: FIXED AND CONFIRMED LIVE (Session 15) —
   `_fetch_active_kalshi_markets()` sends `mve_filter=exclude`, paginates
   via `cursor`, filters on `volume_24h_fp` (cast to float). Live VPS
@@ -184,6 +199,46 @@ async def run(self): ...
   confirming each independently.
 
 ## KNOWN DEBT
+
+### S5a/S5b CANARY — BUILT AND LIVE-VERIFIED, Session 32 (2026-08-02). Zero candidates so far; the instrument is the deliverable, not a result.
+**Read this before the Session 29 "S5a/S5b checked against real live data" entry
+below, which it supersedes on method — Session 29 checked one snapshot by hand,
+this runs continuously.** Authoritative record: **DECISIONS.md Session 32**.
+
+What is true now:
+- The scanner exists (`canary/`), is verified against real books rather than
+  fixtures, and refuses the specific false positives that killed S1 and that
+  Session 29 caught by hand.
+- **Zero candidates** across 12 consecutive sweeps / **13,094 event-evaluations**,
+  with zero errors and every sweep reconciling. Near misses are all exactly one
+  spread wide: ATP $1.01, CS2 $1.02, MLB $1.07, weather ladder $1.09, each for a
+  guaranteed $1.00. ATP is one cent away, but two near-the-money legs pay ~3.5¢
+  in taker fees, so it needs **$0.965** to be real. Twenty-five minutes is not
+  weeks — this is not a verdict on S5a/S5b.
+- **Session 29's coverage gap is closed**: genuine winner-take-all events (MLB,
+  ATP/WTA/ITF tennis, CS2, LoL, Dota, soccer) do qualify as
+  `exclusive + exhaustive confirmed`. Session 29 correctly noted they were
+  absent from its sample; they are now in scope and still show nothing.
+
+**OPEN AND DECISIVE — do not trade a basket before resolving it**: Kalshi
+finalizes a postponed game or unplayed match as `result: "scalar"`,
+`status: "finalized"` on every leg — **0.7% of KXMLBGAME events and 4.1% of
+KXATPMATCH events**, measured. On one of those, no basket pays its guaranteed
+amount. Whether Kalshi refunds those positions **at cost** (making the loss just
+the fees) is a settlement-policy question the API cannot answer; it needs
+Kalshi's own rules. The rate is measured and attached to every logged candidate
+so it can never be read as unconditional.
+
+**Also open**: a separate systemd unit does not inherit `karbot_runner.py`'s
+supervision or Telegram alerting, so the canary can die quietly.
+`Restart=always` covers a crash, not a silent hang. The per-sweep heartbeat line
+in `logs/basket_candidates.jsonl` is the check to actually run — this project
+has been bitten by exactly this before (`karbot-disk-alert.sh`, silently
+non-functional Session 26→29). **Recorded as a gap, not claimed as parity.**
+
+**NOT DEPLOYED.** `scripts/karbot-canary.service` is written and documented but
+has not been installed on the VPS — that is a new unit and needs the operator's
+call.
 
 ### S6 WEATHER DIVERGENCE — TESTED AND DEAD, Session 31 (2026-08-02). Gate G2 FAILED.
 **This is the current state of the strategy direction. Read this before the
@@ -955,23 +1010,30 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-**READ FIRST: the Session 30 direction has been executed and the answer is
-negative.** S6 weather divergence was built, measured and FAILED gate G2 in
-Session 31 — see DECISIONS.md's Session 31 entry (authoritative) and the
-KNOWN DEBT entry above. **Phases 1 and 2 of the Session 30 plan are closed, not
-pending.** The open question is now *what to do instead*, which is a direction
-fork for the operator, not something to pick unilaterally.
+**READ FIRST: two directions have now been executed.** S6 weather divergence was
+built, measured and FAILED gate G2 (Session 31). The S5a/S5b canary that the
+operator chose in its place was **built and live-verified in Session 32** — see
+DECISIONS.md Session 32 (authoritative) and the KNOWN DEBT entry above. It has
+found **zero candidates so far**, which is information about the market, not
+about the code: every near miss is exactly one spread wide.
 
-**DECIDED (operator, 2026-08-02, end of Session 31): the S5a/S5b passive arb
-canary is next. The other options stay explicitly on the table to be
-reconsidered later where appropriate and justified — this is a sequencing
-choice, not an elimination.** Rationale: it is the only candidate that
-produces real live evidence without building new risk surface, it runs in the
-background accumulating frequency data while the larger direction question
-stays open, and `backtest/` already supplies its market discovery. Market-making
-in particular is NOT rejected — it is waiting on a live order layer and on
-someone being willing to build a large subsystem that cannot be falsified
-offline.
+**The immediate next steps are small and specific:**
+1. **Decide whether to deploy the canary to the VPS** (`scripts/karbot-canary.service`,
+   written and documented, not installed). Without it the canary only runs when
+   someone runs it, and frequency-over-weeks is its entire purpose.
+2. **Resolve the void-settlement question from Kalshi's own rules** — see KNOWN
+   DEBT. 4.1% of ATP events settle `scalar`; whether that refunds at cost
+   decides whether it is a fee-sized drag or a principal-sized one. Cheap to
+   answer, decisive for whether any basket is ever tradeable, and exactly the
+   kind of primary-source check this project has learned to do first.
+3. **Let it run, then read the log.** The measurement to watch is not just
+   candidate count but the **`confirmed` vs `vanished_on_recheck` ratio** —
+   that is what separates "real resting arbitrage" from "our view of the book is
+   noisy", the question Session 29 could not answer from one snapshot.
+
+**The larger direction question is still open**, and the other candidates remain
+explicitly on the table (operator, Session 31: *"let's continue to have the
+other options be considered where appropriate and justified later"*).
 
 The candidates, with their state:
 
@@ -982,11 +1044,10 @@ The candidates, with their state:
   order-management layer that does not exist, built entirely up front, with no
   offline test possible. This is the largest new subsystem in the project's
   history.
-- **S5a/S5b passive arb canary** — cheap, parallel, never disproven (Session 29
-  found nothing sitting in one snapshot, which is not the same as nothing
-  existing). REST poller plus arithmetic. Small, safe, and produces real
-  frequency data over weeks. Good background work regardless of the main
-  direction.
+- ~~**S5a/S5b passive arb canary**~~ — **BUILT, Session 32.** See KNOWN DEBT
+  above. Still never disproven: zero candidates in the first sweeps is one more
+  snapshot's worth of evidence, not a verdict. Now it accumulates automatically
+  instead of needing a session to check by hand.
 - **A different `FairValueProvider`** — the abstraction and the divergence
   *shape* survive; one provider on one market family failed. But apply the
   screening question Session 31 added to SIGNAL_REGISTER.md before spending
@@ -1054,18 +1115,19 @@ The candidates, with their state:
    edge to reproduce. Building it would be running plumbing for a signal
    measured to be worse than the price it trades against.
 
-### Phase 3 — arb canary, cheap and parallel — **now the cheapest live option**
-7. **S5a/S5b passive detect-and-log scanner** (Session 28 spec, Session 29
-   empirical check). REST-poll, group by `event_ticker`, honor
-   `mutually_exclusive` + exhaustiveness (YES-basket needs exhaustive;
-   NO-basket needs only mutual exclusivity), price at ask, apply ceil'd
-   per-order fees × N legs, log to `logs/basket_candidates.jsonl`, never
-   publish a tradeable event. **Session 31 confirmed the weather-ladder half of
-   this empirically: all 1,261 city-day ladders sampled are exhaustive,
-   mutually exclusive partitions (exactly one YES each), so they are genuine
-   S5a basket candidates and `backtest/kalshi_history.py` already does the
-   discovery and normalisation.** Unaffected by the S6 result; still the
-   cheapest thing that can produce live evidence.
+### Phase 3 — arb canary — **DONE, Session 32. Built, live-verified, zero candidates so far.**
+7. ~~**S5a/S5b passive detect-and-log scanner**~~ — shipped as `canary/`.
+   Everything the Session 28 spec asked for, plus three things it did not
+   anticipate and that were found live: relations must be gated on **settled
+   history** rather than strike arithmetic (KXMLBSPREAD puts two metrics in one
+   event and interval logic "proves" a false implication — 2,267 measured
+   violations); the bulk snapshot is **stale within seconds**, so every
+   candidate is re-priced from `/orderbook` before being logged; and some events
+   settle **neither YES nor NO** (`result: "scalar"`, 4.1% of ATP), which breaks
+   the payout guarantee outright. Session 31's weather finding held up
+   independently — KXHIGHLAX qualifies as exclusive + exhaustive + disjoint.
+   Remaining work is deployment and the void-settlement question, both listed at
+   the top of this section.
 
 ### Standing / infrastructure
 8. **Re-audit every "CONFIRMED LIVE" claim in this file against actual VPS

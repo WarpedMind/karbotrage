@@ -95,3 +95,8 @@ karbotrage_env/
 # Backtest data cache (NBM bulletins, Kalshi candlesticks, NWS CLI archives).
 # Regenerable from the public APIs; hundreds of MB.
 backtest/cache/
+
+# Canary series profiles — derived from Kalshi's settled history, rebuilt
+# automatically when older than 7 days. Regenerable, and a stale committed
+# profile would be worse than none.
+canary/cache/

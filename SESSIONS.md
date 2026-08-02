@@ -1,6 +1,104 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-08-02 (Session 32 — built the S5a/S5b passive arbitrage canary as a standalone detect-and-log process. Live-verified end to end. Zero candidates in the first sweeps, with every near miss exactly one spread wide.)
+
+### Mandate
+Build the S5a/S5b canary the operator chose at the end of Session 31: a REST
+poller plus arithmetic, no LLM, no orders, no hot path, logging candidates so
+that "one snapshot found nothing" becomes real frequency data over weeks.
+Full reasoning and every measured number: **DECISIONS.md Session 32**.
+
+### What shipped
+`canary/` — a new top-level package, run as its own process, never imported by
+the trading path (`tests/test_canary_isolation.py` enforces it):
+
+| module | job |
+|---|---|
+| `kalshi_rest.py` | one paginated sweep primitive + authoritative order-book top |
+| `strikes.py` | Kalshi strike conventions as intervals; implication and disjointness |
+| `qualify.py` | what a series' **settled history** proves; `confirmed`/`refuted`/`insufficient_evidence` |
+| `economics.py` | one basket evaluator: ask prices, ceil'd per-order fees × N legs, depth-capped size |
+| `scan.py` | two-stage sweep — bulk snapshot, then per-leg order-book re-confirmation |
+| `run_canary.py` | loop, JSONL output, per-sweep heartbeat |
+
+Plus `scripts/karbot-canary.service` (systemd, **written but not deployed**),
+`canary/README.md`, and 75 new tests. **301/301 passing** (226 through Session 31).
+
+### The design decision worth knowing
+**Structure proposes, history disposes.** Strike arithmetic only *generates*
+candidate relations; a relation is usable only if the series' real settled record
+has never violated it. The reason is a live counterexample:
+`KXMLBSPREAD-26AUG021340CWSTB` puts eight `greater` markets in one event covering
+**two different metrics** (each team's winning margin) at overlapping strikes, so
+interval logic "proves" that Tampa Bay winning by 4+ implies Chicago winning by
+3+. Measured on the settled record: **2,267 violations**, series disqualified.
+
+Two text-based tests for metric identity were tried and rejected on evidence.
+An `expiration_value` identity test is outright **wrong** — across 123 settled
+KXMLBSPREAD events all markets share one `expiration_value` despite being on
+different metrics.
+
+### Three things nearly missed, all caught by counting rather than by tests
+1. **The first live sweep evaluated zero events** and errored on nothing. The
+   60-series profile budget went entirely to the series the events endpoint
+   returns first — `KXNEXTNATOSECGEN`, `KXNEWPOPE`, `KXXISUCCESSOR` — all
+   long-horizon "who will be next" markets with **zero settled events**. Fixed by
+   ranking unqualified series by their open markets' 24h volume.
+2. **The reconciliation check caught a real bug on its first live run**: 8,608
+   events accounted for as 8,631, because per-event evaluation *notes* were being
+   counted alongside event *dispositions*. Split into `event_skips` (must
+   reconcile) and `evaluation_notes`. Session 31's lesson paying for itself
+   within an hour.
+3. **A settlement outcome that is neither YES nor NO.** Kalshi finalizes a
+   postponed game or unplayed match as `result: "scalar"`, `status: "finalized"`
+   on every leg — **0.7% of KXMLBGAME events and 4.1% of KXATPMATCH events**. The
+   first implementation filed these under "unsettled" and dropped them, so the
+   profile reported `exhaustive: confirmed` while the basket's guaranteed dollar
+   quietly failed on 4% of real ATP events. That is Session 31's failure mode
+   reproduced in brand-new code. Now measured and carried onto every candidate.
+   **Open**: whether Kalshi refunds voided positions at cost — a policy question
+   the API cannot answer, and decisive for how much that 4% costs.
+
+### Confirmed live
+- **NO-leg depth is `yes_bid_size_fp`** — the field with the opposite name; there
+  is no `no_ask_size_fp`. Verified both directions against `/orderbook`.
+- **The bulk snapshot is stale within seconds** (16/16 agreement back-to-back; a
+  traded market moved yes_bid 0.10 → 0.14, size 3 → 2071 over ~10s). Hence
+  mandatory per-leg re-confirmation before anything is logged.
+- **`strike_type` census over 12,000 open markets**; `less`/`cap_strike`
+  reconfirmed 105/105; `structured` found to be two different things.
+
+### Result: zero candidates
+**12 consecutive sweeps, 13,094 event-evaluations, zero candidates, zero errors,
+every sweep reconciling.** Coverage climbed 725 → 1,284 evaluated events per
+sweep as the profile cache filled (720 series qualified), so the run also
+demonstrates the deferred-qualification design converging rather than stalling.
+
+8,598 open events, 76,483 markets, 3,086 series. Of the first 60 qualified, 26
+qualified for something — including the **genuine winner-take-all events Session
+29 noted were missing from its sample** (MLB, ATP/WTA/ITF, CS2, LoL, Dota,
+soccer). Near misses:
+
+| event | legs | basket cost | guaranteed payout |
+|---|---|---|---|
+| KXATPMATCH | 2 | $1.01 | $1.00 |
+| KXCS2GAME | 2 | $1.02 | $1.00 |
+| KXMLBGAME | 2 | $1.07 | $1.00 |
+| KXHIGHLAX | 6 | $1.09 | $1.00 |
+
+ATP is one cent away, but two near-the-money legs pay ~3.5¢ in taker fees, so it
+needs $0.965 to be real. **This does not show S5a/S5b arbitrage exists** —
+twenty-five minutes on a Sunday afternoon is not weeks, and real arbitrage is
+sporadic by nature. What exists now is the instrument, verified against real
+books rather than fixtures.
+
+### Not done
+Not deployed to the VPS (needs the operator's call — it is a new systemd unit).
+Phase 0 item 4 (paper resolution against real outcomes) and `--mode` remain open.
+
+---
+
 ## 2026-08-02 (Session 31 — Phase 1 executed: the S6 weather calibration backtest was built and run. RESULT: NOAA/NBM is measurably WORSE calibrated than the Kalshi price at every lead. Gate G2 FAILS; S6-weather stops here.)
 
 ### Mandate

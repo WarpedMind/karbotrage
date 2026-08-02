@@ -1,0 +1,48 @@
+# systemd unit for the S5a/S5b passive arbitrage canary.
+#
+# NOT the trading service. This process reads Kalshi's public REST API, does
+# arithmetic, and appends to logs/basket_candidates.jsonl. It holds no
+# credentials, needs no EnvironmentFile, and places no orders -- which is why it
+# is safe to run as its own unit rather than inside karbot.service.
+#
+# Deliberately separate from karbot.service: that process hosts PriceWatcher's
+# Kalshi WebSocket with a 10s ping timeout, and Session 23's confirmed outage was
+# a blocking call added to that event loop stalling it past the deadline. This
+# package uses blocking requests on purpose. Separate processes means a bug in
+# research telemetry can never take down the price feed.
+#
+# Install:
+#   sudo cp scripts/karbot-canary.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now karbot-canary
+#
+# Check it is alive (the last sweep record doubles as the heartbeat):
+#   tail -1 ~/karbotrage_v1/logs/basket_candidates.jsonl | python3 -m json.tool
+#   journalctl -u karbot-canary -n 50 --no-pager
+#
+# KNOWN GAP, recorded rather than papered over: a separate unit does not inherit
+# karbot_runner.py's supervision or its Telegram alerting, so if this dies it
+# dies quietly. Restart=always covers a crash; it does not cover a silent hang.
+# This project has been bitten by exactly that before -- karbot-disk-alert.sh was
+# non-functional and unnoticed from Session 26 to Session 29 -- so the per-sweep
+# heartbeat line above is the check to actually run.
+
+[Unit]
+Description=Karbot Rage S5a/S5b arbitrage canary (detect and log only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/karbotrage_v1
+ExecStart=/home/ubuntu/karbotrage_v1/karbotrage_env/bin/python -m canary.run_canary --interval-seconds 300
+Restart=always
+RestartSec=60
+# Research telemetry must never compete with the trading process for CPU.
+Nice=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

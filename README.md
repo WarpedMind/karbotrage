@@ -60,6 +60,10 @@ karbotrage_env/bin/python karbot_runner.py --mode paper
 # Run a mock-data end-to-end test and exit cleanly
 karbotrage_env/bin/python karbot_runner.py --mode paper \
   --mock-prices tests/fixtures/paper_test_prices.json --exit-after-test
+
+# S5a/S5b arbitrage canary — separate process, detect-and-log only, no orders
+karbotrage_env/bin/python -m canary.run_canary --once
+karbotrage_env/bin/python -m canary.run_canary --interval-seconds 300
 ```
 
 The legacy `python main.py` path still works but is intentionally not extended — it bypasses the event bus.
@@ -107,6 +111,15 @@ backtest/                 # Offline calibration harness — NEVER imported by th
   run_calibration.py      # The report
   diagnose_gap.py         # Why the market wins: point forecast vs uncertainty
   reports/                # Committed raw output
+canary/                   # S5a/S5b arbitrage canary — separate process, NEVER on the live path
+  kalshi_rest.py          # Sweep primitive + authoritative order-book top
+  strikes.py              # Strike conventions as intervals; implication & disjointness
+  qualify.py              # What a series' settled history proves (confirmed/refuted/insufficient)
+  economics.py            # One basket evaluator: asks, ceil'd fees x N legs, depth-capped size
+  scan.py                 # Two-stage sweep — bulk snapshot, then per-leg re-confirmation
+  run_canary.py           # Loop, JSONL output, per-sweep heartbeat
+scripts/
+  karbot-canary.service   # systemd unit for the canary (written, NOT deployed)
 ```
 
 ## Recent fixes (order-book gap recovery, feed monitoring)
@@ -446,12 +459,19 @@ first, and it held.
 
 ## Open questions (flagged live, not yet resolved)
 
-- **What replaces S6?** **Decided 2026-08-02: the S5a/S5b passive arb canary
-  goes next** — the only candidate that produces live evidence without
-  building new risk surface, and it accumulates data in the background while
-  the larger question stays open. Market-making, a different
-  `FairValueProvider`, and infrastructure consolidation all remain on the
-  table to revisit; this is sequencing, not elimination.
+- ~~**What replaces S6?**~~ **Answered and built.** The S5a/S5b passive arb
+  canary shipped in Session 32 as `canary/` — a standalone detect-and-log
+  process, live-verified, **zero candidates so far**. Market-making, a different
+  `FairValueProvider`, and infrastructure consolidation all remain on the table
+  to revisit; this was sequencing, not elimination. The larger direction
+  question is still open.
+- **Does Kalshi refund a voided position at cost?** **Open and decisive.**
+  Kalshi finalizes a postponed game or unplayed match as `result: "scalar"` on
+  every leg — measured at 0.7% of KXMLBGAME events and **4.1% of KXATPMATCH
+  events**. On one of those, no basket pays its guaranteed amount. Whether the
+  position refunds at cost (loss = the fees) or not (loss = the principal) is a
+  settlement-policy question the API cannot answer, and it decides whether any
+  basket is ever tradeable. Needs Kalshi's own rules.
 - ~~**Is there a usable archive of past NWS forecasts?**~~ **Answered and
   used.** NBM on AWS (`noaa-nbm-grib2-pds`, anonymous, 2020→now). Better than
   expected: the bucket's `text/` suite publishes plain-ASCII *station*
@@ -463,9 +483,15 @@ first, and it held.
   `main` while docs claimed otherwise. The box itself is healthy as of
   2026-08-02 (service active, 35 days uptime, disk 17%), with a pending
   reboot and 3 outstanding security updates.
-- **S5a/S5b viability** — checked against one real snapshot, not yet
-  disproven but not yet confirmed either. Continues as a cheap passive
-  detect-and-log canary rather than as a priority.
+- **S5a/S5b viability** — still not disproven and still not confirmed. What
+  changed in Session 32 is that it is now measured continuously rather than by
+  hand: `canary/` sweeps the whole open universe every few minutes. 12
+  consecutive sweeps and 13,094 event-evaluations found nothing, with every near
+  miss exactly one spread wide (ATP $1.01, CS2 $1.02, MLB $1.07, weather ladder
+  $1.09, each for a guaranteed $1.00). Twenty-five minutes is not weeks. The
+  number to watch over weeks is the **`confirmed` vs `vanished_on_recheck`
+  ratio** — that is what separates real resting arbitrage from a noisy view of
+  the book.
 - **Which unconventional data sources actually predict anything** — see
   [`SIGNAL_REGISTER.md`](SIGNAL_REGISTER.md), a standing register of
   candidate signals (official weather-modification filings, ADS-B,
@@ -535,12 +561,28 @@ hours of logs instead of waiting days for an actual trade.
 6. ~~`DivergenceScanner` live for 1–2 weeks~~ — its purpose was to confirm a
    backtested edge reproduces live. There is no edge to reproduce.
 
-**Phase 3 — arb canary** — now the cheapest live option
+**Phase 3 — arb canary** ✅ *built and live-verified, Session 32*
 
-7. S5a/S5b basket/ladder canary — cheap, passive, parallel, and unaffected by
-   the S6 result. Session 31 confirmed the ladder half empirically: all 1,261
-   sampled city-day ladders are exhaustive, mutually exclusive partitions, and
-   `backtest/kalshi_history.py` already does the discovery.
+7. ✅ **S5a/S5b basket/ladder canary shipped as `canary/`** — a standalone
+   detect-and-log process. Everything the Session 28 spec asked for, plus three
+   things it did not anticipate, all found live: relations are gated on
+   **settled history** rather than strike arithmetic (one Kalshi event can hold
+   two different metrics, and interval logic will "prove" a false implication —
+   2,267 measured violations on KXMLBSPREAD); the bulk price snapshot goes
+   **stale within seconds**, so every candidate is re-priced from `/orderbook`
+   before being logged; and some events settle **neither YES nor NO**
+   (`result: "scalar"` — 4.1% of ATP matches), which breaks the payout guarantee
+   outright. Session 31's weather finding held up independently.
+
+**Now next**
+
+7a. **Deploy the canary** (`scripts/karbot-canary.service`, written and
+    documented, not installed) — frequency-over-weeks is its whole purpose and
+    it currently only runs when someone runs it.
+7b. **Answer the void-settlement question from Kalshi's own rules** — does a
+    voided position refund at cost? It decides whether that 4.1% is a fee-sized
+    drag or a principal-sized one, and therefore whether any basket is ever
+    tradeable.
 
 **Standing**
 
