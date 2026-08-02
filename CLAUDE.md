@@ -95,12 +95,28 @@ async def run(self): ...
   one row per leg with real market_id, side, quantity, price, fees.
   Confirmed live on VPS: real Kalshi trades (PGA, World Cup, tennis, MLB)
   writing correctly with full data to kalshi_trades.csv ✓
-- **Strategy direction (Session 30, 2026-08-01): pivoting to statistical
-  trading — S6 external-model divergence (NOAA/weather) first, in
-  detect-and-log mode behind an offline backtest; market-making deferred
-  behind a live order layer; S5a/S5b arb continues as a passive canary.
-  Authoritative spec: DECISIONS.md Session 30 entry.** No S6 code exists
-  yet — Session 30 was spec-only.
+- **Strategy direction — UPDATED Session 31 (2026-08-02): S6 weather
+  divergence is DEAD. It was built, measured, and FAILED gate G2.**
+  NOAA/NBM is measurably *worse* calibrated than the Kalshi price at every
+  lead NOAA publishes (Brier 0.2013 vs 0.1757 at 12h on contested markets;
+  skill −0.146; P(model no better than market) = 1.000 over 36 independent
+  dates; 17 of 18 cities lose). Root cause measured, not guessed: **the
+  market's implied point forecast is ~20% more accurate than NBM's** (MAE
+  1.27 °F vs 1.59 °F at 12h) while NBM's published spread is close to
+  correct — so the deficit is the forecast, not the probability conversion,
+  and no better error model can recover it. Authoritative record:
+  **DECISIONS.md Session 31 entry**; raw output in `backtest/reports/`.
+  **No `DivergenceScannerAgent` and no `FairValueEngineAgent` were built**,
+  and no live-path code was touched. Market-making (S8) and the S5a/S5b
+  canary are untouched by this result — see "Next session priorities".
+- `backtest/`: **NEW, COMPLETE** — offline calibration harness, never
+  imported by the live path, zero new dependencies (stdlib + `requests`).
+  Modules: `nbm_text` (NOAA NBM station bulletins), `kalshi_history`
+  (settled markets + candlesticks), `stations` (empirical Kalshi-series →
+  NWS-station resolution), `probability`, `scoring` (Brier + date-blocked
+  bootstrap), `costs`, plus three runnable gates —
+  `resolve_and_verify`, `verify_alignment`, `run_calibration` — and
+  `diagnose_gap`. See `backtest/README.md` for the traps list.
 - **30-day paper trading clock: RESET (Session 30).** The old
   2026-06-29 → 2026-07-29 window is not usable evidence (dead persistence
   layer for 9 of its first 14 days; all S1 trades in it are confirmed
@@ -111,9 +127,12 @@ async def run(self): ...
   for weather and later strategies, with a hard statistical methodology gate
   (Bonferroni, n≥20, 3-period replication, market-price baseline) that any
   candidate must clear before it can influence a position.
-- Full test suite: **157/157 passing** (133 baseline + 15 Session 30
-  contract-units/fee-rounding + 9 Session 30 config-parsing, less 1 renamed).
-  Runner smoke test (`--mock-prices --exit-after-test`) exits cleanly.
+- Full test suite: **226/226 passing** (157 through Session 30 + 69 Session 31
+  `backtest/` tests: 17 NBM-parser, 28 probability/price-extraction, 24
+  scoring/costs). Runner smoke test (`--mock-prices --exit-after-test`) exits
+  cleanly. Note two of the Session 31 tests caught real defects while being
+  written — a parser sign flip on packed 3-digit rows, and the `less`/
+  `cap_strike` field convention.
 - Kalshi market volume filter: FIXED AND CONFIRMED LIVE (Session 15) —
   `_fetch_active_kalshi_markets()` sends `mve_filter=exclude`, paginates
   via `cursor`, filters on `volume_24h_fp` (cast to float). Live VPS
@@ -166,7 +185,44 @@ async def run(self): ...
 
 ## KNOWN DEBT
 
-### DIRECTION SET, Session 30 (2026-08-01): pivot to statistical trading — S6 external-model divergence first; market-making deferred; arb continues as a passive canary
+### S6 WEATHER DIVERGENCE — TESTED AND DEAD, Session 31 (2026-08-02). Gate G2 FAILED.
+**This is the current state of the strategy direction. Read this before the
+Session 30 entry below, which it supersedes on the S6 question only.**
+
+Built `backtest/`, ran the calibration report Session 30 specced, and got a
+clean negative. NOAA/NBM converted to a probability is **worse calibrated than
+the Kalshi price itself** at every lead NOAA publishes:
+
+| contested markets, test split | 12h | 24h | 30h |
+|---|---|---|---|
+| Brier — NBM model | 0.2013 | 0.1795 | 0.1713 |
+| Brier — **market (baseline)** | **0.1757** | **0.1612** | **0.1567** |
+| Brier skill vs market | −0.146 | −0.114 | −0.093 |
+| P(model no better than market) | 1.000 | 1.000 | 1.000 |
+
+36 independent dates, 95% CIs entirely negative, 17 of 18 cities lose, and the
+model barely beats climatology while the market beats it comfortably. Trading
+it: claimed +$0.11–0.17 net EV per contract, **realised −$0.01 to −$0.04** —
+and tightening the divergence threshold made it *worse*.
+
+**Root cause MEASURED (this is what makes it final rather than "needs more
+work")**: the market's implied point forecast is ~20% more accurate than NBM's
+(MAE 1.27 °F vs 1.59 °F at 12h), while NBM's published spread is close to
+correct (published SD / realised RMSE = 0.93). The deficit is the **forecast**,
+not the probability conversion, so a better error model cannot recover it.
+
+**The staleness objection is closed, not merely argued**: NBM publishes **no**
+daytime-max forecast at less than 12 hours' lead (the 18Z cycle's 00Z-valid
+`TXN` is null). The model loses at NOAA's freshest. Also, these markets trade
+for only **~42 hours**, so there is no market price beyond ~36h of lead —
+"NOAA sees further ahead" has no venue here.
+
+**Do NOT rebuild this without new information.** Full reasoning, all numbers,
+the retraction of an intra-session wrong claim, and what this does and does not
+kill: **DECISIONS.md Session 31 entry**. Raw output: `backtest/reports/`.
+Reusable traps and gotchas: `backtest/README.md`.
+
+### DIRECTION SET, Session 30 (2026-08-01) — SUPERSEDED ON S6 by Session 31 above; the rest still stands
 Spec-only session. Full architecture, math, gates and build plan in
 DECISIONS.md's Session 30 entry (the authoritative version — this is a
 pointer, not a summary to build from). The short form:
@@ -235,6 +291,20 @@ than assume these are still current:
   settlement source are the same agency's number for the same station.
   Structure: 12-market city-day temperature ladders, machine-parseable via
   `strike_type` (`greater`/`between`) and `floor_strike` — no LLM needed.
+
+### RESOLVED, Session 30, then BUILT AND RUN in Session 31 — the data legs below are all CONFIRMED WORKING; see the S6-dead entry above for what the backtest concluded
+**Session 31 correction to the plan below, in NOAA's favour**: the GRIB2 +
+`.idx` byte-range route described here is **not needed**. The same bucket's
+`text/` suite publishes plain-ASCII **station** bulletins, and the NBP product
+(`blend_nbptx.tCCz`) carries per station and valid time `TXNMN` (mean),
+`TXNSD` (spread) **and** `TXNP1/P2/P5/P7/P9` (quantiles) — for exactly the
+airport stations Kalshi settles on, with no GRIB decoder and no grid
+interpolation. `backtest/` uses it and needs **zero new dependencies**. The
+only cost is that values are integer degrees including the spread; measured,
+that did not bind (published SD / realised RMSE = 0.93). Session 31 also
+confirmed **NBS** (`blend_nbstx.tCCz`) publishes **hourly** cycles while NBP is
+6-hourly, and that `expiration_value` on a settled Kalshi market **is** the
+observed settlement value, so no separate observations feed is required.
 
 ### RESOLVED, Session 30 (2026-08-02): the S6 backtest is buildable now — all three data legs confirmed reachable and unauthenticated
 This was flagged as the biggest open unknown ("does a usable archive of
@@ -885,11 +955,37 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-**Direction set Session 30 — see DECISIONS.md's Session 30 entry for the
-authoritative spec (architecture, math, gates). Build from that entry, not
-from this list; this list is the ordering.**
+**READ FIRST: the Session 30 direction has been executed and the answer is
+negative.** S6 weather divergence was built, measured and FAILED gate G2 in
+Session 31 — see DECISIONS.md's Session 31 entry (authoritative) and the
+KNOWN DEBT entry above. **Phases 1 and 2 of the Session 30 plan are closed, not
+pending.** The open question is now *what to do instead*, which is a direction
+fork for the operator, not something to pick unilaterally. The candidates, with
+their state:
 
-### Phase 0 — prerequisites, no strategy code
+- **Market-making (S8)** — Session 30's deferred option, untouched by the S6
+  result and on better footing than that entry first concluded once the maker
+  fee was read correctly: **489 markets with ≥2¢ spread and ≥100 contracts both
+  sides, paying no maker fee at all.** Cost: it needs the live
+  order-management layer that does not exist, built entirely up front, with no
+  offline test possible. This is the largest new subsystem in the project's
+  history.
+- **S5a/S5b passive arb canary** — cheap, parallel, never disproven (Session 29
+  found nothing sitting in one snapshot, which is not the same as nothing
+  existing). REST poller plus arithmetic. Small, safe, and produces real
+  frequency data over weeks. Good background work regardless of the main
+  direction.
+- **A different `FairValueProvider`** — the abstraction and the divergence
+  *shape* survive; one provider on one market family failed. But apply the
+  screening question Session 31 added to SIGNAL_REGISTER.md before spending
+  another session: **"is there a reason the market does not already know
+  this?"** A free public forecast every participant reads is the weakest
+  possible candidate, and that is exactly why weather lost.
+- **Stop and consolidate** — the infrastructure list below has real, unfixed
+  items, several of which stop being cosmetic the moment anything carries
+  variance.
+
+### Phase 0 — prerequisites, no strategy code (STATUS: 3 of 4 done; item 4 re-scoped)
 1. ~~Resolve the NOAA historical-forecast-archive question~~ — **DONE,
    Session 30.** Answer: NBM archive on AWS (`noaa-nbm-grib2-pds`,
    anonymous, 2020→now) carries TMAX + ens std dev + `.idx` byte-range
@@ -920,35 +1016,44 @@ from this list; this list is the ordering.**
    hard limits and the Phase 1 invariants still bind against YAML; both are
    tested. 9 new tests. **Still open**: `--mode` is parsed and never
    applied — make it override or remove it.
-4. **Make S6 paper resolution settle against real outcomes.**
-   `PaperExecutor` currently resolves every trade at its own
-   `expected_pnl` after a fixed delay — tautological for a directional
-   strategy, and it would make every S6 paper result meaningless. Hard
-   requirement before S6 ever trades on paper.
+4. **Make paper resolution settle against real outcomes** — RE-SCOPED,
+   Session 31. `PaperExecutor` resolves every trade at its own `expected_pnl`
+   after a fixed delay, which is tautological for any directional strategy.
+   This was listed as a hard prerequisite for S6 *paper trading*; S6 never got
+   there, so it is **no longer blocking anything today**. It becomes blocking
+   again the moment any variance-bearing strategy reaches paper. Left open
+   deliberately rather than built speculatively — the shape of the fix depends
+   on which strategy needs it.
 
-### Phase 1 — measure before building (deliverable is a report, not an agent)
-5. **`FairValueEngineAgent` + `NoaaTemperatureProvider` + `backtest/`
-   harness.** Produce a calibration report: model Brier score **vs the
-   Kalshi price as baseline**, out-of-sample, reliability curve, stated
-   sample size. The bar is not "is NOAA accurate" — it is "is NOAA better
-   calibrated than the market." Gates G1/G2 decided here; failing is a
-   cheap, acceptable outcome.
+### Phase 1 — measure before building — **DONE, Session 31. RESULT: NEGATIVE.**
+5. ~~`FairValueEngineAgent` + `NoaaTemperatureProvider` + `backtest/`~~ —
+   **`backtest/` was built; the two agents deliberately were NOT.** The
+   calibration report came back negative before any agent was justified.
+   NOAA/NBM scores Brier 0.2013 against the market's 0.1757 at 12h lead on
+   contested markets (skill −0.146, P(model no better) = 1.000, 36 independent
+   dates, 17 of 18 cities losing). **G1 PASS, G2 FAIL, G3 confirms the
+   failure.** Root cause measured: the market's implied point forecast is ~20%
+   more accurate than NBM's, while NBM's spread is close to correct — the
+   forecast is the deficit, not the conversion. See DECISIONS.md Session 31.
 
-### Phase 2 — detect-and-log live
-6. **`DivergenceScannerAgent`**, publishing nothing tradeable, logging to
-   `logs/divergence_candidates.jsonl`, run 1–2 weeks. Confirm observed
-   divergence frequency/magnitude matches what the backtest predicted — a
-   mismatch means a live-data bug, not an edge. Gates G3/G4.
+### Phase 2 — detect-and-log live — **CLOSED, never started**
+6. ~~`DivergenceScannerAgent`~~ — **not built and should not be.** Its whole
+   purpose was to confirm live that a backtested edge reproduces. There is no
+   edge to reproduce. Building it would be running plumbing for a signal
+   measured to be worse than the price it trades against.
 
-### Phase 3 — arb canary, cheap and parallel
+### Phase 3 — arb canary, cheap and parallel — **now the cheapest live option**
 7. **S5a/S5b passive detect-and-log scanner** (Session 28 spec, Session 29
    empirical check). REST-poll, group by `event_ticker`, honor
    `mutually_exclusive` + exhaustiveness (YES-basket needs exhaustive;
    NO-basket needs only mutual exclusivity), price at ask, apply ceil'd
    per-order fees × N legs, log to `logs/basket_candidates.jsonl`, never
-   publish a tradeable event. Note the Session 30 finding that weather
-   ladders are simultaneously S5a and S5b candidates — market discovery
-   can be shared with the S6 provider.
+   publish a tradeable event. **Session 31 confirmed the weather-ladder half of
+   this empirically: all 1,261 city-day ladders sampled are exhaustive,
+   mutually exclusive partitions (exactly one YES each), so they are genuine
+   S5a basket candidates and `backtest/kalshi_history.py` already does the
+   discovery and normalisation.** Unaffected by the S6 result; still the
+   cheapest thing that can produce live evidence.
 
 ### Standing / infrastructure
 8. **Re-audit every "CONFIRMED LIVE" claim in this file against actual VPS

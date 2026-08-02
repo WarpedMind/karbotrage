@@ -1,6 +1,143 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-08-02 (Session 31 — Phase 1 executed: the S6 weather calibration backtest was built and run. RESULT: NOAA/NBM is measurably WORSE calibrated than the Kalshi price at every lead. Gate G2 FAILS; S6-weather stops here.)
+
+### Mandate
+Build `backtest/` and produce the calibration report Session 30 specced —
+"a report, not a trading agent" — and stop if the model does not beat the
+market price. It did not. Stopping.
+
+### The answer, up front
+| contested markets, test split | 12h | 24h | 30h |
+|---|---|---|---|
+| Brier — NBM model | 0.2013 | 0.1795 | 0.1713 |
+| Brier — **market (baseline)** | **0.1757** | **0.1612** | **0.1567** |
+| Brier — climatology | 0.2104 | 0.1896 | 0.1812 |
+| skill vs market | −0.146 | −0.114 | −0.093 |
+| P(model no better) | 1.000 | 1.000 | 1.000 |
+
+36 independent dates; 95% CIs from a bootstrap over whole **dates**, all
+entirely negative. 17 of 18 cities lose. The model barely beats climatology
+while the market beats it comfortably.
+
+Trading it makes the point plainly: the model claims **+$0.11 to +$0.17** net EV
+per contract and **realises −$0.01 to −$0.04**. Tightening the divergence filter
+makes it *worse*, which is what a divergence signal looks like when the model is
+the less-informed party.
+
+### Why — measured, not guessed
+Recovered the market's implied expected temperature from each city-day ladder
+(an exhaustive partition, so its normalised YES prices are a real distribution)
+and scored both against the settled high:
+
+| | NBM | market-implied |
+|---|---|---|
+| point MAE @12h | 1.59 °F | **1.27 °F** |
+| point MAE @24h | 1.77 °F | **1.47 °F** |
+
+NBM's published spread meanwhile is close to right (published SD 2.32 vs
+realised RMSE 2.16, ratio 0.93). **So the deficit is the forecast, not the
+probability conversion** — a better error model cannot recover it. The Kalshi
+weather market already prices a better temperature forecast than a raw NBM run.
+
+Session 30's own honest counter said this would be the risk ("Kalshi weather
+markets are known to attract participants already using NOAA"). It was the
+decisive consideration, not a footnote.
+
+### The objection that would have killed the result — tested and closed
+*"The model was handed stale data."* **NBM does not publish a daytime-max
+forecast at less than 12 hours' lead** — the 18Z cycle's 00Z-valid `TXN` column
+is null. Twelve hours is NOAA's freshest. The model loses at NOAA's own best.
+
+Separately: these markets only trade for **~42 hours**, so there is no market
+price beyond ~36h of lead — a strategy premised on "NOAA sees further ahead"
+has no venue here.
+
+### Proved before any modelling ran (each treated as a gate)
+- **Settlement rule replayed against reality: 7,565/7,565 exact**, all three
+  strike types, using each market's real `expiration_value` and `result`.
+- **Ladders are exhaustive partitions: 1,261/1,261 city-days have exactly one
+  YES.**
+- **Station identity resolved empirically: 18/18 at 100% exact match** against
+  NWS CLI highs. **Houston is KHOU (Hobby), not KIAH.** Also KMDW not KORD,
+  KNYC not KLGA/KJFK, KDCA not KIAD, KDFW not KDAL. Guessing would have been
+  wrong on at least one and unfalsifiably so.
+- **NBM valid-time → local-day mapping** scored both ways: correct reading MAE
+  1.85 °F, naive same-date reading 3.46 °F.
+- **Fee model cross-checks against the live `KalshiFeeModel`** at every probe.
+
+### A bug found by counting, not by testing
+Gate 1 first reported "7,565/7,565 matched" on **6,305 checked out of 7,566
+seen**. The totals do not reconcile, and the missing 1,255 were almost exactly
+one per city-day.
+
+Cause: **Kalshi's `less` markets carry the threshold in `cap_strike` and leave
+`floor_strike` null** — the opposite convention from `greater`. Reading
+`floor_strike` returned `None`, and the `None` was skipped silently, deleting
+the entire low tail of every ladder while the printed rate still read 100%.
+
+Nothing failed; no test caught it; a total did not add up. `verify_strike_logic`
+now counts every skip by reason and refuses to pass with any unhandled case.
+**Standing lesson: a validation reporting a rate rather than a reconciliation
+can hide an arbitrarily large omission behind a perfect-looking number.**
+
+### An architectural finding that outlives the negative result
+Session 30 specced the forecast leg as GRIB2 byte-range fetches needing an
+eccodes/cfgrib binary dependency plus grid interpolation. **Unnecessary.** The
+same S3 bucket's `text/` suite publishes plain-ASCII **station** bulletins, and
+the NBP product carries per station and valid time: `TXNMN` (mean), `TXNSD`
+(spread) **and** `TXNP1/2/5/7/9` (quantiles). No decoder, no interpolation,
+exactly the airport stations Kalshi settles on. `backtest/` ships with **zero
+new dependencies** — stdlib plus `requests`.
+
+Cost of the text route: values are integer degrees, including the spread. That
+was the reason to suspect overconfidence; measured, it does not bind.
+
+### A trap for whoever builds a live weather provider
+IEM has two daily-temperature feeds and they disagree. `cgi-bin/request/daily.py`
+(ASOS) reads KLAX 2026-08-01 as **79 °F**; `json/cli.py` (parsed NWS CLI) reads
+**80 °F**. Kalshi's `expiration_value` is 80.00. Kalshi settles on CLI. The more
+obvious endpoint is the wrong one.
+
+### Retraction, recorded rather than dropped
+Mid-session I called a 12h RMSE of 2.27 °F next to KLAX's `TXNSD` of 1 "a first
+sign the model will be overconfident" from integer truncation. **Wrong** — that
+generalised one station to the population; the population mean published SD is
+2.32 °F and the ratio to realised error is 0.93 (slightly *wide*). Same shape as
+Session 30's fee error: a confident conclusion from an incomplete look. Caught
+by measuring it.
+
+### Also fixed this session
+- **Parser sign flip.** NBS rows that pack 3-digit values with no separator
+  (VIS, SLV, CIG, LCB) bleed one character left of the FHR-derived column grid,
+  so `-88` parsed as `88` and `100` as `00`. Repaired, bounded by the label
+  length — NBP labels like `TXNP1` end in a digit and an unbounded repair
+  destroys the row. Both directions have regression tests.
+- `.gitignore` gained `backtest/cache/`; an initial append merged into the
+  previous line (no trailing newline) and briefly produced the nonsense pattern
+  `karbotrage_env/backtest/cache/`, verified fixed with `git check-ignore -v`.
+
+### Tests
+**226/226 passing** (157 baseline + 69 new across three files:
+`test_backtest_nbm_parser.py`, `test_backtest_probability.py`,
+`test_backtest_scoring_costs.py`). Two of the new tests caught real defects
+while being written — the parser sign flip, and a bin-index error that was mine,
+not the code's. Runner smoke test unaffected; no live-path code was touched.
+
+### What was NOT done
+- Phase 0's last item (PaperExecutor resolving against real outcomes) — it was
+  a prerequisite for S6 *paper trading*, which no longer has a strategy behind
+  it. Left open and re-scoped in CLAUDE.md rather than built speculatively.
+- `--mode` is still parsed and never applied.
+- No VPS work; no live-path code changed.
+
+### Cost of learning this
+One session. No order layer, no capital, no paper trades. That was the whole
+argument for sequencing divergence ahead of market-making, and it held.
+
+---
+
 ## 2026-08-01 (Session 30 — SPEC ONLY, no strategy code: pivot direction chosen and specced — external-model divergence (S6) first, market-making deferred, arb continues as a passive canary; Session 28's maker-fee premise found wrong)
 
 ### Mandate

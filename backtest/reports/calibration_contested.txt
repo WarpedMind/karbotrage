@@ -1,0 +1,289 @@
+==============================================================================
+KARBOT RAGE - S6 CALIBRATION REPORT (NOAA/NBM vs KALSHI)
+==============================================================================
+
+  fee model cross-check vs live KalshiFeeModel: agrees
+
+  reusing 22587 rows from backtest/cache/rows6.json
+
+  markets seen      : 22587
+  dropped low volume: 0
+  dropped no price  : 0
+  evaluation rows   : 22587
+
+  CONTESTED-ONLY cut: 22587 -> 13903 rows (market mid in [0.05, 0.95])
+  Rationale: most ladder rungs are far out of the money and both
+  the model and the market price them near 0. Those markets
+  dominate a pooled Brier score while carrying no decision
+  content and no tradeable size.
+
+  date range        : 2026-05-22 .. 2026-08-01  (71 dates)
+  train/test split  : < 2026-06-27  ->  train=6672 test=7231
+  SEASON            : late spring / summer only. Nothing here
+                      generalises to winter; that is unproven.
+  leads present (h) : [12, 24, 30]
+
+  fitted on TRAIN   : bias=+0.00 F  sd_scale=0.80  sd_floor=1.50 F
+
+------------------------------------------------------------------------------
+  LEAD 12 HOURS   (test split only, n=2079)
+------------------------------------------------------------------------------
+
+  gaussian (0 fitted params)
+    n markets      : 2079
+    n dates(blocks): 36
+    base rate      : 0.3011
+    Brier model    : 0.2018
+    Brier MARKET   : 0.1757   <- the baseline
+    Brier climo    : 0.2104
+    skill vs market: -0.1484
+    logloss model  : 0.6010
+    logloss market : 0.5273
+    Brier delta (market - model), block-bootstrapped by DATE:
+      point   : -0.02607
+      95% CI  : [-0.03210, -0.01986]  over 36 dates
+      P(model no better than market) = 1.000
+
+  calibrated (3 params, fit on train)
+    n markets      : 2079
+    n dates(blocks): 36
+    base rate      : 0.3011
+    Brier model    : 0.2013
+    Brier MARKET   : 0.1757   <- the baseline
+    Brier climo    : 0.2104
+    skill vs market: -0.1460
+    logloss model  : 0.5999
+    logloss market : 0.5273
+    Brier delta (market - model), block-bootstrapped by DATE:
+      point   : -0.02566
+      95% CI  : [-0.03203, -0.01917]  over 36 dates
+      P(model no better than market) = 1.000
+
+  Reliability - MODEL calibrated (3 params, fit on train), lead 12h
+             bin       n   mean p  observed      gap
+    0.0-0.1     307    0.044     0.143   -0.099
+    0.1-0.2     524    0.163     0.219   -0.057
+    0.2-0.3     167    0.259     0.257   +0.002
+    0.3-0.4     573    0.321     0.353   -0.032
+    0.4-0.5     488    0.452     0.426   +0.026
+    0.5-0.6       9    0.580     0.667   -0.086
+    0.6-0.7       4    0.625     0.500   +0.125
+    0.7-0.8       3    0.734     0.667   +0.067
+    0.8-0.9       3    0.834     1.000   -0.166
+    0.9-1.0       1    0.920     1.000   -0.080
+
+  Reliability - MARKET price, lead 12h
+             bin       n   mean p  observed      gap
+    0.0-0.1     339    0.070     0.077   -0.006
+    0.1-0.2     399    0.144     0.153   -0.009
+    0.2-0.3     344    0.249     0.212   +0.037
+    0.3-0.4     318    0.345     0.349   -0.004
+    0.4-0.5     315    0.445     0.406   +0.039
+    0.5-0.6     230    0.546     0.565   -0.019
+    0.6-0.7      97    0.638     0.691   -0.053
+    0.7-0.8      25    0.733     0.720   +0.013
+    0.8-0.9       7    0.826     1.000   -0.174
+    0.9-1.0       5    0.924     1.000   -0.076
+
+  Per-series (DESCRIPTIVE ONLY - 18 comparisons, uncorrected)
+    series             n  Brier model  Brier mkt     delta
+    KXHIGHAUS        113       0.1943     0.1460   -0.0483
+    KXHIGHCHI        119       0.1818     0.1792   -0.0027
+    KXHIGHDEN        118       0.1930     0.1844   -0.0086
+    KXHIGHLAX        112       0.2178     0.1809   -0.0369
+    KXHIGHMIA        105       0.1950     0.1992   +0.0043
+    KXHIGHNY         108       0.2035     0.1958   -0.0077
+    KXHIGHPHIL       119       0.2090     0.1714   -0.0376
+    KXHIGHTATL       128       0.1799     0.1789   -0.0011
+    KXHIGHTBOS       120       0.2068     0.1518   -0.0549
+    KXHIGHTDAL       108       0.2255     0.1734   -0.0521
+    KXHIGHTDC        122       0.2085     0.1716   -0.0369
+    KXHIGHTHOU       105       0.2357     0.2259   -0.0097
+    KXHIGHTLV         95       0.2022     0.1336   -0.0686
+    KXHIGHTMIN       120       0.1674     0.1526   -0.0148
+    KXHIGHTNOLA      110       0.2120     0.1875   -0.0245
+    KXHIGHTOKC       123       0.2251     0.1836   -0.0415
+    KXHIGHTSATX      105       0.2241     0.1879   -0.0362
+    KXHIGHTSFO       149       0.1630     0.1645   +0.0015
+    A single city beating the market here is expected by chance;
+    Bonferroni at 18 comparisons demands p < 0.0028, not p < 0.05.
+
+------------------------------------------------------------------------------
+  LEAD 24 HOURS   (test split only, n=2510)
+------------------------------------------------------------------------------
+
+  gaussian (0 fitted params)
+    n markets      : 2510
+    n dates(blocks): 36
+    base rate      : 0.2542
+    Brier model    : 0.1792
+    Brier MARKET   : 0.1612   <- the baseline
+    Brier climo    : 0.1896
+    skill vs market: -0.1116
+    logloss model  : 0.5458
+    logloss market : 0.4917
+    Brier delta (market - model), block-bootstrapped by DATE:
+      point   : -0.01799
+      95% CI  : [-0.02353, -0.01237]  over 36 dates
+      P(model no better than market) = 1.000
+
+  calibrated (3 params, fit on train)
+    n markets      : 2510
+    n dates(blocks): 36
+    base rate      : 0.2542
+    Brier model    : 0.1795
+    Brier MARKET   : 0.1612   <- the baseline
+    Brier climo    : 0.1896
+    skill vs market: -0.1136
+    logloss model  : 0.5512
+    logloss market : 0.4917
+    Brier delta (market - model), block-bootstrapped by DATE:
+      point   : -0.01831
+      95% CI  : [-0.02409, -0.01219]  over 36 dates
+      P(model no better than market) = 1.000
+
+  Reliability - MODEL calibrated (3 params, fit on train), lead 24h
+             bin       n   mean p  observed      gap
+    0.0-0.1     510    0.043     0.106   -0.063
+    0.1-0.2     697    0.162     0.185   -0.023
+    0.2-0.3     276    0.256     0.264   -0.009
+    0.3-0.4     582    0.319     0.352   -0.033
+    0.4-0.5     434    0.451     0.394   +0.057
+    0.5-0.6       7    0.572     0.571   +0.001
+    0.6-0.7       2    0.623     0.000   +0.623
+    0.7-0.8       1    0.734     1.000   -0.266
+    0.8-0.9       1    0.826     1.000   -0.174
+
+  Reliability - MARKET price, lead 24h
+             bin       n   mean p  observed      gap
+    0.0-0.1     534    0.071     0.077   -0.006
+    0.1-0.2     538    0.147     0.119   +0.028
+    0.2-0.3     499    0.246     0.242   +0.004
+    0.3-0.4     439    0.346     0.353   -0.007
+    0.4-0.5     297    0.446     0.431   +0.015
+    0.5-0.6     138    0.538     0.580   -0.042
+    0.6-0.7      51    0.641     0.745   -0.105
+    0.7-0.8      10    0.737     0.700   +0.037
+    0.8-0.9       4    0.838     1.000   -0.162
+
+  Per-series (DESCRIPTIVE ONLY - 18 comparisons, uncorrected)
+    series             n  Brier model  Brier mkt     delta
+    KXHIGHAUS        126       0.1921     0.1638   -0.0284
+    KXHIGHCHI        143       0.1639     0.1599   -0.0039
+    KXHIGHDEN        141       0.1748     0.1573   -0.0175
+    KXHIGHLAX        123       0.2052     0.1680   -0.0372
+    KXHIGHMIA        117       0.1809     0.1857   +0.0048
+    KXHIGHNY         130       0.2021     0.1718   -0.0303
+    KXHIGHPHIL       152       0.1746     0.1550   -0.0196
+    KXHIGHTATL       157       0.1600     0.1597   -0.0003
+    KXHIGHTBOS       152       0.1968     0.1415   -0.0553
+    KXHIGHTDAL       137       0.1855     0.1662   -0.0193
+    KXHIGHTDC        161       0.1753     0.1654   -0.0098
+    KXHIGHTHOU       131       0.1991     0.1814   -0.0177
+    KXHIGHTLV        109       0.1868     0.1437   -0.0431
+    KXHIGHTMIN       149       0.1563     0.1508   -0.0055
+    KXHIGHTNOLA      139       0.1696     0.1669   -0.0026
+    KXHIGHTOKC       145       0.1925     0.1622   -0.0303
+    KXHIGHTSATX      124       0.2038     0.1731   -0.0308
+    KXHIGHTSFO       174       0.1377     0.1417   +0.0040
+    A single city beating the market here is expected by chance;
+    Bonferroni at 18 comparisons demands p < 0.0028, not p < 0.05.
+
+------------------------------------------------------------------------------
+  LEAD 30 HOURS   (test split only, n=2642)
+------------------------------------------------------------------------------
+
+  gaussian (0 fitted params)
+    n markets      : 2642
+    n dates(blocks): 36
+    base rate      : 0.2377
+    Brier model    : 0.1712
+    Brier MARKET   : 0.1567   <- the baseline
+    Brier climo    : 0.1812
+    skill vs market: -0.0920
+    logloss model  : 0.5272
+    logloss market : 0.4781
+    Brier delta (market - model), block-bootstrapped by DATE:
+      point   : -0.01442
+      95% CI  : [-0.01889, -0.01020]  over 36 dates
+      P(model no better than market) = 1.000
+
+  calibrated (3 params, fit on train)
+    n markets      : 2642
+    n dates(blocks): 36
+    base rate      : 0.2377
+    Brier model    : 0.1713
+    Brier MARKET   : 0.1567   <- the baseline
+    Brier climo    : 0.1812
+    skill vs market: -0.0928
+    logloss model  : 0.5298
+    logloss market : 0.4781
+    Brier delta (market - model), block-bootstrapped by DATE:
+      point   : -0.01455
+      95% CI  : [-0.01940, -0.00993]  over 36 dates
+      P(model no better than market) = 1.000
+
+  Reliability - MODEL calibrated (3 params, fit on train), lead 30h
+             bin       n   mean p  observed      gap
+    0.0-0.1     594    0.042     0.093   -0.051
+    0.1-0.2     744    0.161     0.175   -0.014
+    0.2-0.3     284    0.256     0.278   -0.022
+    0.3-0.4     587    0.319     0.339   -0.020
+    0.4-0.5     424    0.451     0.377   +0.074
+    0.5-0.6       7    0.569     0.571   -0.002
+    0.6-0.7       1    0.623     0.000   +0.623
+    0.8-0.9       1    0.826     1.000   -0.174
+
+  Reliability - MARKET price, lead 30h
+             bin       n   mean p  observed      gap
+    0.0-0.1     616    0.069     0.045   +0.024
+    0.1-0.2     590    0.148     0.158   -0.010
+    0.2-0.3     554    0.249     0.267   -0.019
+    0.3-0.4     464    0.349     0.312   +0.036
+    0.4-0.5     274    0.443     0.471   -0.027
+    0.5-0.6     113    0.542     0.540   +0.003
+    0.6-0.7      25    0.627     0.720   -0.093
+    0.7-0.8       3    0.762     1.000   -0.238
+    0.8-0.9       2    0.840     1.000   -0.160
+    0.9-1.0       1    0.905     1.000   -0.095
+
+  Per-series (DESCRIPTIVE ONLY - 18 comparisons, uncorrected)
+    series             n  Brier model  Brier mkt     delta
+    KXHIGHAUS        138       0.1717     0.1495   -0.0223
+    KXHIGHCHI        152       0.1548     0.1527   -0.0021
+    KXHIGHDEN        155       0.1689     0.1519   -0.0170
+    KXHIGHLAX        136       0.1912     0.1622   -0.0290
+    KXHIGHMIA        127       0.1744     0.1626   -0.0118
+    KXHIGHNY         139       0.1922     0.1636   -0.0286
+    KXHIGHPHIL       171       0.1500     0.1449   -0.0051
+    KXHIGHTATL       163       0.1556     0.1604   +0.0048
+    KXHIGHTBOS       151       0.1933     0.1449   -0.0484
+    KXHIGHTDAL       140       0.1806     0.1682   -0.0124
+    KXHIGHTDC        166       0.1707     0.1711   +0.0004
+    KXHIGHTHOU       133       0.1805     0.1693   -0.0112
+    KXHIGHTLV        110       0.1700     0.1343   -0.0358
+    KXHIGHTMIN       162       0.1440     0.1402   -0.0038
+    KXHIGHTNOLA      148       0.1665     0.1627   -0.0038
+    KXHIGHTOKC       144       0.2049     0.1596   -0.0454
+    KXHIGHTSATX      135       0.1878     0.1766   -0.0112
+    KXHIGHTSFO       172       0.1447     0.1489   +0.0043
+    A single city beating the market here is expected by chance;
+    Bonferroni at 18 comparisons demands p < 0.0028, not p < 0.05.
+
+==============================================================================
+  NET-OF-COST EDGE (gate G3)
+==============================================================================
+
+     lead  thresh   trades   gross EV/c    fee/c   net EV/c  net/capital   realised/c
+       12    0.02     1760      +0.1309   0.0169    +0.1140      +0.2525      -0.0217
+       12    0.05     1446      +0.1512   0.0172    +0.1340      +0.3091      -0.0282
+       12    0.10      945      +0.1916   0.0177    +0.1740      +0.4189      -0.0329
+       24    0.02     1993      +0.1136   0.0163    +0.0973      +0.2028      -0.0288
+       24    0.05     1509      +0.1385   0.0167    +0.1218      +0.2719      -0.0260
+       24    0.10      885      +0.1850   0.0173    +0.1676      +0.3832      -0.0367
+       30    0.02     2078      +0.1068   0.0163    +0.0905      +0.1876      -0.0227
+       30    0.05     1568      +0.1300   0.0166    +0.1134      +0.2481      -0.0216
+       30    0.10      857      +0.1766   0.0172    +0.1594      +0.3592      -0.0129
+
+    'realised/c' is the ACTUAL settled P&L per contract on those
+    trades -- the model's own EV is a claim, this is the outcome.

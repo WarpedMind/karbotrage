@@ -1,6 +1,260 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-08-02 — Session 31: S6 weather divergence FAILS gate G2 — NOAA/NBM is measurably WORSE calibrated than the Kalshi price, and the reason is the forecast itself, not the probability conversion
+
+### Status of each claim, labeled up front
+- **MEASURED, out of sample, this session**: every Brier score, skill score,
+  confidence interval and forecast-error number below. Reproducible end to end
+  from public unauthenticated APIs via `backtest/`; raw output committed under
+  `backtest/reports/`.
+- **CONFIRMED LIVE**: all three data legs, the settlement rule, the station
+  identities, and the NBM valid-time mapping — each proved against real
+  settled Kalshi markets rather than assumed. See "What was proved before any
+  modelling ran" below.
+- **ARGUED, not measured**: the read-across to other `FairValueProvider`
+  candidates in the "what this does and does not kill" section. It is
+  reasoning about why weather failed, not evidence about anything else.
+
+### The decision
+**S6 external-model divergence, using NOAA/NBM on Kalshi's daily-high
+temperature markets, is dead. It does not proceed to Phase 2 (detect-and-log).
+No `DivergenceScannerAgent` is built, and `FairValueEngineAgent` is not built
+for this provider.** Session 30 specced exactly this outcome as an acceptable
+one — "it costs one session to learn, which is the entire argument for going
+this way first" — and that is what happened. **No code was written into the
+live trading path this session.**
+
+### Gate results
+- **G1 — Data: PASS.** 18 Kalshi daily-high series, 1,261 city-days across 71
+  dates (2026-05-22 → 2026-08-01), 7,565 settled markets, 22,587
+  (market × forecast-cycle) evaluation rows at leads of 12, 24 and 30 hours.
+- **G2 — Calibration: FAIL, decisively and at every lead.**
+- **G3 — Net of costs: moot, and confirms the failure** — trading the model's
+  divergences realises a *loss*.
+
+### G2, the actual numbers
+Test split only (the later 36 of 71 dates); "contested" means the market itself
+priced the outcome as genuinely uncertain (mid in [0.05, 0.95]), which is where
+any trade would happen. 95% intervals come from a bootstrap resampling whole
+**dates**.
+
+| contested, test split | lead 12h | lead 24h | lead 30h |
+|---|---|---|---|
+| n markets | 2,079 | 2,510 | 2,642 |
+| base rate | 0.301 | 0.254 | 0.238 |
+| Brier — NBM model | 0.2013 | 0.1795 | 0.1713 |
+| Brier — **market price (baseline)** | **0.1757** | **0.1612** | **0.1567** |
+| Brier — climatology | 0.2104 | 0.1896 | 0.1812 |
+| Brier skill vs market | **−0.146** | **−0.114** | **−0.093** |
+| 95% CI on (market − model) Brier | [−0.032, −0.019] | [−0.024, −0.012] | [−0.019, −0.010] |
+| P(model no better than market) | **1.000** | **1.000** | **1.000** |
+
+Three things in that table matter more than the headline:
+1. **Every confidence interval lies entirely on the wrong side of zero**, over
+   36 independent dates. This is not a marginal or noisy result.
+2. **The model barely beats climatology** (0.2013 vs 0.2104 at 12h) while the
+   market beats it comfortably. A model that beats a coin flip but loses to the
+   market has no edge — that framing was written into Session 30's spec before
+   any data existed, and it is exactly what came back.
+3. **The model does WORSE the shorter the lead** (−0.146 at 12h vs −0.093 at
+   30h). The market's informational advantage grows as the event approaches,
+   which is the signature of the market incorporating information a single
+   model run does not have.
+
+Per-city: **17 of 18 cities lose to the market.** The one nominal winner
+(KXHIGHTATL, +0.0013 Brier) is far inside what 18 uncorrected comparisons
+produce by chance — Bonferroni at 18 demands p < 0.0028, and this is not close.
+
+### G3 — what trading it would actually have done
+Buying whenever the model's probability exceeds the executable ask by a
+threshold, one contract, real ceil'd Kalshi taker fees:
+
+| lead | threshold | trades | model's claimed net EV/contract | **realised P&L/contract** |
+|---|---|---|---|---|
+| 12h | 2¢ | 2,406 | +$0.1055 | **−$0.0195** |
+| 12h | 10¢ | 1,191 | +$0.1715 | **−$0.0297** |
+| 24h | 10¢ | 1,000 | +$0.1651 | **−$0.0378** |
+| 30h | 10¢ | 948 | +$0.1578 | **−$0.0101** |
+
+**The model claims a 10-17 cent edge per contract and loses 1-4 cents.** And it
+gets *worse* as the divergence filter gets stricter: demanding a bigger
+disagreement with the market selects harder for cases where the model is wrong,
+not for cases where the market is. That is the cleanest possible statement of
+what a divergence signal looks like when the model is the less-informed party,
+and it is worth remembering as the shape to watch for in any future
+`FairValueProvider`.
+
+### WHY — the part that decides whether this is fixable
+A negative calibration result is only useful if it says which component failed,
+because the two candidates imply opposite follow-ups:
+
+- **(a) the market's point forecast is better** — no cheap fix exists; a better
+  error model around an inferior mean cannot recover it; or
+- **(b) the point forecasts are comparable but NBM's published uncertainty is
+  wrong** — the failure is in the probability conversion, and the fix is a
+  properly estimated error distribution or the float-valued GRIB2 fields.
+
+Measured, by recovering the market's implied expected temperature from each
+city-day ladder (an exhaustive partition, so normalising its YES prices gives a
+proper distribution over temperature) and scoring both against the settled high:
+
+| | NBM | market-implied |
+|---|---|---|
+| point-forecast MAE @ 12h | 1.59 °F | **1.27 °F** |
+| point-forecast MAE @ 24h | 1.77 °F | **1.47 °F** |
+| bias @ 12h | +0.21 °F | +0.11 °F |
+
+| | published SD | realised RMSE | ratio |
+|---|---|---|---|
+| lead 12h | 2.32 °F | 2.16 °F | **0.93** |
+| lead 24h | 2.55 °F | 2.38 °F | **0.93** |
+
+**It is case (a).** The market's implied temperature forecast is ~20% more
+accurate than NBM's, at both leads. NBM's published spread, meanwhile, is close
+to correct — if anything very slightly *wide* (ratio 0.93), not narrow. So the
+probability conversion is not the bottleneck and improving it cannot close the
+gap. **The Kalshi weather market already prices a better temperature forecast
+than a raw NBM run.**
+
+**RETRACTION, recorded rather than quietly dropped**: earlier in this same
+session, on seeing a 12h RMSE of 2.27 °F next to a KLAX `TXNSD` of 1, I said
+this was "a first sign the model will be overconfident" from integer truncation
+of the published spread. **That was wrong.** It generalised from one station's
+value to the population; the population mean published SD is 2.32 °F and the
+ratio to realised error is 0.93. Same failure mode as Session 30's fee error —
+a confident conclusion from an incomplete look — caught here by measuring it.
+
+### The objection that would kill this result, tested and closed
+The obvious challenge: *the model was handed stale data.* At a 12-hour lead the
+comparison uses the 12Z NBM cycle, while the market at that moment can see
+anything more recent.
+
+**Closed by measurement, not by argument: NBM does not publish a daytime-max
+forecast at a shorter lead than 12 hours.** The 18Z cycle's 00Z-valid `TXN`
+column is null — the max-temperature product for a 12Z-00Z window is simply not
+issued from a cycle three-quarters of the way through it. Twelve hours is the
+freshest daytime-max forecast NOAA publishes. The model is losing at NOAA's own
+best, not to a handicap this harness imposed.
+
+A second structural limit worth recording: **these markets only trade for ~42
+hours** (KXHIGHLAX-26AUG01 opened 2026-07-31T14:00Z, closed 2026-08-02T07:59Z).
+There is no market price beyond ~36 hours of lead at all, so any strategy whose
+thesis is "NOAA sees further ahead than the market" has no venue to express it
+here.
+
+### What was proved before any modelling ran
+Every one of these was treated as a gate, because a well-calibrated model of the
+wrong event is the failure mode that would have survived every test:
+
+1. **The settlement rule.** `settles_yes()` replayed against all 7,565 settled
+   markets using each market's real `expiration_value` and real `result`:
+   **7,565/7,565 exact, across all three strike types.**
+2. **The ladders are an exhaustive partition.** 1,261 of 1,261 city-days have
+   exactly one YES. (This also makes them simultaneous S5a/S5b candidates, as
+   Session 30 noted.)
+3. **Station identity, resolved empirically rather than guessed.** Each series'
+   `expiration_value` series matched day-for-day against candidate stations'
+   NWS CLI highs: **18/18 resolved at 100% exact match**, with clear separation
+   from runners-up. **Houston is KHOU (Hobby), not KIAH** — the obvious guess is
+   wrong. Also KMDW not KORD, KNYC not KLGA/KJFK, KDCA not KIAD, KDFW not KDAL.
+4. **The NBM valid-time → local-day mapping.** Scored both readings against real
+   settlements: "local day = valid date − 1" gives MAE 1.85 °F, the naive
+   same-date reading gives 3.46 °F. Not subtle, and now not assumed.
+5. **The fee model** cross-checks against the live `KalshiFeeModel` at every
+   price/size probe, so this report cannot assume cheaper fees than the trading
+   path uses.
+
+### A bug found by counting, not by testing — worth generalising
+Gate 1 initially reported a clean **7,565/7,565 match on 6,305 markets checked**
+out of 7,566 seen. The counts do not reconcile, and the missing 1,255 were
+almost exactly one per city-day.
+
+Cause: **Kalshi's `less` markets carry their threshold in `cap_strike` and leave
+`floor_strike` null — the opposite convention from `greater`.** Reading
+`floor_strike` returned `None`, and `None` was being skipped silently. That
+removed the entire low tail of every ladder — a fifth of the sample, and
+systematically the same region of every distribution — while every printed
+diagnostic still read as a perfect 100%.
+
+Nothing failed. No test caught it. It was found because a total did not add up.
+The fix is not just the field: `verify_strike_logic` now **counts every skip by
+reason and refuses to pass with any unhandled case**, so silence can no longer
+look like success. Recording this as a standing pattern: *a validation that
+reports a rate rather than a reconciliation can hide an arbitrarily large
+omission behind a perfect-looking number.*
+
+### An architectural correction to Session 30's spec, in NOAA's favour
+Session 30 specced the forecast leg as byte-range GRIB2 fetches from the
+`core/` suite, with the `qmd/` quantiles as a later upgrade if a Gaussian proved
+inadequate — which implies a GRIB2 decoder (eccodes/cfgrib, a binary
+dependency) and point interpolation from a CONUS grid.
+
+**None of that is necessary.** The same bucket's `text/` suite publishes plain
+ASCII **station** bulletins, and the NBP product carries, per station, per valid
+time: `TXNMN` (mean), `TXNSD` (spread) **and** `TXNP1/P2/P5/P7/P9` (the 10th
+through 90th percentiles). Mean, spread and quantiles, for exactly the airport
+stations Kalshi settles on, with no decoder and no interpolation. `backtest/`
+therefore has **no new dependencies at all** — stdlib plus `requests`, which the
+project already has.
+
+This is worth carrying forward independently of the weather result: it is the
+cheapest known route to NOAA point-forecast data, and it stays true for any
+future provider built on NBM.
+
+The one real cost: text-bulletin values are **integer degrees**, including the
+spread. That was the reason to suspect overconfidence — and it was measured and
+found not to bind (ratio 0.93 above). Should NBM ever be revisited, the GRIB2
+float route remains the upgrade path, but it would be fixing something that this
+session has shown is not broken.
+
+### A data-source trap that would have silently corrupted the ground truth
+Iowa State's IEM exposes two daily-temperature feeds and **they disagree**:
+
+    /cgi-bin/request/daily.py   (ASOS-derived)     KLAX 2026-08-01 -> 79 °F
+    /json/cli.py                (parsed NWS CLI)   KLAX 2026-08-01 -> 80 °F
+
+Kalshi's `expiration_value` for that day is **80.00**. Kalshi settles on the CLI
+product, exactly as its rules say, and Kalshi's own `rules_secondary` warns
+about precisely this ("rounding and conversion nuances"). The more obvious
+endpoint is the wrong one. Use `json/cli.py`.
+
+In the end this harness did not need an observations feed at all —
+`expiration_value` **is** the settled observation, published on every market —
+but the discrepancy is recorded because anyone building a live weather provider
+will reach for `daily.py` first.
+
+### What this kills, and what it does not
+**Killed:** NOAA/NBM temperature forecasts as a fair-value source for Kalshi
+daily-high markets. Not "unproven" — measured, out of sample, at every lead
+NOAA publishes, with the reason identified.
+
+**Not killed, and deliberately not re-litigated here:**
+- The `FairValueProvider` abstraction and the divergence *shape* of strategy.
+  What failed is one provider on one market family, for a specific and
+  legible reason: the market was better informed than the model. That is a
+  fact about NWS-settled weather markets — where the settlement source is
+  public, free, and read by every participant — not a general law.
+- **The generalisable lesson, which is the useful output**: a divergence
+  strategy needs a source whose informational advantage over the market is
+  plausible *before* it is measured. A free public forecast that every
+  participant can read is the weakest possible candidate, and weather was
+  chosen in Session 30 precisely because forecast and settlement share a source
+  — which, read again, is the same property that guarantees the market sees it
+  too. **Session 30's own "honest counter" said exactly this** ("Kalshi weather
+  markets are known to attract participants already using NOAA") and it turned
+  out to be the decisive consideration, not a footnote.
+- Market-making (S8), which Session 30 deferred behind a live order layer and
+  whose measured 489-market zero-maker-fee surface is untouched by this result.
+- S5a/S5b as a passive canary, which never depended on S6.
+
+### Cost of learning this
+One session. No order-management layer, no capital, no paper trades, no live
+exposure. That was the entire argument for sequencing divergence ahead of
+market-making, and it held.
+
+---
+
 ## 2026-08-01 — Session 30 (spec-only): the pivot direction is external-model divergence (S6) first; market-making (S8) is deferred behind a live order layer; S5a/S5b arb continues as a cheap passive canary
 
 ### Status of each claim in this entry, labeled up front

@@ -1,0 +1,29 @@
+==============================================================================
+  WHY THE MARKET WINS: point forecast vs uncertainty
+==============================================================================
+
+  (a) POINT FORECAST -- error against the settled high, in degrees F
+     lead      n  source      bias     MAE    RMSE
+       12   1261  NBM        +0.21    1.59    2.16
+       12   1261  market     +0.11    1.27    1.75
+       24   1243  NBM        +0.32    1.77    2.38
+       24   1243  market     +0.10    1.47    2.01
+
+  (b) UNCERTAINTY -- NBM's published spread vs its own realised error
+     lead  published SD  realised RMSE    ratio
+       12          2.32           2.16     0.93
+       24          2.55           2.38     0.93
+
+    A ratio above 1 means the published spread is TOO NARROW, i.e.
+    every probability derived from it is overconfident. NBM's text
+    bulletins publish the spread as an INTEGER degree, so this is a
+    live suspect and not merely a modelling choice.
+
+  Sensitivity: mean probability mass sitting in the open-ended
+  tail rungs, where the TAIL_OFFSET assumption bites:
+    lead  12h: 0.138
+    lead  24h: 0.156
+
+==============================================================================
+  lead  12h: MARKET has the better point forecast (NBM MAE 1.59 vs market 1.27)
+  lead  24h: MARKET has the better point forecast (NBM MAE 1.77 vs market 1.47)

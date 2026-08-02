@@ -29,11 +29,32 @@ Agreed, with one hard condition attached below.
 ## THE METHODOLOGY GATE — read this before adding or testing anything
 
 The danger with a large candidate-signal list is not that any individual idea
-is silly. It is **multiple comparisons**. Kalshi weather history currently
-gives roughly 800–5,000 settled market outcomes. Testing a few hundred exotic
-signals against that sample will produce "statistically significant"
-relationships **by construction**, even if every single signal is pure noise.
-At p < 0.05, one test in twenty passes by chance alone.
+is silly. It is **multiple comparisons**. Testing a few hundred exotic signals
+against a small sample will produce "statistically significant" relationships
+**by construction**, even if every single signal is pure noise. At p < 0.05,
+one test in twenty passes by chance alone.
+
+**The budget is much smaller than it looks — MEASURED, Session 31, correcting
+this section's original estimate.** This document first put the sample at
+"roughly 800–5,000 settled market outcomes." The market count is real (7,565
+settled daily-high markets as of 2026-08-02), but **almost none of it is
+independent information**:
+
+- A city-day is a ladder of ~6 markets forming an *exhaustive partition* —
+  confirmed on all 1,261 city-days, exactly one YES each. Six outcomes, one
+  temperature. Not six observations.
+- Every city on a given calendar date shares one synoptic weather pattern, so
+  even city-days are correlated across cities within a date.
+
+So the honest independent unit is the **date**, and there are **71 of them**
+(2026-05-22 → 2026-08-01) — not thousands. Treating markets as independent
+shrinks a confidence interval by roughly a factor of nine and converts noise
+into a publishable edge. Every number in `backtest/` bootstraps whole dates for
+exactly this reason, and any future test on this register must do the same.
+
+**Practical consequence: at n≈71 independent observations, the register can
+support very few hypotheses, not hundreds.** Spend the budget accordingly, and
+count every hypothesis tested including the failures.
 
 This is not a hypothetical failure mode for this project. It is the same shape
 as the failure that cost it three months: S1 produced a consistent, plausible,
@@ -80,8 +101,8 @@ actually settle on, and they come from official registries.
 |---|---|---|---|
 | **NOAA Weather Modification Project Reports** | Legally-required filings for all non-federal US weather-modification activity | Public repository, updated quarterly | **The strongest item on this list.** Federal law requires operators to file **at least 10 days BEFORE** activity commences. That is genuine, official, public *advance notice of planned weather modification* — cloud seeding is a real, legal, funded industry, and a seeding programme in a catchment area has a direct physical path to precipitation outcomes. No conspiracy framing needed; this is a government registry. |
 | **State cloud-seeding programme pages** (e.g. Idaho Dept. of Water Resources) | Monthly summaries, season reports, operational windows | Public | Operational detail the federal registry summarises. Directly relevant to KXRAIN/KXSNOW-type markets. |
-| **NOAA NBM archive** (already confirmed, see CLAUDE.md) | Forecast mean + ensemble spread + quantiles | AWS S3, anonymous | The baseline model itself. |
-| **NWS observation/climatological reports** | The actual settlement values | api.weather.gov | Ground truth for scoring. |
+| **NOAA NBM archive** — **TESTED, NO EDGE (Session 31)** | Forecast mean + spread + quantiles, per station, in plain ASCII (`text/` suite, no GRIB decoder) | AWS S3, anonymous | Still the correct baseline model and the cheapest NOAA point-forecast route. But as a *tradeable divergence signal* against Kalshi it FAILED — see "Tested — no edge found". |
+| **NWS climatological reports** | The actual settlement values | Not needed — Kalshi's own `expiration_value` **is** the settled observation. For cross-checks use IEM `json/cli.py`, **not** `cgi-bin/request/daily.py`, which disagrees by a degree. | Ground truth for scoring. |
 
 **Note on the timing asymmetry**: the federal registry updates *quarterly*,
 which is far too slow to trade on directly. The 10-day advance-filing
@@ -168,9 +189,45 @@ divergence, options-implied probability, COT reports, ACLED conflict data.
 
 ## Tested — no edge found
 
-*(Empty. Populate as things are tested and fail — a failed test that stays
-recorded is worth as much as a passed one, because it stops the idea being
-re-proposed.)*
+### NOAA/NBM temperature forecast → Kalshi daily-high markets — FAILED, Session 31 (2026-08-02)
+
+**Do not re-propose without new information about why this would now differ.**
+Full detail: DECISIONS.md Session 31; raw output in `backtest/reports/`.
+
+| Gate | Result |
+|---|---|
+| 1. Multiple-comparisons correction | Applied — 18 cities, uncorrected per-city table published with the Bonferroni threshold stated. Not needed in the end: 17 of 18 lose. |
+| 2. ≥20 independent resolutions | **1,261 city-days over 71 dates.** Far exceeded. |
+| 3. Replication across periods | Consistent across 3 lead times (12/24/30h) and both halves of the sample. |
+| 4. ≥2h lead | 12h minimum — and 12h is the shortest lead NOAA publishes a daytime max for at all. |
+| 5. Out-of-sample | Yes. Zero-parameter model and a 3-parameter model fitted on the first 35 dates, scored on the last 36. Both lose. |
+| 6. **Baseline is the market price** | **This is where it fails.** Brier 0.2013 (model) vs **0.1757 (market)** at 12h; skill −0.146; P(model no better) = 1.000. |
+
+**The reason, measured rather than inferred:** the market's *implied point
+forecast* is ~20% more accurate than NBM's (MAE 1.27 °F vs 1.59 °F at 12h
+lead), while NBM's published uncertainty is close to correct (published SD /
+realised RMSE = 0.93). So the failure is in the forecast, not in the
+probability conversion — a better error model cannot recover it.
+
+**The generalisable lesson, and the reason this entry matters beyond weather:**
+a divergence signal needs a source with a *plausible informational advantage
+over the market before it is measured*. A free, public, official forecast that
+every participant can read is the weakest possible candidate — and Kalshi
+weather markets were chosen in Session 30 precisely because the forecast source
+and the settlement source are the same agency, which is the very property that
+guarantees every other participant is reading it too. **Add "is there a reason
+the market does not already know this?" as a screening question before any
+future candidate on this register consumes multiple-comparisons budget.**
+
+One diagnostic worth reusing: the model claimed +$0.11 to +$0.17 net EV per
+contract and realised −$0.01 to −$0.04, and **tightening the divergence
+threshold made it worse**. Demanding a larger disagreement with the market
+selected harder for the model being wrong. That inverted relationship is a
+cheap, general test of which side is the informed one.
+
+**Not invalidated by this**: the `FairValueProvider` abstraction, the divergence
+strategy shape, or any other source on this register. One provider on one market
+family failed, for a legible reason.
 
 ## Tested — edge confirmed
 

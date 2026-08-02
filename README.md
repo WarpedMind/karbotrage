@@ -95,6 +95,18 @@ agents/
     telegram_agent.py      # TelegramAgent
 execution/engine.py       # Legacy monolith — do not extend until paper tested
 data/market_data.py       # Kalshi-first market data
+backtest/                 # Offline calibration harness — NEVER imported by the live path
+  nbm_text.py             # NOAA NBM station bulletins (plain ASCII, no GRIB decoder)
+  kalshi_history.py       # Settled markets + candlestick price history
+  stations.py             # Kalshi series -> NWS station, resolved empirically
+  probability.py          # Forecast -> market probability (continuity-corrected)
+  scoring.py              # Brier, reliability, date-blocked bootstrap
+  costs.py                # Ceil'd taker fees, executable-price economics
+  resolve_and_verify.py   # Gate: prove the ground truth before modelling it
+  verify_alignment.py     # Gate: prove the NBM valid-time -> local-day mapping
+  run_calibration.py      # The report
+  diagnose_gap.py         # Why the market wins: point forecast vs uncertainty
+  reports/                # Committed raw output
 ```
 
 ## Recent fixes (order-book gap recovery, feed monitoring)
@@ -374,16 +386,77 @@ Full spec — architecture, Kelly derivation, backtest design, and the
 G1–G5 gates that must pass before any of it sees paper money — is in
 `DECISIONS.md`, Session 30.
 
+## The answer, 2026-08-02 (Session 31): NOAA loses to the market. S6 weather is dead.
+
+The direction above was chosen because it could be **falsified cheaply and
+offline**. It was, in one session. The backtest is in
+[`backtest/`](backtest/README.md); raw output in `backtest/reports/`.
+
+The question was never "is NOAA accurate" — it is — but "is NOAA, converted
+to a probability, better calibrated than the Kalshi price itself?" It is not:
+
+| Contested markets, out-of-sample, 36 independent dates | 12h lead | 24h | 30h |
+|---|---|---|---|
+| Brier — NOAA/NBM model | 0.2013 | 0.1795 | 0.1713 |
+| Brier — **Kalshi price (the baseline)** | **0.1757** | **0.1612** | **0.1567** |
+| Brier — climatology | 0.2104 | 0.1896 | 0.1812 |
+| Brier skill vs market | −0.146 | −0.114 | −0.093 |
+| P(model no better than market) | 1.000 | 1.000 | 1.000 |
+
+Every confidence interval sits entirely on the wrong side of zero. **17 of 18
+cities lose.** The model barely beats climatology while the market beats it
+comfortably. Simulating the trades makes it concrete: the model claims **+$0.11
+to +$0.17** of net edge per contract and **realises −$0.01 to −$0.04** — and
+demanding a *bigger* disagreement with the market makes it worse, because a
+bigger disagreement selects harder for the model being wrong.
+
+**Why, measured rather than assumed** — this is what makes it final instead of
+"needs more work". Recovering the market's implied expected temperature from
+each city-day ladder and scoring both against the settled high:
+
+| | NOAA/NBM | market-implied |
+|---|---|---|
+| point-forecast MAE @12h | 1.59 °F | **1.27 °F** |
+| point-forecast MAE @24h | 1.77 °F | **1.47 °F** |
+
+NBM's published *uncertainty* is close to correct (published SD ÷ realised
+RMSE = 0.93). So the deficit is in the **forecast**, not the probability
+conversion — and no better error model can recover an inferior mean. The Kalshi
+weather market already prices a better temperature forecast than a raw NBM run.
+
+The obvious objection — *the model was handed stale data* — is closed by
+measurement, not argument: **NBM publishes no daytime-max forecast at less than
+12 hours' lead.** The model loses at NOAA's freshest.
+
+The honest reading: Session 30 picked weather because the forecast source and
+the settlement source are the same agency. Read again, that is precisely the
+property that guarantees every other participant is reading it too. Session
+30's own stated counter-argument turned out to be the decisive one. The
+generalisable lesson is now a screening question in `SIGNAL_REGISTER.md`:
+**"is there a reason the market does not already know this?"**
+
+**What this does not kill:** the `FairValueProvider` abstraction, the
+divergence strategy shape, market-making (S8), or the S5a/S5b canary. One
+provider on one market family failed, for a legible reason. Full record:
+`DECISIONS.md`, Session 31.
+
+**Cost of learning it:** one session. No order layer, no capital, no paper
+trades, no live exposure. That was the whole argument for sequencing divergence
+first, and it held.
+
 ## Open questions (flagged live, not yet resolved)
 
-- **Does NOAA-vs-Kalshi divergence have any edge at all?** Nothing in this
-  repo claims it does. The bar is deliberately high: not "is NOAA
-  accurate" but "is NOAA better calibrated than the Kalshi price itself,"
-  measured by Brier score against the market as baseline.
-- **Is there a usable archive of past NWS forecasts?** `api.weather.gov`
-  serves only the current forecast. This is the single biggest unknown in
-  the plan — with an archive the backtest takes a session, without one it
-  takes weeks of forward data collection.
+- **What replaces S6?** An open direction fork, not a decision to make
+  unilaterally. Candidates: market-making (needs the live order layer that
+  doesn't exist), the S5a/S5b passive canary (cheap, parallel, never
+  disproven), a different `FairValueProvider` (subject to the screening
+  question above), or consolidating the infrastructure backlog.
+- ~~**Is there a usable archive of past NWS forecasts?**~~ **Answered and
+  used.** NBM on AWS (`noaa-nbm-grib2-pds`, anonymous, 2020→now). Better than
+  expected: the bucket's `text/` suite publishes plain-ASCII *station*
+  bulletins carrying forecast mean, spread **and** quantiles — so no GRIB2
+  decoder and no grid interpolation are needed, and `backtest/` ships with zero
+  new dependencies.
 - **Every "CONFIRMED LIVE" claim in CLAUDE.md still needs re-auditing**
   against the VPS directly — the VPS was once found 4 commits behind
   `main` while docs claimed otherwise. The box itself is healthy as of
@@ -403,10 +476,8 @@ G1–G5 gates that must pass before any of it sees paper money — is in
 - **S1's liquidity cap is top-of-book only**, not a full multi-level
   depth walk — moot while S1 is canary-mode-only, but relevant again if
   the reconstruction bug is ever fixed.
-- **RiskGate dollar/quantity unit mismatch** — Kelly outputs dollars,
-  consumed downstream as contract quantity; only ever balanced because an
-  S1 pair costs ≈$1. Must be fixed before any basket strategy (S5a) is
-  trusted to size correctly.
+- ~~**RiskGate dollar/quantity unit mismatch**~~ — **fixed in Session 30**;
+  sizing now returns integer contracts. Listed here in error after the fix.
 - **Paper trade fee variance**: fee amounts shown in Telegram trade
   messages vary in a way that hasn't been explained yet (flat $70, or
   $0–$113 depending on the trade) — needs a cross-check against the fee
@@ -431,11 +502,12 @@ hours of logs instead of waiting days for an actual trade.
 
 **Phase 0 — prerequisites** *(3 of 4 done, 2026-08-02)*
 
-1. ✅ **NOAA forecast-archive question answered.** NBM archive on AWS
-   (`noaa-nbm-grib2-pds`, anonymous, 2020→now) carries forecast TMAX *and*
-   ensemble standard deviation, with `.idx` byte-range access; Kalshi
-   supplies settled outcomes and `candlesticks` price history with bid/ask.
-   The backtest is buildable now over real history.
+1. ✅ **NOAA forecast-archive question answered — and the backtest built and
+   run.** NBM archive on AWS (`noaa-nbm-grib2-pds`, anonymous, 2020→now).
+   The `text/` suite turned out to publish per-station bulletins with forecast
+   mean, spread *and* quantiles in plain ASCII, so no GRIB2 decoder was needed.
+   Kalshi supplies settled outcomes (`expiration_value` **is** the observed
+   high) and `candlesticks` price history with bid *and* ask.
 2. ✅ **RiskGate dollar-vs-contract unit mismatch fixed.** Sizing now
    returns integer contracts derived from real per-contract basket cost.
    Riskless strategies size against caps (removing a hidden ~5.26%
@@ -446,17 +518,28 @@ hours of logs instead of waiting days for an actual trade.
    mistyped setting can't look configured while doing nothing.
 4. ⬜ Make paper resolution settle against real market outcomes.
    `PaperExecutor` currently resolves every trade at its own expected P&L,
-   which is tautological for a directional strategy.
+   which is tautological for a directional strategy. **Re-scoped Session 31**:
+   this was a prerequisite for S6 paper trading, which no longer exists, so it
+   blocks nothing today — and becomes blocking again the moment any
+   variance-bearing strategy reaches paper.
 
-**Phase 1 — measure before building**
+**Phase 1 — measure before building** ✅ *done, result negative*
 
-5. `FairValueEngine` + NOAA provider + a `backtest/` harness. The
-   deliverable is a calibration report, not a trading agent.
+5. ✅ `backtest/` harness built and run; **`FairValueEngine` and the NOAA
+   provider deliberately were NOT built**, because the calibration report came
+   back negative before either was justified. G1 pass, **G2 fail**, G3 confirms.
 
-**Phase 2–3 — detect and log**
+**Phase 2 — detect and log** — closed, never started
 
-6. `DivergenceScanner` live, publishing nothing tradeable, for 1–2 weeks.
-7. S5a/S5b basket/ladder canary — cheap, passive, parallel.
+6. ~~`DivergenceScanner` live for 1–2 weeks~~ — its purpose was to confirm a
+   backtested edge reproduces live. There is no edge to reproduce.
+
+**Phase 3 — arb canary** — now the cheapest live option
+
+7. S5a/S5b basket/ladder canary — cheap, passive, parallel, and unaffected by
+   the S6 result. Session 31 confirmed the ladder half empirically: all 1,261
+   sampled city-day ladders are exhaustive, mutually exclusive partitions, and
+   `backtest/kalshi_history.py` already does the discovery.
 
 **Standing**
 
