@@ -60,10 +60,15 @@ the market-making build**, and it retains its value even if market-making is
 never chosen — because both items are also required before *anything* carries
 real variance.
 
-### The recommendation
+### The decision — CONFIRMED BY THE OPERATOR, 2026-08-02, end of Session 32
 Sequence it as: **send the enquiry → let the canary accumulate → spend
 intervening sessions on the two infrastructure prerequisites → decide
 market-making with the exchange's answer and weeks of canary data in hand.**
+
+Put to the operator with the counter-argument below stated alongside it, and
+confirmed. This is a sequencing decision with an information trigger, **not** a
+commitment to build market-making — that call is still open and is made when the
+enquiry is answered.
 
 Nothing in that sequence is idle. The canary measures continuously for free and
 alerts on its own. The enquiry is minutes of operator time. The infrastructure

@@ -1118,7 +1118,9 @@ about the code: every near miss is exactly one spread wide.
 2. ~~Resolve the void-settlement question~~ — **DONE, and the question was
    framed wrong**; see KNOWN DEBT. The basket guarantee survives cancellation.
 
-**Direction — analysed Session 32, sequencing recommended, not yet committed.**
+**Direction — DECIDED by the operator, 2026-08-02 (end of Session 32).**
+A sequencing decision with an information trigger, **not** a commitment to build
+market-making; that call is made when the Kalshi enquiry is answered.
 Full reasoning in DECISIONS.md's Session 32 addendum ("the direction question,
 and why the infrastructure items are on market-making's critical path"). The
 sequence: **send the Kalshi market-maker enquiry

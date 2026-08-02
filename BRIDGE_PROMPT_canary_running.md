@@ -172,8 +172,16 @@ than the 13 minutes measured so far — count `book_reset_rest_failed`, **never
 `grep 429`**, which matches sequence numbers containing those digits and
 produced a false alarm that had to be retracted.
 
-**Then: the direction question, which is the operator's call.** Do not open a
-large build without putting it to them.
+**The direction question was put to the operator at the end of Session 32 and
+ANSWERED — do not re-ask it.** The confirmed sequence is: send the Kalshi
+enquiry → let the canary accumulate → spend intervening sessions on the two
+infrastructure prerequisites → decide market-making with the exchange's answer
+and ~2 weeks of canary data in hand. **This is a sequencing decision with an
+information trigger, not a commitment to build market-making** — that call is
+still open and gets made when the enquiry is answered. Surface the fork again
+only if something you find changes its premise.
+
+So this session's work, in order:
 
 **One thing already settled, so do not re-open it unprompted**: the operator
 asked in Session 32 whether paying for data or services would make this worth
@@ -210,8 +218,21 @@ the decision has an **information trigger, not a date** (when the Kalshi answer
 arrives and the canary has ~2 weeks of data, market-making is decided yes or
 no; "institution-only" decides it *no* immediately and reopens the fork).
 
-The candidates stay explicitly on the table (operator, Session 31: *"let's
-continue to have the other options be considered where appropriate and justified
+**The concrete work for this session, then, is the two infrastructure
+prerequisites** — the Health Monitor (dead-lettered `AgentHeartbeat` events,
+firing every ~30s with no subscriber) and the stuck order-book reset loop
+(Session 26; specific markets log `book_needs_reset`/`book_reset_throttled` on
+every delta indefinitely and never complete recovery). Both are on
+market-making's critical path and both retain value regardless. **Keep the list
+bounded to those two** — fee variance, `--mode`, Telegram mute are cosmetic and
+must not be used to fill a session.
+
+Also check whether the operator has sent the Kalshi enquiry and had a reply; if
+so, that answer may decide market-making immediately (an "institution-only"
+programme kills it and reopens the fork).
+
+The other candidates stay on the table (operator, Session 31: *"let's continue
+to have the other options be considered where appropriate and justified
 later"*):
 
 - **Market-making (S8)** — the strongest remaining statistical candidate,
@@ -503,29 +524,34 @@ round-trip and trains them to skim the options:
 
 ## Recommended model / effort for this session
 
-**It depends entirely on what the operator picks, so ask first and scope after.**
+**Opus, medium-to-high effort.** The direction is settled, so this is a bounded
+build session rather than an open question — but the two items in it are the
+opposite of mechanical.
 
-- **If the session is just reading the log and deciding direction: Opus, medium
-  effort.** Reading the canary's output is mostly interpretation — is a
-  `vanished_on_recheck` ratio telling you the market is efficient or that the
-  snapshot endpoint is noisy? — and the direction conversation needs the full
-  project history in view. Cheap, short, no build.
-- **If the operator picks market-making: Opus, high effort, and open it
-  deliberately.** It is the largest new subsystem in the project's history, it
-  **cannot be falsified offline at all**, and every trap in it is a class this
-  project has already paid for four times: pricing the wrong side of the book
-  (Session 26), mistaking a structural impossibility for an opportunity
-  (Session 28), mis-reading a strike-field convention (Session 31), and
-  mistaking a stale snapshot for a resting order (Session 32).
-- **If it is infrastructure consolidation: Sonnet is reasonable** for the
-  mechanical items (the fee-variance cross-check, the `--mode` flag, doc
-  sweeps), Opus for anything touching the order-book reset loop or the Health
-  Monitor, since those decide whether an agent silently stops managing real
-  inventory.
+The **Health Monitor** decides whether a silently-stopped agent is noticed, and
+the whole reason it stops being cosmetic is that market-making would have it
+managing real inventory. The **stuck order-book reset loop** has resisted two
+prior sessions' attempts and its symptom (169 million log lines filling the disk
+over 9 days, Session 26) was mistaken for the disease once already; the fix then
+addressed the log volume and explicitly not the cause. Neither is a
+tighten-the-bolts task, and both touch the live trading process — which is where
+this project's expensive outages have all been.
+
+**Sonnet is the wrong economy here** despite the work looking like
+infrastructure. It is reasonable only for genuinely mechanical accompaniments —
+doc sweeps, test scaffolding, refactors confined to code already being changed.
+
+**Escalate to Opus high** if the Kalshi answer arrives and market-making is
+committed to: that is the largest new subsystem in the project's history, it
+**cannot be falsified offline at all**, and every trap in it is a class already
+paid for four times — pricing the wrong side of the book (Session 26), mistaking
+a structural impossibility for an opportunity (Session 28), mis-reading a
+strike-field convention (Session 31), and mistaking a stale snapshot for a
+resting order (Session 32).
 
 **Do not use max effort** unless a genuinely open statistical question reappears.
-None is open right now — Session 31's calibration work is done and Session 32's
-questions all resolved to measurements.
+None is open — Session 31's calibration work is done and Session 32's questions
+all resolved to measurements.
 
 ## Before ending this session
 
