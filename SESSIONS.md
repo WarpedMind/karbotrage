@@ -157,7 +157,38 @@ since Kalshi doesn't atomically match across an event's separate markets.
   measured against it.
 - **G1–G5 gates** before S6 sees paper money, each a stop.
 
-### The biggest open unknown, flagged deliberately rather than glossed
+### Phase 0 begun: the "biggest open unknown" was raised and then answered, same session
+Flagged the forecast-archive question as the thing that decides the S6
+timeline, then went and answered it rather than leaving it for later.
+**Result: the backtest is buildable now, over real history — no weeks of
+forward data collection.** Three legs, all verified live and all
+unauthenticated:
+1. **NOAA NBM archive on AWS Open Data** — bucket `noaa-nbm-grib2-pds`,
+   anonymous S3, **2020-05-18 → current**. The `core` GRIB2 index carries
+   `TMAX:2 m above ground:12-24 hour max fcst` (exactly what Kalshi
+   settles on) **and `:ens std dev`** — so a first-cut `P(high > strike)`
+   comes straight from the published mean and spread, with a `qmd/`
+   quantile suite available as the better-calibrated upgrade. This
+   substantially retires the "must build a bespoke forecast-error model"
+   concern raised earlier in the session. `.idx` sidecars allow
+   byte-range fetching a single TMAX record instead of multi-GB files.
+2. **Kalshi settled outcomes** — `status=settled` gives clean
+   `result` ∈ {yes,no} with `floor_strike`/`strike_type`; 414 settled
+   markets for KXHIGHLAX alone.
+3. **Kalshi historical prices** — the `candlesticks` endpoint returns
+   hourly bars with `yes_bid`, `yes_ask`, OHLC price, volume and open
+   interest. This is the market baseline the model has to beat, and it
+   carries **bid and ask**, so the backtest can be scored on the
+   executable side of the book from day one — structurally avoiding the
+   bug class that invalidated S1.
+
+**Binding constraint is Kalshi's history, not NOAA's**: KXHIGHLAX settled
+markets start 2026-05-25 (~69 days), ~12 markets per city-day across ~12
+cities. Usable, but **summer-only** — any calibration result must state its
+season, and cross-season generalization stays unproven until winter data
+exists.
+
+### The open unknown as originally flagged (now resolved above — kept for the record)
 `api.weather.gov` serves the *current* forecast, not an archive of past
 forecasts. Historical NWS/NBM forecast archives are understood to exist
 (NOAA NOMADS, Iowa State IEM) but **this session did not verify any is

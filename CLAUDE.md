@@ -230,19 +230,47 @@ than assume these are still current:
   Structure: 12-market city-day temperature ladders, machine-parseable via
   `strike_type` (`greater`/`between`) and `floor_strike` — no LLM needed.
 
-### BIGGEST OPEN UNKNOWN for the S6 build — resolve BEFORE writing model code
-`api.weather.gov` serves the **current** forecast, not an archive of past
-forecasts. Historical NWS/NBM forecast archives are understood to exist
-(NOAA NOMADS, Iowa State IEM) but Session 30 did **not** verify any is
-reachable, complete, or matched to the stations Kalshi settles on. This
-decides the timeline: with a usable archive, a real backtest is one session
-over months of history; without one, the fallback is forward collection of
-(forecast, price, outcome) triples and the answer takes weeks. Also: NWS
-gridpoint forecasts are **deterministic values, not probabilities** —
-converting "predicted high 78°" into "P(high > 75°)" needs a per-station,
-per-lead-time forecast-error distribution. That error model *is* the
-strategy. Check whether NBM probabilistic guidance supplies it directly
-before building a bespoke one.
+### RESOLVED, Session 30 (2026-08-02): the S6 backtest is buildable now — all three data legs confirmed reachable and unauthenticated
+This was flagged as the biggest open unknown ("does a usable archive of
+past forecasts exist?") and then answered the same session. **A real
+backtest over real history is a one-session job — no weeks of forward
+collection needed.** All three legs verified live, not assumed:
+
+**1. Forecast archive — NOAA National Blend of Models on AWS Open Data.**
+Bucket `noaa-nbm-grib2-pds`, anonymous S3 list/get, no key, no account.
+Coverage **2020-05-18 → current** (confirmed both ends). Product suites per
+cycle: `core/`, `qmd/` (quantiles), `text/`. Critically, the `core` GRIB2
+index already carries:
+```
+TMAX:2 m above ground:12-24 hour max fcst              <- what Kalshi settles on
+TMAX:2 m above ground:12-24 hour max fcst:ens std dev  <- forecast uncertainty
+APCP:surface:12-24 hour acc fcst:prob >0.254           <- direct PoP, for KXRAIN
+```
+**This substantially retires the "must build a bespoke error model"
+concern**: NBM publishes the ensemble standard deviation alongside the
+mean, so a first-cut `P(high > strike)` is available directly, with the
+`qmd/` quantile suite as the better-calibrated upgrade if a Gaussian
+assumption proves inadequate. `.idx` sidecar files exist for every GRIB2,
+so a backtest can **byte-range fetch just the TMAX record** rather than
+pulling multi-GB files — cheap and fast.
+
+**2. Kalshi settled outcomes.** `GET /markets?status=settled&series_ticker=
+KXHIGHLAX` returns clean labels: `result` ∈ {yes, no}, plus `floor_strike`
+and `strike_type`. 414 settled markets retrieved for that one series.
+
+**3. Kalshi historical prices — the market baseline.** `GET /series/
+{series}/markets/{ticker}/candlesticks?start_ts=&end_ts=&period_interval=`
+returns HTTP 200 with hourly bars carrying `yes_bid`, `yes_ask`, and OHLC
+`price` plus volume and open interest. **It carries bid AND ask**, so the
+backtest can be scored against the executable side of the book from the
+start — structurally avoiding the bug class that invalidated S1.
+
+**The real binding constraint is Kalshi's history, not NOAA's.** KXHIGHLAX
+settled markets begin **2026-05-25** (~69 days as of 2026-08-02), ~12
+markets per city-day across ~12 cities. Workable sample, but **summer-only
+and seasonally narrow** — calibration measured on LA in July should not be
+assumed to transfer to Chicago in January. State the season in any result,
+and treat cross-season generalization as unproven.
 
 ### 30-day paper clock RESET, Session 30 — the old dates are dead
 Started 2026-06-29 targeting 2026-07-29; that date has passed and the
@@ -820,13 +848,12 @@ authoritative spec (architecture, math, gates). Build from that entry, not
 from this list; this list is the ordering.**
 
 ### Phase 0 — prerequisites, no strategy code
-1. **Resolve the NOAA historical-forecast-archive question FIRST** (KNOWN
-   DEBT above, "BIGGEST OPEN UNKNOWN"). `api.weather.gov` serves only the
-   current forecast. Check whether NOAA NOMADS / Iowa State IEM (or NBM
-   probabilistic guidance) gives a reachable, complete archive matched to
-   the stations Kalshi settles on. **Decides whether the backtest is one
-   session or several weeks of forward collection.** Do not write model
-   code before this is answered.
+1. ~~Resolve the NOAA historical-forecast-archive question~~ — **DONE,
+   Session 30.** Answer: NBM archive on AWS (`noaa-nbm-grib2-pds`,
+   anonymous, 2020→now) carries TMAX + ens std dev + `.idx` byte-range
+   access; Kalshi gives settled outcomes and `candlesticks` price history
+   with bid/ask. The backtest is buildable now over ~69 days of Kalshi
+   weather history. Full detail in KNOWN DEBT above.
 2. **Fix the RiskGate/PaperExecutor unit system** (Session 28, DECISIONS.md
    entry 3) — now a hard prerequisite, not a nice-to-have: S1's
    dollars≈contracts coincidence does not hold for a single-leg S6
