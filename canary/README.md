@@ -137,6 +137,23 @@ That is what a functioning market looks like, and it matches Session 29's ladder
 check (closest 1.01) exactly. One snapshot is not a verdict — accumulating the
 frequency data is the point.
 
+## Isolated in process, NOT isolated in rate limit
+
+Worth stating plainly, because "separate process" overstates the independence:
+`canary` and `karbot.service` reach Kalshi from the same IP and share its rate
+limit. `PriceWatcher._request_snapshot` already measured a **~5.5% 429 rate**
+during post-restart bursts (Session 23).
+
+Canary load is ~43 requests per sweep at steady state, but **~160 per sweep
+while profiles are being built** (43 event pages plus up to 60 settled-history
+fetches) — a few hours after a cold start, recurring weekly as profiles age out.
+At the default 300s interval that is a low sustained rate, and `kalshi_rest.get`
+backs off on 429 rather than retrying hot.
+
+**If PriceWatcher's 429 rate rises after this is deployed, look here first.**
+The levers are `--interval-seconds` (up) and `max_new_profiles` (down), not a
+theory about Kalshi changing something.
+
 ## Not on the live trading path
 
 `canary/` and `backtest/` are research code and must never be imported by

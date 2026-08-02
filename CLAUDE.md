@@ -229,6 +229,21 @@ the fees) is a settlement-policy question the API cannot answer; it needs
 Kalshi's own rules. The rate is measured and attached to every logged candidate
 so it can never be read as unconditional.
 
+**The processes are isolated but SHARE KALSHI'S RATE LIMIT** — noted Session 32
+before deploying, because "separate process" was overstating the independence.
+`canary` and `karbot.service` run from the same VPS IP, and
+`PriceWatcher._request_snapshot` already measured a **~5.5% 429 rate** during
+post-restart bursts (Session 23). Canary load: ~43 requests per sweep at steady
+state, but **~160 per sweep during the profile-building phase** (43 event pages
+plus up to 60 settled-history fetches), which lasts a few hours until the cache
+converges and then recurs weekly as profiles age out. At a 300s interval that is
+a low sustained rate, and `kalshi_rest.get()` backs off on 429 rather than
+retrying hot — but the coupling is real and was not part of the original
+separate-process argument. **If PriceWatcher's 429 rate rises after the canary
+is deployed, this is the first place to look**, and the fix is to raise
+`--interval-seconds` or lower `max_new_profiles`, not to assume a Kalshi-side
+change.
+
 **Also open**: a separate systemd unit does not inherit `karbot_runner.py`'s
 supervision or Telegram alerting, so the canary can die quietly.
 `Restart=always` covers a crash, not a silent hang. The per-sweep heartbeat line
