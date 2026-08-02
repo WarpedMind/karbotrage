@@ -127,6 +127,18 @@ class OpportunityEvent(Event):
     confidence:                str   = "LOW"   # HIGH | MEDIUM | LOW
     persona_consensus_score:   float = 0.0     # 0-1, from persona panel aggregation
 
+    # Externally-modelled probability that this position pays out, for
+    # STATISTICAL strategies only (S6 model-divergence and successors).
+    # 0.0 = not supplied, which is the correct default for riskless arb
+    # strategies whose payoff is guaranteed once every leg fills.
+    # Risk Gate feeds this to the Kelly sizing closed form
+    # f* = (p - c)/(1 - c) — see RiskGateAgent._calculate_position_size. A
+    # variance-bearing opportunity that omits it is sized to zero rather
+    # than guessed at, because the alternative is a hardcoded pseudo-
+    # probability, which is exactly the bug Session 28 found (p=0.95
+    # silently imposing a ~5.26% minimum edge on arbitrage).
+    model_probability:         float = 0.0
+
     # Metadata
     detected_at:               datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     expected_resolution:       Optional[datetime] = None

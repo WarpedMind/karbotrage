@@ -106,8 +106,14 @@ async def run(self): ...
   layer for 9 of its first 14 days; all S1 trades in it are confirmed
   book-reconstruction artifacts). A new clock starts only when a strategy
   that has passed gates G1–G5 begins paper trading. See KNOWN DEBT.
-- Full test suite: 133/133 passing as of Session 29 (not re-run in
-  Session 30 — no code changed)
+- **Candidate signal sources**: see `SIGNAL_REGISTER.md` (added Session 30)
+  — a standing, open-minded register of unconventional data sources to test
+  for weather and later strategies, with a hard statistical methodology gate
+  (Bonferroni, n≥20, 3-period replication, market-price baseline) that any
+  candidate must clear before it can influence a position.
+- Full test suite: **157/157 passing** (133 baseline + 15 Session 30
+  contract-units/fee-rounding + 9 Session 30 config-parsing, less 1 renamed).
+  Runner smoke test (`--mock-prices --exit-after-test`) exits cleanly.
 - Kalshi market volume filter: FIXED AND CONFIRMED LIVE (Session 15) —
   `_fetch_active_kalshi_markets()` sends `mve_filter=exclude`, paginates
   via `cursor`, filters on `volume_24h_fp` (cast to float). Live VPS
@@ -854,20 +860,30 @@ from this list; this list is the ordering.**
    access; Kalshi gives settled outcomes and `candlesticks` price history
    with bid/ask. The backtest is buildable now over ~69 days of Kalshi
    weather history. Full detail in KNOWN DEBT above.
-2. **Fix the RiskGate/PaperExecutor unit system** (Session 28, DECISIONS.md
-   entry 3) — now a hard prerequisite, not a nice-to-have: S1's
-   dollars≈contracts coincidence does not hold for a single-leg S6
-   position, where the error is a factor of `1/price`. Standardize on
-   integer contract count end-to-end; set `capital_required_usd = qty ×
-   cost` so check 2 finally binds; floor to int, reject < 1; make
-   `KalshiFeeModel` ceil to the next cent. Keep fractional Kelly **only**
-   for statistical strategies, fed the model probability
-   (`f* = (p − c)/(1 − c)`), never a hardcoded per-strategy constant.
-3. **Fix the `from_yaml()` config-parsing gaps** (Session 24 + 28) —
-   `data_feeds:`, `capital:`, `risk:`, and `strategies:` are all silently
-   unparsed, so capital is permanently the $10k paper default and no
-   strategy threshold is tunable without a code change. Blocks operating
-   S6 thresholds sanely. Also make `--mode` actually override, or remove it.
+2. ~~Fix the RiskGate/PaperExecutor unit system~~ — **DONE, Session 30
+   (2026-08-02).** `RiskGateAgent._calculate_position_size` now returns an
+   **integer contract count**, computed as a dollar budget divided by the
+   real per-contract basket cost (`_basket_cost_per_contract`, summed from
+   leg ask prices); floors to int and returns 0 below 1 contract. Sizing
+   splits by strategy class: `RISKLESS_STRATEGIES` (S1/S2/S5a/S5b) size
+   against the caps — removing the hidden ~5.26% Kelly floor that made
+   `s1_min_net_profit_pct` a dead letter — while statistical strategies use
+   `f* = (p − c)/(1 − c)` fed by the new `OpportunityEvent.model_probability`
+   field, and size to **0** rather than guessing when it's absent. Check 2
+   now falls back to the derived basket cost, so it finally binds. The
+   approval log emits `size_contracts` + `cost_usd` instead of the
+   misleading `size_usd`. `KalshiFeeModel.taker_fee_dollars()` added with
+   Kalshi's real per-order round-up (validated against the published fee
+   table); `taker_fee_fraction()` kept but documented as optimistic.
+   19 new tests.
+3. ~~Fix the `from_yaml()` config-parsing gaps~~ — **DONE, Session 30.**
+   `data_feeds:`, `capital:`, `risk:`, `strategies:` and `intelligence:`
+   are now parsed via a generic `_section()` helper that also **warns on
+   unknown keys** (`config_unknown_keys`) — closing the Session 24 class of
+   bug where a key looks configured and silently does nothing. RiskConfig
+   hard limits and the Phase 1 invariants still bind against YAML; both are
+   tested. 9 new tests. **Still open**: `--mode` is parsed and never
+   applied — make it override or remove it.
 4. **Make S6 paper resolution settle against real outcomes.**
    `PaperExecutor` currently resolves every trade at its own
    `expected_pnl` after a fixed delay — tautological for a directional

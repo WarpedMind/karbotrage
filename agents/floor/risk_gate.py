@@ -169,16 +169,22 @@ class RiskGateAgent:
         # instead of approving nothing.
         if approved_size <= 0:
             await self._reject(event, "ZERO_APPROVED_SIZE",
-                                "Position sizing (Kelly criterion and/or "
-                                "liquidity cap) computed a non-positive size")
+                                "Position sizing computed fewer than 1 whole "
+                                "contract after capital, depth and risk caps")
             return
 
         self._approved += 1
+        cost_per_contract = self._basket_cost_per_contract(event)
+        # `size_contracts`, not `size_usd` — the old field name recorded a
+        # dollar figure that downstream agents consumed as a contract count
+        # (Session 28/30). Log both, unambiguously, so historical log lines
+        # can never be misread again.
         log.info("opportunity_approved",
-                 strategy  = event.strategy,
-                 net_pct   = event.net_profit_pct,
-                 size_usd  = approved_size,
-                 paper     = self.config.system.paper_mode)
+                 strategy        = event.strategy,
+                 net_pct         = event.net_profit_pct,
+                 size_contracts  = approved_size,
+                 cost_usd        = round(approved_size * cost_per_contract, 2),
+                 paper           = self.config.system.paper_mode)
 
         await self.bus.publish(ApprovedOpportunityEvent(
             source         = self.AGENT_NAME,
@@ -234,11 +240,19 @@ class RiskGateAgent:
         total_capital = self._current_snapshot.total_capital_usd
         max_trade_usd = total_capital * (self._risk.max_capital_per_trade_pct / 100)
 
+        # `capital_required_usd` is set by some strategies and not others
+        # (Session 28: no strategy ever set it, so this check had never once
+        # run). Fall back to the real per-contract basket cost derived from the
+        # legs, so a single contract that alone exceeds the per-trade cap is
+        # rejected here rather than being silently floored to zero later.
         required = event.capital_required_usd
+        if required <= 0:
+            required = self._basket_cost_per_contract(event)
+
         if required > 0 and required > max_trade_usd:
             return CheckResult.fail(
                 "POSITION_TOO_LARGE",
-                f"Required ${required:.0f} exceeds max ${max_trade_usd:.0f}"
+                f"Required ${required:.2f} exceeds max ${max_trade_usd:.2f}"
             )
 
         # Also check platform-specific limits
@@ -427,78 +441,118 @@ class RiskGateAgent:
 
     # ── Position Sizing ───────────────────────────────────────────────────────
 
-    def _calculate_position_size(self, event: OpportunityEvent) -> float:
+    # Strategies whose payoff is guaranteed once ALL legs fill, so the binding
+    # constraints are capital and real book depth — not a win probability.
+    RISKLESS_STRATEGIES = frozenset({
+        "S1_REBALANCING", "S2_CROSS_PLATFORM", "S5A_EVENT_BASKET",
+        "S5B_LADDER",
+    })
+
+    @staticmethod
+    def _basket_cost_per_contract(event: OpportunityEvent) -> float:
         """
-        Calculate optimal position size using Kelly Criterion.
+        Dollar cost of acquiring ONE unit of this opportunity — i.e. one
+        contract on every leg. Legs quote executable (ask) prices.
+        """
+        return sum(float(leg.get("price", 0.0) or 0.0) for leg in event.legs)
 
-        Kelly formula: f = (bp - q) / b
-        where:
-          f = fraction of capital to bet
-          b = odds received (net profit / cost)
-          p = probability of winning
-          q = probability of losing
+    def _calculate_position_size(self, event: OpportunityEvent) -> int:
+        """
+        Return position size as an INTEGER NUMBER OF CONTRACTS.
 
-        We use a fractional Kelly (default 0.15) for safety.
+        UNITS (fixed 2026-08-02, Session 30 — see DECISIONS.md Session 28
+        entry 3 and Session 30). This function previously returned Kelly
+        *dollars*, which `PaperExecutor` then wrote straight into each leg's
+        "quantity" and `PositionTracker` booked as `price x quantity` — the
+        same number was dollars at birth and contracts everywhere after. It
+        only ever balanced because an S1 YES+NO pair costs ~$1, making the two
+        readings numerically coincide by accident of that strategy's shape.
+        Any single-leg position breaks it by a factor of 1/price (3.3x at a
+        30c contract). Contracts are now the unit end to end.
+
+        Kalshi trades whole contracts with a minimum of 1, so the result is
+        floored and a sub-1 result returns 0 (RiskGate rejects it upstream as
+        ZERO_APPROVED_SIZE). Session 27's 0.05-contract paper trade could
+        never have existed live.
+
+        SIZING MODEL, by strategy class:
+          * Riskless (S1/S2/S5x): payoff is locked once every leg fills, so
+            variance is ~0 and Kelly is the wrong instrument — at p=0.95 it
+            silently imposed a ~5.26% minimum net edge (q/p), making the
+            configured `s1_min_net_profit_pct = 0.5` a dead letter and
+            rejecting precisely the small, plausible edges that are the only
+            real ones on a competed exchange. Size against the caps instead.
+          * Statistical (S6 divergence and anything else with a real loss
+            probability): Kelly is correct here, but must be fed a real
+            probability, not a hardcoded per-strategy constant. For a binary
+            contract bought at price c with model probability p, stake c and
+            profit (1-c) on a win, net odds b = (1-c)/c, so
+                f* = (b.p - q)/b = (p - c)/(1 - c)
+            Note f* > 0 exactly when p > c, so the strategy's own claimed edge
+            becomes the binding condition instead of an unrelated constant.
+            `model_probability` comes from the opportunity; if it is absent we
+            cannot size a variance-bearing trade honestly, so we return 0
+            rather than guessing.
         """
         if not self._current_snapshot:
-            return 0.0
+            return 0
+
+        cost_per_contract = self._basket_cost_per_contract(event)
+        if cost_per_contract <= 0:
+            log.warning("sizing_no_leg_prices",
+                        strategy=event.strategy,
+                        opportunity_id=event.opportunity_id)
+            return 0
 
         total_capital = self._current_snapshot.total_capital_usd
         free_capital  = self._current_snapshot.free_capital_usd
 
-        # Conservative Kelly for arb (probability ≈ 1 for pure arb, less for directional)
-        if event.strategy in ("S1_REBALANCING", "S2_CROSS_PLATFORM"):
-            p = 0.95   # Near-certain for pure arb
-        elif event.strategy in ("S3_LOGICAL_ARB", "S4_SETTLEMENT_ARB"):
-            p = 0.80   # High but not certain
+        # Dollar budget this trade may consume, before any edge-based scaling.
+        budget_usd = min(
+            total_capital * (self._risk.max_capital_per_trade_pct / 100.0),
+            max(0.0, free_capital) * 0.9,
+        )
+        if budget_usd <= 0:
+            return 0
+
+        if event.strategy in self.RISKLESS_STRATEGIES:
+            # Caps are the constraint; deploy the full permitted budget.
+            deployable_usd = budget_usd
         else:
-            p = 0.65   # More uncertain strategies
+            p = float(getattr(event, "model_probability", 0.0) or 0.0)
+            c = cost_per_contract
+            if not (0.0 < p < 1.0) or not (0.0 < c < 1.0):
+                log.warning("sizing_missing_model_probability",
+                            strategy=event.strategy,
+                            model_probability=p,
+                            cost_per_contract=c)
+                return 0
+            kelly_full = (p - c) / (1.0 - c)
+            if kelly_full <= 0:
+                return 0
+            kelly_frac = min(1.0, kelly_full * self._risk.kelly_fraction)
+            deployable_usd = min(budget_usd, total_capital * kelly_frac)
 
-        q = 1 - p
-        b = event.net_profit_pct / 100  # Net profit as decimal
-
-        if b <= 0:
-            return 0.0
-
-        kelly_full = (b * p - q) / b
-        kelly_fraction = max(0, kelly_full * self._risk.kelly_fraction)
-
-        # Position size
-        size = total_capital * kelly_fraction
-
-        # Apply hard caps
-        max_size = total_capital * (self._risk.max_capital_per_trade_pct / 100)
-        size = min(size, max_size, free_capital * 0.9)
-
-        # Reduce for elevated geopolitical risk
+        # Risk-environment haircuts (unchanged semantics, applied to dollars).
         if self._geopolitical_risk == "ELEVATED":
-            size *= 0.75
+            deployable_usd *= 0.75
         elif self._geopolitical_risk == "HIGH":
-            size *= 0.5
+            deployable_usd *= 0.5
         elif self._geopolitical_risk == "CRITICAL":
-            size *= 0.25
+            deployable_usd *= 0.25
 
-        # Reduce for high portfolio correlation
         if self._current_snapshot.correlation_score > 0.7:
             reduction = 1 - (self._current_snapshot.correlation_score - 0.7) / 0.3
-            size *= max(0.3, reduction)
+            deployable_usd *= max(0.3, reduction)
 
-        # Cap to what the order book can actually fill (ArbScanner-computed,
-        # S1 only as of 2026-07-13 — 0.0 means the strategy didn't compute
-        # one, so no cap is applied). Note: `size` here is nominally USD
-        # (Kelly formula output) while max_fillable_qty is contract count —
-        # these units don't actually match, but this mirrors the existing,
-        # pre-existing convention throughout this codebase where
-        # approved_size is already consumed as a raw quantity by
-        # PaperExecutor (event.approved_size -> leg "quantity" directly,
-        # no dollar/contract conversion anywhere). Not fixed here — flagged
-        # as separate KNOWN DEBT in CLAUDE.md; this cap stays consistent
-        # with the existing (imperfect) unit handling rather than
-        # introducing a second, inconsistent convention.
+        qty = int(deployable_usd // cost_per_contract)
+
+        # Cap to what the book can actually fill at the quoted price
+        # (0.0 = strategy computed no cap). Both sides are contracts now.
         if event.max_fillable_qty > 0:
-            size = min(size, event.max_fillable_qty)
+            qty = min(qty, int(event.max_fillable_qty))
 
-        return round(size, 2)
+        return max(0, qty)
 
     # ── Event Handlers ────────────────────────────────────────────────────────
 

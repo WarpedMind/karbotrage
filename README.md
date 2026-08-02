@@ -392,6 +392,14 @@ G1–G5 gates that must pass before any of it sees paper money — is in
 - **S5a/S5b viability** — checked against one real snapshot, not yet
   disproven but not yet confirmed either. Continues as a cheap passive
   detect-and-log canary rather than as a priority.
+- **Which unconventional data sources actually predict anything** — see
+  [`SIGNAL_REGISTER.md`](SIGNAL_REGISTER.md), a standing register of
+  candidate signals (official weather-modification filings, ADS-B,
+  solar/lunar/geophysical events, crowd-sourced claim data, Farmer's
+  Almanac) with a hard statistical gate. Nothing in it is endorsed and
+  nothing is dismissed — track record decides. The gate exists because the
+  failure mode of an open mind on a small sample isn't wasted time, it's
+  confidently trading noise.
 - **S1's liquidity cap is top-of-book only**, not a full multi-level
   depth walk — moot while S1 is canary-mode-only, but relevant again if
   the reconstruction bug is ever fixed.
@@ -421,16 +429,22 @@ hours of logs instead of waiting days for an actual trade.
 
 ## Next up
 
-**Phase 0 — prerequisites, no strategy code**
+**Phase 0 — prerequisites** *(3 of 4 done, 2026-08-02)*
 
-1. **Answer the NOAA forecast-archive question first.** It decides whether
-   the backtest is one session or several weeks. No model code before it.
-2. Fix the RiskGate/PaperExecutor dollar-vs-contract unit mismatch. Now a
-   hard prerequisite: S1's dollars≈contracts coincidence doesn't hold for
-   a single-leg position, where the error is a factor of `1/price`.
-3. Wire `from_yaml()` to actually parse `strategies:`, `capital:`,
-   `risk:`, and `data_feeds:` — all four are silently ignored today.
-4. Make paper resolution settle against real market outcomes.
+1. ✅ **NOAA forecast-archive question answered.** NBM archive on AWS
+   (`noaa-nbm-grib2-pds`, anonymous, 2020→now) carries forecast TMAX *and*
+   ensemble standard deviation, with `.idx` byte-range access; Kalshi
+   supplies settled outcomes and `candlesticks` price history with bid/ask.
+   The backtest is buildable now over real history.
+2. ✅ **RiskGate dollar-vs-contract unit mismatch fixed.** Sizing now
+   returns integer contracts derived from real per-contract basket cost.
+   Riskless strategies size against caps (removing a hidden ~5.26%
+   minimum-edge floor); statistical strategies use `f* = (p − c)/(1 − c)`
+   fed by a real model probability, and size to zero rather than guess.
+3. ✅ **`from_yaml()` now parses `capital:`, `risk:`, `strategies:`,
+   `data_feeds:`, `intelligence:`** — and warns on unknown keys, so a
+   mistyped setting can't look configured while doing nothing.
+4. ⬜ Make paper resolution settle against real market outcomes.
    `PaperExecutor` currently resolves every trade at its own expected P&L,
    which is tautological for a directional strategy.
 

@@ -19,6 +19,7 @@ Strategy implementations:
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -76,10 +77,44 @@ class KalshiFeeModel:
 
     @classmethod
     def taker_fee_fraction(cls, price: float) -> float:
-        """Fee as a fraction of $1 face value for one contract at `price`."""
+        """
+        Fee as a fraction of $1 face value for one contract at `price`.
+
+        CONTINUOUS approximation — does NOT apply Kalshi's round-up. Fine for
+        comparing candidate edges; systematically OPTIMISTIC for real orders,
+        badly so for small ones. Use taker_fee_dollars() for anything that
+        decides whether a specific trade is profitable.
+        """
         if price <= 0.0 or price >= 1.0:
             return 0.0
         return cls.TAKER_FEE_MULTIPLIER * price * (1.0 - price)
+
+    @classmethod
+    def taker_fee_dollars(cls, price: float, contracts: float) -> float:
+        """
+        Real per-ORDER taker fee in dollars, rounded UP as Kalshi does.
+
+        Kalshi's published schedule (effective 2026-07-07, read directly in
+        Session 30 — `documentation/kalshi-fee-schedule.pdf`):
+            fees = round up(M x 0.07 x C x P x (1-P)),  M defaults to 1
+        The round-up is per ORDER, not per contract, so it amortises with size
+        and bites hardest on the tiny liquidity-capped orders this system
+        actually places: a 1-contract fill at $0.10 pays $0.01 — 10% of face
+        value, versus the continuous model's 0.63%. Session 28 flagged this;
+        it is implemented here.
+
+        The schedule's prose says the round-up lands on a "centicent"
+        ($0.0001), but its own published fee table shows 1 contract at $0.10
+        paying $0.01 and at $0.50 paying $0.02 — i.e. ceil-to-the-cent. The
+        table is authoritative for observed behaviour and is what is
+        implemented. VERIFY AGAINST A REAL FILL before trusting this for live
+        sizing; sub-cent (`deci_cent`) price levels now exist on some markets
+        and may be where the centicent language applies.
+        """
+        if contracts <= 0 or price <= 0.0 or price >= 1.0:
+            return 0.0
+        raw = cls.TAKER_FEE_MULTIPLIER * contracts * price * (1.0 - price)
+        return math.ceil(raw * 100.0 - 1e-9) / 100.0
 
     @classmethod
     def estimate_fee_pct(cls, yes_price: float, no_price: float) -> float:

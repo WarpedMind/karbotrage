@@ -278,6 +278,32 @@ class KarbotConfig:
 
     # ── YAML loader ───────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _section(dc_cls, raw_section: Any):
+        """
+        Build a sub-config dataclass from a YAML mapping, ignoring unknown keys
+        but WARNING about them.
+
+        The warning is the point. Session 24 lost three live deploys to
+        `telegram.enabled` silently defaulting to False, and Session 28/30 found
+        `data_feeds:`, `capital:`, `risk:` and `strategies:` were never parsed at
+        all — so `config.yaml.example`'s keys were decorative and capital was
+        permanently the $10k paper default on the VPS. A key that looks
+        configured but does nothing is the most expensive kind of bug this
+        project has hit. If an operator writes a key we don't recognise, say so
+        at startup rather than ignoring it in silence.
+        """
+        if not isinstance(raw_section, dict):
+            return dc_cls()
+        known = {f.name for f in dataclass_fields(dc_cls)}
+        unknown = sorted(set(raw_section) - known)
+        if unknown:
+            log.warning(
+                "config_unknown_keys section=%s ignored_keys=%s",
+                dc_cls.__name__, unknown,
+            )
+        return dc_cls(**{k: v for k, v in raw_section.items() if k in known})
+
     @classmethod
     def from_yaml(cls, path: str) -> "KarbotConfig":
         """Load config from a YAML file, falling back to safe defaults."""
@@ -290,7 +316,6 @@ class KarbotConfig:
                 raw = yaml.safe_load(f) or {}
 
         # Map legacy config.yaml fields to KarbotConfig structure.
-        # Unknown keys are silently ignored — defaults are Phase 1 safe.
         trading = raw.get("trading", {})
         paper = trading.get("mode", "paper") == "paper"
 
@@ -357,8 +382,25 @@ class KarbotConfig:
             ),
         )
 
+        # Sections that were silently unparsed until Session 30 (2026-08-02).
+        # RiskConfig.__post_init__ still enforces the ABSOLUTE_* hard limits, so
+        # YAML cannot raise a risk ceiling above what the code permits — it can
+        # only lower it. KarbotConfig.__post_init__ still enforces the Phase 1
+        # invariants, so a config enabling Polymarket or S2 at phase=1 raises
+        # rather than quietly running.
+        data_feeds = cls._section(DataFeedsConfig, raw.get("data_feeds"))
+        capital    = cls._section(CapitalConfig,   raw.get("capital"))
+        risk       = cls._section(RiskConfig,      raw.get("risk"))
+        strategies = cls._section(StrategiesConfig, raw.get("strategies"))
+        intelligence = cls._section(IntelligenceConfig, raw.get("intelligence"))
+
         return cls(
             system=system,
+            data_feeds=data_feeds,
+            capital=capital,
+            risk=risk,
+            strategies=strategies,
+            intelligence=intelligence,
             telegram=telegram,
             regulatory_intelligence=regulatory_intelligence,
             regulatory_halt=raw.get("regulatory_halt", False),

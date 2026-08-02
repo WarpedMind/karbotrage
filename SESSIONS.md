@@ -203,6 +203,93 @@ into "P(high > 75°)" requires a per-station, per-lead-time forecast-error
 distribution. That error model *is* the strategy; NBM probabilistic
 guidance may supply it directly and should be checked first.
 
+### Phase 0 implementation — the two live bugs fixed (157/157 tests passing)
+Operator pushed back on the proposed sequencing ("if we'll eventually need
+all the code anyway, continue with that... I don't want zombie code — but
+sounds like what we build is needed still right?"). Correct, and it
+reframed the plan usefully: **these were never S6 prerequisites, they are
+outstanding bug fixes to live code that had been mislabeled as S6
+scaffolding.** Neither becomes unnecessary if S6 dies. Done on that basis.
+
+**1. The dollars-vs-contracts unit bug (Session 28 entry 3) — FIXED.**
+`RiskGateAgent._calculate_position_size` returned Kelly **dollars**;
+`PaperExecutor` wrote that number straight into each leg's `"quantity"`
+and `PositionTracker` booked `price × quantity`. It only ever balanced
+because an S1 YES+NO pair costs ≈$1. Now:
+- Returns an **integer contract count** — a dollar budget divided by
+  `_basket_cost_per_contract()` (sum of leg ask prices), floored, with
+  anything under 1 contract returning 0. Session 27's 0.05-contract paper
+  trade could not have existed on Kalshi.
+- **Riskless vs statistical sizing split.** `RISKLESS_STRATEGIES`
+  (S1/S2/S5a/S5b) size against the caps, which removes the hidden
+  ~5.26% minimum-edge floor that Kelly at a hardcoded `p=0.95` was
+  silently imposing and that made `s1_min_net_profit_pct=0.5` a dead
+  letter. A test now pins this directly: a 0.6% riskless edge must size
+  positively.
+- **Kelly, correctly, for statistical strategies**: `f* = (p − c)/(1 − c)`,
+  fed by a new additive `OpportunityEvent.model_probability`. If that field
+  is absent, the trade sizes to **0** rather than falling back to a
+  hardcoded pseudo-probability — the exact bug being fixed.
+- Check 2 (`POSITION_TOO_LARGE`) now falls back to the derived basket cost
+  when `capital_required_usd` is unset, so a check that had **never once
+  run** finally binds.
+- The approval log emits `size_contracts` and `cost_usd` instead of
+  `size_usd`, so historical log lines can't be misread the same way again.
+- `KalshiFeeModel.taker_fee_dollars()` added, implementing Kalshi's real
+  per-order round-up — validated against the published fee table
+  (1 contract @ $0.10 → $0.01; 100 @ $0.50 → $1.75; 100 @ $0.30 → $1.47).
+  The old continuous `taker_fee_fraction()` is kept but now documented as
+  systematically optimistic, worst on the tiny orders this system places.
+
+**2. `from_yaml()` silently ignoring four config sections — FIXED.**
+`data_feeds:`, `capital:`, `risk:`, `strategies:` and `intelligence:` are
+now parsed through a generic `_section()` helper that additionally
+**warns on unknown keys** (`config_unknown_keys`). That warning is the
+point: Session 24 lost three live deploys to a flag that looked configured
+and did nothing. RiskConfig's `ABSOLUTE_*` ceilings and the Phase 1
+invariants still bind against YAML — both explicitly tested, so making
+these sections configurable did not become a way to configure past the
+hard limits.
+
+**Test note worth recording**: three existing liquidity-cap tests failed
+against the new sizing, and the reason was diagnostic rather than
+incidental — they constructed `OpportunityEvent`s with **no legs at all**,
+which passed under the old code because sizing never looked at what it was
+buying. That is the unit bug in miniature. Updated to carry real ask-priced
+legs, with each test's original intent preserved.
+
+157/157 passing; runner smoke test exits cleanly with S1 canary firing as
+designed.
+
+### Alternative / unconventional data — SIGNAL_REGISTER.md created
+Operator raised a broad set of candidate data sources (weather-modification
+and cloud-seeding trackers, ADS-B, satellite loops, solar/lunar/tidal and
+geophysical events, launch schedules, Farmer's Almanac) and asked that it
+be documented and treated as an open question rather than pre-judged —
+*"data is data... awareness and an open mind keeps one able to make
+connections not anticipated."*
+
+Created `SIGNAL_REGISTER.md`: a standing, tiered register with a hard
+methodology gate. Two things worth surfacing from it here:
+- **The strongest item on the list is an official government registry.**
+  Weather modification is real, legal and funded; NOAA maintains a
+  legally-required public repository of project reports, and filers must
+  report **≥10 days before activity commences**. Advance public notice of
+  planned cloud seeding has a direct physical path to precipitation
+  markets. (Caveat flagged in the register: the repository publishes
+  *quarterly*, so whether filings are visible at submission time or only at
+  publication is **unverified and decisive** for tradability.)
+- **The real risk is multiple comparisons, not the subject matter.**
+  ~800–5,000 settled outcomes against hundreds of candidate signals will
+  manufacture "significant" findings by construction. The register makes
+  the vision doc's own guardrails mandatory (Bonferroni/FDR, n≥20,
+  replication across 3 periods, ≥2h lead, out-of-sample, and always the
+  market price as baseline). Also documented: contrail-report data has a
+  textbook common-cause confound — persistent contrails form because of
+  upper-atmosphere humidity and temperature, so they will correlate with
+  weather without predicting it, and must be tested against an
+  NBM-conditioned baseline.
+
 ### Also decided: the 30-day paper clock is reset, not paused
 It started 2026-06-29 targeting 2026-07-29 — a date that has now passed.
 That window is not usable evidence: 9 of its first 14 days had a dead
