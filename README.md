@@ -68,7 +68,7 @@ The legacy `python main.py` path still works but is intentionally not extended �
 
 - Kalshi is the primary data source; Polymarket is gated behind `polymarket_ws_enabled` (disabled in Phase 1)
 - Phase 1 invariants are enforced structurally in `KarbotConfig.__init__` — enabling Polymarket WebSocket or cross-platform strategies while `phase=1` raises `ValueError` at startup
-- Paper trading mode only; 30-day paper trading clock started 2026-06-29, target live date 2026-07-29; live execution deferred until it completes and end-to-end results are reviewed
+- Paper trading mode only. The 30-day paper clock has been **reset** (Session 30) — the original 2026-06-29 → 2026-07-29 window is not usable evidence, because 9 of its first 14 days ran with a dead persistence layer and every S1 trade in it turned out to be a book-reconstruction artifact. A new clock starts when a strategy that has passed its measurement gates actually begins paper trading. Live execution stays deferred until then.
 
 ## Project layout
 
@@ -316,11 +316,72 @@ detect-and-log S5a/S5b over a longer real window, search more
 specifically for genuine winner-take-all markets, or reconsider
 direction entirely (e.g. market-making).
 
+## Direction change, 2026-08-01 (Session 30): from pure arbitrage to statistical trading
+
+Pure structural arbitrage on Kalshi turned out to be a dead end for the
+strategy this project started with, and thin-to-absent for its successors.
+S1 is impossible by construction (see the correction above). S5a/S5b are
+not disproven, but a real 1,600-market check found nothing sitting there.
+So the centre of gravity moves to **statistical trading — real edge, real
+variance, no risk-free guarantee** — while the arbitrage work stays in
+place rather than being ripped out.
+
+**Chosen direction: S6 — External Model Divergence.** Compare Kalshi's
+price against a calibrated external source and trade the gap. Starting
+with weather markets and the National Weather Service, for one reason
+that nothing else in the market universe offers: Kalshi weather markets
+settle on *"the National Weather Service's Climatological Report (Daily)"*
+for a specific named station — **the forecast source and the settlement
+source are the same agency's number for the same station.**
+
+This was chosen over market-making on measured grounds, not preference:
+
+| Measured live 2026-08-02, 40,000 open markets, 74.7M contracts/24h | |
+|---|---|
+| Sports share of volume | 75.4% |
+| Weather share of volume | 3.2% (2.4M contracts, 672 markets) |
+| Fed / CPI / econ share of volume | 0.1% — effectively dead |
+| Median bid-ask spread (markets that trade) | 2¢ |
+| Markets with spread ≥2¢ and ≥100 contracts both sides | 486 |
+
+The deciding argument: **divergence can be falsified offline, and
+market-making cannot.** NWS publishes forecasts and Kalshi publishes
+settlements, so "when the model said 70% and the market said 55%, what
+actually happened?" is answerable from history with no capital at risk.
+Whether resting quotes get filled — and whether the fills you get are the
+ones you didn't want — can only be learned by placing real orders. A
+direction that can be killed cheaply beats one that can only be evaluated
+expensively. That is the same discipline that killed S1 for $0.
+
+Market-making stays on the roadmap, deferred behind a live
+order-management layer that doesn't exist yet. Also corrected this
+session: Kalshi's maker fee is **not** $0 as previously recorded — it's
+25% of the taker fee, `ceil(0.0175 × C × P × (1−P))`, which at 1 contract
+on a 50¢ market is 1¢ per side against a 2¢ median spread. Nothing is
+being deleted: S1's canary detector, the S2/S3/S4 groundwork, the event
+bus, order-book reconstruction, RiskGate, PaperExecutor, the compliance
+and Telegram agents all remain as substrate.
+
+Full spec — architecture, Kelly derivation, backtest design, and the
+G1–G5 gates that must pass before any of it sees paper money — is in
+`DECISIONS.md`, Session 30.
+
 ## Open questions (flagged live, not yet resolved)
 
+- **Does NOAA-vs-Kalshi divergence have any edge at all?** Nothing in this
+  repo claims it does. The bar is deliberately high: not "is NOAA
+  accurate" but "is NOAA better calibrated than the Kalshi price itself,"
+  measured by Brier score against the market as baseline.
+- **Is there a usable archive of past NWS forecasts?** `api.weather.gov`
+  serves only the current forecast. This is the single biggest unknown in
+  the plan — with an archive the backtest takes a session, without one it
+  takes weeks of forward data collection.
+- **VPS state is currently unknown** — SSH has been failing with
+  `Permission denied (publickey)` since 2026-08-01. Access needs restoring
+  before any "confirmed live" claim can be re-audited.
 - **S5a/S5b viability** — checked against one real snapshot, not yet
-  disproven but not yet confirmed either. Needs either a longer
-  detect-and-log window or a more targeted search (see correction above).
+  disproven but not yet confirmed either. Continues as a cheap passive
+  detect-and-log canary rather than as a priority.
 - **S1's liquidity cap is top-of-book only**, not a full multi-level
   depth walk — moot while S1 is canary-mode-only, but relevant again if
   the reconstruction bug is ever fixed.
@@ -350,23 +411,41 @@ hours of logs instead of waiting days for an actual trade.
 
 ## Next up
 
-1. **Decide on S5a/S5b direction** (see correction above) — detect-and-log
-   over a longer window, search more specifically for genuine
-   winner-take-all events, or reconsider strategy direction entirely.
-   This is the actual next decision, not a default "keep building."
-2. Fix the RiskGate dollar/quantity unit mismatch — prerequisite before
-   any basket strategy (S5a) can be trusted to size correctly.
-3. Investigate the stuck order-book reset loop (why some markets never
-   complete recovery — the disk-filling symptom is fixed, the loop itself
-   isn't).
-4. Re-audit every "CONFIRMED LIVE" claim in CLAUDE.md against actual VPS
-   state, not just prior session notes.
-5. Investigate the paper-trade fee variance noted in earlier sessions.
-6. Add a concurrency limiter (`asyncio.Semaphore`) on `_request_snapshot`
-   REST calls — not urgent.
-7. Telegram `/mute` `/unmute` operator commands.
-8. Live executor spec — on hold until a confirmed-viable strategy exists;
-   the original 2026-07-29 target assumed S1 would be that strategy.
+**Phase 0 — prerequisites, no strategy code**
+
+1. **Answer the NOAA forecast-archive question first.** It decides whether
+   the backtest is one session or several weeks. No model code before it.
+2. Fix the RiskGate/PaperExecutor dollar-vs-contract unit mismatch. Now a
+   hard prerequisite: S1's dollars≈contracts coincidence doesn't hold for
+   a single-leg position, where the error is a factor of `1/price`.
+3. Wire `from_yaml()` to actually parse `strategies:`, `capital:`,
+   `risk:`, and `data_feeds:` — all four are silently ignored today.
+4. Make paper resolution settle against real market outcomes.
+   `PaperExecutor` currently resolves every trade at its own expected P&L,
+   which is tautological for a directional strategy.
+
+**Phase 1 — measure before building**
+
+5. `FairValueEngine` + NOAA provider + a `backtest/` harness. The
+   deliverable is a calibration report, not a trading agent.
+
+**Phase 2–3 — detect and log**
+
+6. `DivergenceScanner` live, publishing nothing tradeable, for 1–2 weeks.
+7. S5a/S5b basket/ladder canary — cheap, passive, parallel.
+
+**Standing**
+
+8. Restore VPS access, then re-audit every "CONFIRMED LIVE" claim.
+9. Confirm Kalshi's maker fee against the primary source (currently
+   secondary-sourced only).
+10. Build the Health Monitor agent — no longer cosmetic once positions
+    carry real variance.
+11. Investigate the stuck order-book reset loop; the paper-trade fee
+    variance; a concurrency limiter on `_request_snapshot`; Telegram
+    `/mute` `/unmute`.
+12. Live executor, then market-making — gated, last, and re-derived
+    against the corrected maker fee.
 
 ## License
 

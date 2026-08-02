@@ -95,8 +95,19 @@ async def run(self): ...
   one row per leg with real market_id, side, quantity, price, fees.
   Confirmed live on VPS: real Kalshi trades (PGA, World Cup, tennis, MLB)
   writing correctly with full data to kalshi_trades.csv ✓
-- **30-day paper trading clock: STARTED 2026-06-29. Target live date: 2026-07-29.**
-- Full test suite: 83/83 passing ✓ (49 baseline + 4 S17 + 2 S17-fu2 + 4 S17-fu3 + 4 S18 + 2 S19 + 4 S20-telegram + 3 S20-restart + 2 S22-net + 4 S22-new + 4 S23 + 1 S24 + 3 S25)
+- **Strategy direction (Session 30, 2026-08-01): pivoting to statistical
+  trading — S6 external-model divergence (NOAA/weather) first, in
+  detect-and-log mode behind an offline backtest; market-making deferred
+  behind a live order layer; S5a/S5b arb continues as a passive canary.
+  Authoritative spec: DECISIONS.md Session 30 entry.** No S6 code exists
+  yet — Session 30 was spec-only.
+- **30-day paper trading clock: RESET (Session 30).** The old
+  2026-06-29 → 2026-07-29 window is not usable evidence (dead persistence
+  layer for 9 of its first 14 days; all S1 trades in it are confirmed
+  book-reconstruction artifacts). A new clock starts only when a strategy
+  that has passed gates G1–G5 begins paper trading. See KNOWN DEBT.
+- Full test suite: 133/133 passing as of Session 29 (not re-run in
+  Session 30 — no code changed)
 - Kalshi market volume filter: FIXED AND CONFIRMED LIVE (Session 15) —
   `_fetch_active_kalshi_markets()` sends `mve_filter=exclude`, paginates
   via `cursor`, filters on `volume_24h_fp` (cast to float). Live VPS
@@ -148,6 +159,94 @@ async def run(self): ...
   confirming each independently.
 
 ## KNOWN DEBT
+
+### DIRECTION SET, Session 30 (2026-08-01): pivot to statistical trading — S6 external-model divergence first; market-making deferred; arb continues as a passive canary
+Spec-only session. Full architecture, math, gates and build plan in
+DECISIONS.md's Session 30 entry (the authoritative version — this is a
+pointer, not a summary to build from). The short form:
+- **Chosen: S6 — External Model Divergence**, weather/NOAA first, in
+  detect-and-log mode, gated behind an offline backtest. New
+  `FairValueEngineAgent` (pluggable `FairValueProvider` registry) +
+  `DivergenceScannerAgent` + additive `FairValueEstimateEvent`.
+- **Deferred: market-making (S8)** — behind a live order-management layer
+  that does not exist. Measured surface for whenever it's picked up: 486
+  markets with spread ≥2¢ and ≥100 contracts both sides.
+- **Continuing: S5a/S5b as a cheap passive canary**, not a priority — a
+  REST poller plus arithmetic, no LLM, no orders. Turns "one snapshot found
+  nothing" into real frequency data over weeks.
+- **Kelly finally has a correct home**: for a binary contract bought at
+  price `c` with model probability `p`, `f* = (p − c)/(1 − c)`. Fed the
+  model's probability, never a hardcoded per-strategy constant.
+- **Nothing was deleted or gutted.** All arb groundwork, the event bus,
+  order-book reconstruction, RiskGate, PaperExecutor, ComplianceOfficer,
+  and the Telegram agent stay as reusable substrate.
+
+### CORRECTION to Session 28: Kalshi's maker fee is NOT $0 — found Session 30 (2026-08-01)
+Session 28 recommended market-making partly on "maker fee = $0 on most
+Kalshi markets" (DECISIONS.md Session 28 roadmap entry; SESSIONS.md Session
+28 item S8). Three independent third-party references give the real maker
+fee as **25% of taker** — `ceil(0.0175 × C × P × (1−P))` — which also
+matches this repo's own `KalshiFeeModel` docstring, unreconciled until now.
+With ceil rounding, 1 contract at 50¢ pays **1¢ per side**, against a
+**median observed spread of 2¢** — at small size the fee is the whole
+spread. Market-making is therefore only viable at size, where the real
+exposure is inventory/adverse selection rather than spread capture.
+**SECONDARY-SOURCED — needs primary confirmation**: Kalshi's own fee
+schedule PDF returned HTTP 429 on three attempts. Confirm before any
+market-making work proceeds. Session 28's entry is intentionally left
+intact; the Session 30 DECISIONS.md entry supersedes it.
+
+### Live Kalshi universe measurements — CONFIRMED LIVE, Session 30 (2026-08-02 ~03:00 UTC)
+Public REST, no auth, 40,000 open markets (`mve_filter=exclude`),
+74,654,881 contracts of 24h volume. Reusable baseline — re-measure rather
+than assume these are still current:
+- Volume by domain: **sports 75.4%** (PGA 31.3%, MLB ~36%), **weather
+  3.2%** (2,404,232 contracts / 672 markets), **Fed-CPI-econ 0.1%**
+  (46,953 contracts / 453 markets — effectively dead, which is why
+  "Kalshi vs CME FedWatch" was ruled out as a starting point).
+- Of 3,918–3,938 markets with vol≥100 and a two-sided book: spread p25/med/
+  p75/p90 = 1¢ / **2¢** / 4¢ / 8¢; top-of-book `min(bid,ask)` p25/med/p75/
+  p90 = 5 / **42** / 395 / 1,395 contracts.
+- **Kalshi weather markets settle on NWS's own data** — verbatim from
+  `rules_primary`: *"as reported by the National Weather Service's
+  Climatological Report (Daily)"* for a named station. Forecast source and
+  settlement source are the same agency's number for the same station.
+  Structure: 12-market city-day temperature ladders, machine-parseable via
+  `strike_type` (`greater`/`between`) and `floor_strike` — no LLM needed.
+
+### BIGGEST OPEN UNKNOWN for the S6 build — resolve BEFORE writing model code
+`api.weather.gov` serves the **current** forecast, not an archive of past
+forecasts. Historical NWS/NBM forecast archives are understood to exist
+(NOAA NOMADS, Iowa State IEM) but Session 30 did **not** verify any is
+reachable, complete, or matched to the stations Kalshi settles on. This
+decides the timeline: with a usable archive, a real backtest is one session
+over months of history; without one, the fallback is forward collection of
+(forecast, price, outcome) triples and the answer takes weeks. Also: NWS
+gridpoint forecasts are **deterministic values, not probabilities** —
+converting "predicted high 78°" into "P(high > 75°)" needs a per-station,
+per-lead-time forecast-error distribution. That error model *is* the
+strategy. Check whether NBM probabilistic guidance supplies it directly
+before building a bespoke one.
+
+### 30-day paper clock RESET, Session 30 — the old dates are dead
+Started 2026-06-29 targeting 2026-07-29; that date has passed and the
+window is not usable evidence — 9 of its first 14 days had a dead
+persistence layer (Session 26) and every S1 trade in it is a confirmed
+book-reconstruction artifact (Session 29). **The clock restarts when a
+strategy that has passed its gates actually begins paper trading.** No live
+trading on anything until that clock has genuinely run.
+
+### VPS access lost as of Session 30 (2026-08-01) — VPS state is UNKNOWN, not assumed
+`ssh ubuntu@147.224.209.18` fails with `Permission denied (publickey)`
+using `~/.ssh/id_rsa` (the only key present; `ssh-add -l` reports no
+identities; no `~/.ssh/config` entry for the host). Prior sessions had
+working SSH. Session 30 therefore **cannot** confirm whether the VPS is
+running, what commit it is on, or its disk state — and makes no claim
+either way. Restoring access is a prerequisite for the standing "re-audit
+every CONFIRMED LIVE claim against actual VPS state" item below.
+Separately and unexplained: a local `logs/audit_trail.jsonl` `DailySummary`
+write at 2026-08-02T03:11 UTC with **no** `karbot_runner` process running
+locally. Not investigated; flagged rather than waved off.
 
 ### S5a/S5b checked against real live data BEFORE building — neither shows a currently-exploitable edge, Session 29 (2026-07-16)
 Before writing any S5a/S5b code, ran the same empirical-first discipline
@@ -687,47 +786,82 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-1. ~~Fix the Telegram sender-authentication hole~~ — **DONE, Session 29
-   (2026-07-16)**: `_is_authorized_sender()` checks `message.chat.id`
-   against `TELEGRAM_CHAT_ID`. ~~Set a non-default `regulatory_clear_phrase`
-   on the VPS~~ — **still open**, confirmed the VPS still uses the
-   default value, needs rotating. ~~Verify `karbot-disk-alert.sh`
-   reads the right secrets path~~ — **DONE**: it didn't, fixed and
-   verified live with a real test send.
-2. ~~Run the S1 structural-impossibility verification plan~~ — **DONE,
-   Session 29**: confirmed (0/778 real markets crossed; 5/5 trades
-   correlate 100% with a gap event). S1 demoted to canary mode
-   (`s1_canary_mode=True`, default). Session 27's claims marked
-   superseded.
-3. **S5a/S5b — decision point, not a straightforward build** (Session 28
-   spec in DECISIONS.md entry 5; Session 29 empirical check in KNOWN
-   DEBT above and SESSIONS.md). Neither showed a currently-exploitable
-   edge against a real 1,600-market live sample — 0/78 genuine
-   mutually-exclusive S5a candidates, closest S5b ladder crossing was
-   1.01 (not <1.00). Before building the full scanners, operator should
-   decide: (a) invest in detect-and-log mode over 1-2 weeks anyway to
-   catch rare/time-varying windows a snapshot can't see, (b) search more
-   specifically for genuine winner-take-all events (elections, award
-   winners) not well-represented in the sample checked, or (c)
-   reconsider direction (market-making, Session 28's S8 note). If (a) is
-   chosen: group by `event_ticker`, honor `mutually_exclusive` +
-   exhaustiveness rules (YES-basket needs exhaustive; NO-basket only
-   needs mutual exclusivity), price at ask via existing depth fields,
-   apply ceil'd per-order fees × N legs, no RiskGate wiring yet.
-4. **Fix the RiskGate/PaperExecutor unit system** (Session 28,
-   DECISIONS.md entry 3): standardize on integer contract count
-   end-to-end; set `capital_required_usd = qty × basket_cost` so check
-   2 finally binds; floor quantities to int, reject < 1; replace Kelly
-   with cap/depth-based sizing for riskless strategies (keep fractional
-   Kelly only for statistical ones); make `KalshiFeeModel` ceil to the
-   next cent. Prerequisite for trading S5a/S5b.
-5. **Fix or explicitly disable the S3 pipeline** (Session 28, DECISIONS.md
+**Direction set Session 30 — see DECISIONS.md's Session 30 entry for the
+authoritative spec (architecture, math, gates). Build from that entry, not
+from this list; this list is the ordering.**
+
+### Phase 0 — prerequisites, no strategy code
+1. **Resolve the NOAA historical-forecast-archive question FIRST** (KNOWN
+   DEBT above, "BIGGEST OPEN UNKNOWN"). `api.weather.gov` serves only the
+   current forecast. Check whether NOAA NOMADS / Iowa State IEM (or NBM
+   probabilistic guidance) gives a reachable, complete archive matched to
+   the stations Kalshi settles on. **Decides whether the backtest is one
+   session or several weeks of forward collection.** Do not write model
+   code before this is answered.
+2. **Fix the RiskGate/PaperExecutor unit system** (Session 28, DECISIONS.md
+   entry 3) — now a hard prerequisite, not a nice-to-have: S1's
+   dollars≈contracts coincidence does not hold for a single-leg S6
+   position, where the error is a factor of `1/price`. Standardize on
+   integer contract count end-to-end; set `capital_required_usd = qty ×
+   cost` so check 2 finally binds; floor to int, reject < 1; make
+   `KalshiFeeModel` ceil to the next cent. Keep fractional Kelly **only**
+   for statistical strategies, fed the model probability
+   (`f* = (p − c)/(1 − c)`), never a hardcoded per-strategy constant.
+3. **Fix the `from_yaml()` config-parsing gaps** (Session 24 + 28) —
+   `data_feeds:`, `capital:`, `risk:`, and `strategies:` are all silently
+   unparsed, so capital is permanently the $10k paper default and no
+   strategy threshold is tunable without a code change. Blocks operating
+   S6 thresholds sanely. Also make `--mode` actually override, or remove it.
+4. **Make S6 paper resolution settle against real outcomes.**
+   `PaperExecutor` currently resolves every trade at its own
+   `expected_pnl` after a fixed delay — tautological for a directional
+   strategy, and it would make every S6 paper result meaningless. Hard
+   requirement before S6 ever trades on paper.
+
+### Phase 1 — measure before building (deliverable is a report, not an agent)
+5. **`FairValueEngineAgent` + `NoaaTemperatureProvider` + `backtest/`
+   harness.** Produce a calibration report: model Brier score **vs the
+   Kalshi price as baseline**, out-of-sample, reliability curve, stated
+   sample size. The bar is not "is NOAA accurate" — it is "is NOAA better
+   calibrated than the market." Gates G1/G2 decided here; failing is a
+   cheap, acceptable outcome.
+
+### Phase 2 — detect-and-log live
+6. **`DivergenceScannerAgent`**, publishing nothing tradeable, logging to
+   `logs/divergence_candidates.jsonl`, run 1–2 weeks. Confirm observed
+   divergence frequency/magnitude matches what the backtest predicted — a
+   mismatch means a live-data bug, not an edge. Gates G3/G4.
+
+### Phase 3 — arb canary, cheap and parallel
+7. **S5a/S5b passive detect-and-log scanner** (Session 28 spec, Session 29
+   empirical check). REST-poll, group by `event_ticker`, honor
+   `mutually_exclusive` + exhaustiveness (YES-basket needs exhaustive;
+   NO-basket needs only mutual exclusivity), price at ask, apply ceil'd
+   per-order fees × N legs, log to `logs/basket_candidates.jsonl`, never
+   publish a tradeable event. Note the Session 30 finding that weather
+   ladders are simultaneously S5a and S5b candidates — market discovery
+   can be shared with the S6 provider.
+
+### Standing / infrastructure
+8. **Restore VPS access, then re-audit every "CONFIRMED LIVE" claim in
+   this file against actual VPS state.** SSH has been failing with
+   `Permission denied (publickey)` since Session 30 — VPS state is
+   currently unknown and must not be assumed. "Confirmed live" means
+   checked against `git log -1` on the VPS itself plus fresh log output.
+9. **Confirm Kalshi's maker fee from the primary source** (KNOWN DEBT
+   above) — currently secondary-sourced only; the fee schedule PDF was
+   rate-limiting. Blocks any market-making work.
+10. **Build the Health Monitor agent / investigate dead-lettered
+   `AgentHeartbeat` events** firing every ~30s. Deferred for many sessions
+   as cosmetic; it stops being cosmetic once positions carry real variance
+   and a silently-stopped agent means unmanaged inventory.
+11. **Fix or explicitly disable the S3 pipeline** (Session 28, DECISIONS.md
    entry 2): wire `update_markets()` from PriceWatcher's market fetch (or
    delete the loop), switch pricing to asks, guard zero/empty-book
    prices, and decide single-leg (statistical) vs paired-leg (riskless-
-   if-relation-holds) semantics. Flip `s4_settlement_arb_enabled`
-   default to False until a News Analyst exists.
-6. **Investigate the stuck order-book reset loop** (Session 26) — specific
+   if-relation-holds) semantics. `s4_settlement_arb_enabled` already
+   defaults False as of Session 29.
+12. **Investigate the stuck order-book reset loop** (Session 26) — specific
    markets (e.g. `KXWORLDNEWSMENTION-26JUL10-WILD`) get stuck logging
    `book_needs_reset`/`book_reset_throttled` on every delta indefinitely,
    never actually completing recovery via the Session 22/23 REST mechanism.
@@ -735,20 +869,14 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
    cause of the Session 26 disk-full outage. The Session 26 fix
    (`structlog.configure` filtering) stops this from filling the disk again,
    but does not fix why the loop happens.
-7. **Re-audit every "CONFIRMED LIVE" claim in this file against actual VPS
-   state** (Session 26) — the VPS was found 4 commits behind `main`,
-   silently missing the Session 23/24/25 fixes despite this file marking
-   them "CONFIRMED LIVE." Going forward, "confirmed live" must mean checked
-   against `git log -1` on the VPS itself and fresh log output, not just a
-   local commit plus a plausible-sounding log line from one prior check.
-8. **Investigate paper-trade fee variance** (KNOWN DEBT, Session 25) — fee
+13. **Investigate paper-trade fee variance** (KNOWN DEBT, Session 25) — fee
    amounts observed live via Telegram vary unexplainably ($70.00 flat,
    $0.00, $42.78, $113.27, $56.64). Session 28 note: the flat $70.00
    entries are almost certainly the pre-Session-26 flat-14% fee model (7%
    per leg × ~$500 size × 2 legs = $70) and the variance since is the
    price-dependent real formula — cross-reference against `compliance.db`
    to confirm, then close this item.
-9. **Continue live-verifying Telegram alerting** (Session 19/20/24/25) —
+14. **Continue live-verifying Telegram alerting** (Session 19/20/24/25) —
    confirm: no `TypeError` on any real Kalshi WS disconnect with
    `kalshi_reconnect_retry` logs increasing (Session 19); a real "FEED
    DOWN"/"FEED RECOVERED" Telegram pair on any real disconnect/reconnect
@@ -758,16 +886,16 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
    new, independent disk-space Telegram watchdog
    (`/usr/local/bin/karbot-disk-alert.sh`, hourly-cron-adjacent via
    `/etc/cron.d/karbot-disk-alert` every 15 min) — confirmed working live.
-10. **Monitor the book-reset recovery (Session 22/23)** — watch that
+15. **Monitor the book-reset recovery (Session 22/23)** — watch that
    `book_snapshot_applied` keeps firing at a healthy rate and the 429 rate
    (currently ~5.5% right after restart, KNOWN DEBT) stays a one-time
    post-restart surge rather than a sustained pattern.
-11. **Add a concurrency limiter on `_request_snapshot` REST calls** (KNOWN
+16. **Add a concurrency limiter on `_request_snapshot` REST calls** (KNOWN
    DEBT from Session 23, not urgent) — an `asyncio.Semaphore` or similar
    bounding in-flight REST snapshot fetches, to smooth the post-restart
    burst that produced the 429s. Only worth prioritizing if 429s become a
    recurring pattern rather than a one-time restart surge.
-12. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
+17. **Telegram mute/unmute** — add operator commands (`/mute`, `/unmute`)
    so the bot can be silenced during high-volume paper trading without
    disabling the agent entirely. Scope: `TelegramNotificationAgent`
    command handler only; no changes to event bus or other agents. Note: the
@@ -775,30 +903,22 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
    once this is built — do not let it get silenced. Prerequisite: the
    sender-authentication fix (priority 1) — operator commands must not be
    world-writable.
-13. **Monitor paper trading** — clock running since 2026-06-29, target
-   live date 2026-07-29 (9 of the 14 elapsed days as of Session 26 had a
-   dead persistence layer — see Session 26 in SESSIONS.md, don't count
-   that window as clean data; Session 28: S1 trades in this data are
-   suspected artifacts pending the verification plan — don't count them as
-   edge evidence either). Review `logs/kalshi_trades.csv` and
-   `logs/compliance_actions.jsonl` periodically. Confirm resolved rows
-   show nonzero `gain_loss` and `status=RESOLVED` after
-   `paper_resolution_delay_seconds`.
-14. **Begin live executor spec** after 30-day paper run completes
-   (2026-07-29). Design `live_executor.py` to replace `paper_executor.py`
-   on the real Kalshi trading path. Session 28 gate: do NOT go live on S1
-   under any circumstances until the structural-impossibility verification
-   is resolved; the first live candidate strategy should be S5a/S5b with
-   measured detect-and-log data behind it.
-15. **Investigate dead_letter `AgentHeartbeat` events** firing every ~30s
-   in VPS logs — no Health Monitor agent subscribed yet; confirm this
-   isn't masking a real event-bus wiring issue.
-16. **Fix the `from_yaml()` config-parsing gaps** (KNOWN DEBT, Session
-   24 + Session 28) — `data_feeds:`, `capital:`, `risk:`, and
-   `strategies:` YAML sections are all silently unparsed; capital is
-   permanently the $10k paper default and strategy thresholds are not
-   operator-tunable without a code change. Also make `--mode` actually
-   override, or remove it from the documented commands.
+18. **Paper trading — clock RESET as of Session 30.** The old 2026-06-29 →
+   2026-07-29 window is dead (see KNOWN DEBT): 9 of its first 14 days had
+   a dead persistence layer, and every S1 trade in it is a confirmed
+   book-reconstruction artifact, not edge. A new 30-day clock starts only
+   when a strategy that has passed gates G1–G5 begins paper trading.
+   Review `logs/kalshi_trades.csv` and `logs/compliance_actions.jsonl`
+   periodically; confirm resolved rows show nonzero `gain_loss` and
+   `status=RESOLVED`.
+19. **Live executor spec, then market-making (S8) — gated, last.** Design
+   `live_executor.py` / `live_order_manager.py` (place/cancel/amend/
+   reconcile, order state machine, cancel-on-disconnect, rate limits).
+   This is a prerequisite for going live on *anything*, and specifically
+   for market-making. Do NOT go live on S1 under any circumstances. The
+   first live candidate is whichever strategy has measured gate data
+   behind it. Re-derive the market-making case against the **corrected**
+   maker fee before committing to it.
 
 ## FUTURE ROADMAP (do not build yet — design required first)
 

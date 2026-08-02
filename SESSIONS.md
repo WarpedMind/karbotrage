@@ -1,6 +1,189 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-08-01 (Session 30 — SPEC ONLY, no strategy code: pivot direction chosen and specced — external-model divergence (S6) first, market-making deferred, arb continues as a passive canary; Session 28's maker-fee premise found wrong)
+
+### Mandate
+Turn the already-made decision ("shift from pure structural arbitrage
+toward statistical/correlated trading") into a concrete, phased,
+implementable plan. Explicitly not an implementation session — the
+deliverable is documentation the next session can build from without
+re-deriving anything. Same pattern as the Session 28 review, which worked.
+
+### Measured live before deciding anything (2026-08-02 ~03:00 UTC)
+Kept the project's own discipline — pulled real data rather than reasoning
+from the vision docs. Public Kalshi REST, no auth, 40,000 open markets
+(`mve_filter=exclude`), 74,654,881 contracts of 24h volume:
+
+| What | Number |
+|---|---|
+| Sports share of volume | **75.4%** (KXPGATOUR 31.3%, MLB series ~36%) |
+| Weather share of volume | **3.2%** — 2,404,232 contracts, 672 markets |
+| Fed/CPI/econ share of volume | **0.1%** — 46,953 contracts across 453 markets |
+| Markets with vol≥100 and a two-sided book | 3,918–3,938 |
+| Spread p25 / median / p75 / p90 | 1¢ / **2¢** / 4¢ / 8¢ |
+| Top-of-book min(bid,ask) p25/med/p75/p90 | 5 / **42** / 395 / 1,395 contracts |
+| Spread ≥2¢ AND ≥100 contracts both sides | **486 markets** |
+
+Three consequences, all of which changed the plan from what was expected
+going in:
+1. **Fed/econ markets on Kalshi are effectively dead** (0.1% of volume).
+   The clean-sounding "Kalshi vs CME FedWatch" idea has almost no volume
+   behind it. Ruled out as a starting point on measured grounds.
+2. **Sports is 75% of volume** but the external benchmark is a sharp
+   sportsbook's closing line — the hardest benchmark in the space, and not
+   free. Right target eventually, wrong first target.
+3. **Weather is small but uniquely tractable.** Confirmed live from
+   `rules_primary`: Kalshi weather markets settle on *"the National Weather
+   Service's Climatological Report (Daily)"* for a named station (e.g. Los
+   Angeles Airport). The forecast source and the settlement source are the
+   same agency's number for the same station — a property nothing else in
+   the scanned universe has. Structure is 12-market city-day temperature
+   ladders with machine-parseable `strike_type`/`floor_strike` (no LLM
+   needed); `KXHIGHLAX` alone did 616,690 contracts/24h.
+
+### Found this session: Session 28's market-making premise is wrong
+Session 28 recommended market-making partly on "maker fee = $0 on most
+Kalshi markets." Three independent third-party fee references agree the
+real maker fee is **25% of taker** — `ceil(0.0175 × C × P × (1−P))` — and
+this repo's own `KalshiFeeModel` docstring has said the same thing
+("~25% of the taker rate") the whole time, unreconciled. With ceil
+rounding, 1 contract at 50¢ pays **1¢ maker fee per side** against a
+**median observed spread of 2¢** — at small size the fee is the entire
+spread. Market-making only works at size, and size on a binary contract
+means carrying directional inventory, so the real exposure is adverse
+selection, not spread capture.
+**Labeled honestly**: secondary-sourced. Kalshi's own fee-schedule PDF
+returned HTTP 429 on three attempts; primary confirmation is a next-session
+task. Session 28's entry left intact for the historical record; the new
+DECISIONS.md entry supersedes it.
+
+### The decision
+**S6 — External Model Divergence, NOAA/weather first, detect-and-log,
+gated behind an offline backtest.** Market-making (S8) deferred behind a
+live order-management layer that does not exist. S5a/S5b arb detection
+continues **in parallel as a cheap passive canary** — a REST poller plus
+arithmetic, no LLM, no orders, no hot path — so "one snapshot found
+nothing" becomes real frequency data over weeks.
+
+Operator asked directly why divergence before market-making, and whether
+arb was still feasible at all. Answered plainly rather than with a
+recommendation alone; the four reasons and the three-different-answers
+breakdown of "is arb dead" are both recorded in full in DECISIONS.md.
+Short version: **divergence can be falsified offline and market-making
+cannot** — NWS publishes forecasts and Kalshi publishes settlements, so
+"when the model said 70% and the market said 55%, what happened?" is
+answerable from history with no capital; whereas whether resting quotes get
+filled, and whether those fills are the ones you didn't want, is only
+observable by placing real orders. A direction that can be killed cheaply
+beats one that can only be evaluated expensively — the exact discipline
+that killed S1 for $0.
+
+And on arb specifically: S1 is dead by construction and not revisitable;
+S5a/S5b were never disproven — Session 29 found no candidates in one
+snapshot, but unlike S1 there is no structural reason they can't exist,
+since Kalshi doesn't atomically match across an event's separate markets.
+
+### What was specced (full detail in DECISIONS.md — not repeated here)
+- **`FairValueEngineAgent`** (Research Floor) with a pluggable
+  `FairValueProvider` registry; first provider `NoaaTemperatureProvider`.
+  api.weather.gov confirmed free, no API key, `User-Agent` with contact
+  info required.
+- **`DivergenceScannerAgent`** (Trading Floor) — deliberately a separate
+  module from `ArbScannerAgent`, to keep riskless and statistical
+  strategies from blurring the way Session 28 found they had everywhere
+  else.
+- **New `FairValueEstimateEvent`**, additive, with a load-bearing
+  `valid_until` so RiskGate can reject stale models.
+- **RiskGate**: this is finally where Kelly is correct — but fed the
+  model's probability, not a hardcoded per-strategy constant. Closed form
+  derived for a binary contract bought at price `c` with model probability
+  `p`: **`f* = (p − c)/(1 − c)`**. Plus: per-strategy staleness horizons
+  (S6 lives for hours, current code hardcodes 30s for non-S1), a
+  correlated-exposure cap (five strikes on one city's ladder are one bet),
+  and a per-provider capital cap (a biased provider makes every position
+  wrong at once).
+- **Hard requirement flagged**: `PaperExecutor` currently resolves every
+  trade at its own `expected_pnl`, which is tautological for a directional
+  strategy. S6 paper resolution must settle against the market's real
+  outcome or its paper results are meaningless.
+- **Backtest harness** (`backtest/`, offline) with the scoring bar stated
+  precisely: not "is NOAA accurate" but "**is NOAA better calibrated than
+  the Kalshi price**" — the baseline is the market, and Brier score is
+  measured against it.
+- **G1–G5 gates** before S6 sees paper money, each a stop.
+
+### The biggest open unknown, flagged deliberately rather than glossed
+`api.weather.gov` serves the *current* forecast, not an archive of past
+forecasts. Historical NWS/NBM forecast archives are understood to exist
+(NOAA NOMADS, Iowa State IEM) but **this session did not verify any is
+reachable, complete, or matched to the stations Kalshi settles on.** That
+question decides the timeline: with a usable archive, a real backtest is a
+single session over months of history; without one, the fallback is forward
+collection of (forecast, price, outcome) triples and the answer takes
+weeks. **Resolving this is the first task of the next session — before any
+model code is written.** Also flagged: NWS gridpoint forecasts are
+deterministic values, not probabilities, so converting "predicted high 78°"
+into "P(high > 75°)" requires a per-station, per-lead-time forecast-error
+distribution. That error model *is* the strategy; NBM probabilistic
+guidance may supply it directly and should be checked first.
+
+### Also decided: the 30-day paper clock is reset, not paused
+It started 2026-06-29 targeting 2026-07-29 — a date that has now passed.
+That window is not usable evidence: 9 of its first 14 days had a dead
+persistence layer (Session 26) and every S1 trade in it is a confirmed
+book-reconstruction artifact (Session 29). Clock restarts when a strategy
+that passes its gates actually begins paper trading. CLAUDE.md updated so
+the stale dates stop reading as live.
+
+### Two things could not be verified this session — reported, not assumed
+1. **VPS state is unknown.** `ssh ubuntu@147.224.209.18` fails with
+   `Permission denied (publickey)` using `~/.ssh/id_rsa` (the only key
+   present; `ssh-add -l` reports no identities, no `~/.ssh/config` entry).
+   Prior sessions had working SSH. So this session **cannot** confirm
+   whether the VPS is running, what commit it is on, or its disk state —
+   and does not claim to. CLAUDE.md's standing item 7 ("re-audit every
+   CONFIRMED LIVE claim against actual VPS state") is therefore still
+   open, now additionally blocked on restoring access. Local `main` is at
+   `d1ac08c` and clean apart from this session's doc changes.
+2. **A local `logs/audit_trail.jsonl` write at 2026-08-02T03:11 UTC** (a
+   `DailySummary` compliance checkpoint) with **no** `karbot_runner`
+   process currently running locally (`ps` count 0). Something started and
+   exited, or the file is being synced from elsewhere. Not investigated,
+   not load-bearing for this session's work, but flagged rather than
+   ignored — an unexplained write to a compliance log is exactly the sort
+   of thing this project has learned not to wave off.
+
+### Vision-doc re-read (all four April 2026 .docx)
+Kept: Options Signal Agent (becomes the second `FairValueProvider`, not a
+separate agent), Health Monitor (still missing, more important once
+positions carry variance), and the *problem* the Portfolio Manager exists
+to solve (correlated exposure) — though solved with a RiskGate correlation
+cap, not the specced Bull/Bear LLM debate. Set aside with reasons: News
+Analyst / Sentiment / Geopolitical (diffuse signals into directional bets
+with no calibration infrastructure), Whale Tracker / Resolution Verifier
+(Phase 2 only), and the Correlation Engine / 12-persona panel — whose
+premise ("test thousands of speculative correlations") is in direct tension
+with the one discipline that has actually produced results here. Its first
+legitimate instance already exists inside this plan: measuring whether the
+fair-value model beats the market price, per category, over time. That is
+the correlation engine in miniature, and the version worth building first.
+One more find from the re-read: the vision's own S1 trigger
+("YES_price + NO_price < 1.00") never said *which side of the book* — the
+ambiguity that became the Session 26 sign bug and the Session 28 structural
+finding was in the spec from day one. The S6 spec names the executable
+price side and the settlement source explicitly for exactly that reason.
+
+### Not done, deliberately
+No strategy code, no new agents, no config changes, no tests — spec-only
+mandate. Nothing was deleted or gutted: S1 canary, S2/S3/S4 groundwork, the
+event bus, order-book reconstruction, RiskGate, PaperExecutor,
+ComplianceOfficer and the Telegram agent all stay exactly as they are, as
+reusable substrate. Test suite untouched at 133/133 from Session 29 (not
+re-run this session — no code changed).
+
+---
+
 ## 2026-07-16 (Session 29 — independently verified Session 28's S1 finding live; implemented S1 canary mode, Telegram sender-auth fix, disk-alert.sh secrets-path fix)
 
 ### Independent verification of Session 28's core claim
