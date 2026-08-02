@@ -63,38 +63,58 @@ strategies blurring together — that blurring is exactly what Session 28
 found had happened everywhere else (single-leg S3 sold as "arb", Kelly
 applied to riskless baskets).
 
-## The actual job this session: Phase 0, and Phase 1 only if Phase 0 clears
+## What Session 30 already finished (do NOT redo)
 
-Implementation session, unlike the last one. Work the phased priority list
-in CLAUDE.md, in order. Do not skip ahead to writing strategy code.
+Phase 0 is 3-of-4 done and pushed. Confirm against `git log` rather than
+trusting this list, but do not re-derive:
+- **NOAA archive question: ANSWERED.** NBM on AWS (`noaa-nbm-grib2-pds`,
+  anonymous S3, 2020-05-18→now) carries `TMAX:2 m above ground:12-24 hour
+  max fcst` **and** `:ens std dev`, plus a `qmd/` quantile suite and `.idx`
+  sidecars for byte-range fetching. Kalshi supplies settled outcomes
+  (`status=settled`, `result`) and a `candlesticks` endpoint with
+  `yes_bid`/`yes_ask` history. **The backtest is buildable now.**
+- **Unit system: FIXED.** RiskGate sizes in integer contracts;
+  riskless-vs-statistical sizing split; `f* = (p−c)/(1−c)` wired to a new
+  `OpportunityEvent.model_probability`; `KalshiFeeModel.taker_fee_dollars()`
+  implements the real per-order round-up.
+- **`from_yaml()`: FIXED.** All previously-ignored sections parse, with an
+  unknown-key warning.
+- **Still open in Phase 0**: paper resolution settling against real market
+  outcomes (`PaperExecutor` resolves every trade at its own `expected_pnl`,
+  which is tautological for a directional strategy and would make S6 paper
+  results meaningless). Also `--mode` is parsed and never applied.
 
-1. **Answer the NOAA forecast-archive question BEFORE writing any model
-   code.** `api.weather.gov` serves only the *current* forecast. Is there a
-   reachable, complete archive of past NWS/NBM forecasts, matched to the
-   stations Kalshi settles on (NOAA NOMADS, Iowa State IEM, or NBM
-   probabilistic guidance)? This single answer decides whether the backtest
-   is one session over months of history or several weeks of forward
-   collection — and therefore what the rest of this session can even
-   attempt. Report the answer plainly either way; "no usable archive" is a
-   perfectly good result that changes the plan rather than blocking it.
-2. **Land the Phase 0 prerequisites** (CLAUDE.md priorities 2–4): the
-   integer-contract unit fix across RiskGate/PaperExecutor/PositionTracker,
-   the `from_yaml()` parsing gaps, and paper resolution settling against
-   real outcomes instead of the trade's own expected P&L. These are
-   genuinely blocking — a statistical strategy sized in the wrong units, or
-   scored against its own forecast, produces meaningless results.
-3. **Then, and only then, Phase 1**: `FairValueEngine` +
-   `NoaaTemperatureProvider` + the `backtest/` harness. The deliverable of
-   Phase 1 is **a calibration report, not a trading agent** — model Brier
-   score against the Kalshi price as baseline, out-of-sample, with a
-   reliability curve and the sample size stated. The bar is not "is NOAA
-   accurate," it is "is NOAA better calibrated than the market."
-4. If the calibration fails the bar, **say so and stop** — that is a
-   successful session, not a failed one, and it costs one session instead
-   of a live order layer.
+157/157 tests passing; runner smoke test clean.
+
+## The actual job this session: Phase 1 — the calibration report
+
+1. **Finish the last Phase 0 item** (real-outcome paper resolution) if you
+   want it out of the way — but it does **not** block the backtest, which
+   is pure offline analysis and touches none of RiskGate/PaperExecutor.
+2. **Build `backtest/` and produce a calibration report.** This is the
+   session's deliverable, and it is **a report, not a trading agent**:
+   - Pull NBM forecast TMAX + ens std dev for the stations Kalshi settles
+     on, at several lead times, using `.idx` byte-range fetches.
+   - Convert to `P(high > strike)` per Kalshi market. First cut: Gaussian
+     from mean + ens std dev. Upgrade to the `qmd/` quantiles if the
+     Gaussian assumption is visibly poor — check, don't assume.
+   - Pull settled outcomes and `candlesticks` price history for the same
+     markets. **Score the model's Brier against the market price's Brier**,
+     out-of-sample. Report a reliability curve and the sample size.
+   - Then apply ceil'd taker fees (`taker_fee_dollars`), the half-spread
+     cost of crossing to the ask, and the observed depth cap, to convert a
+     calibration edge into a net-of-cost expected edge.
+3. **Constraints to respect in the report**: Kalshi weather history starts
+   ~2026-05-25, so the sample is **summer-only**. State the season. Do not
+   claim cross-season generalisation — it is unproven until winter data
+   exists.
+4. **If the model does not beat the market price, say so and stop.** That
+   is a successful session, not a failed one — it costs one session instead
+   of an order layer, and it is the entire reason this direction was chosen
+   over market-making.
 
 Tests are expected for anything that ships, matching this project's
-existing convention (133/133 passing as of Session 29).
+convention (157/157 as of Session 30).
 
 ## Operating notes for this environment (from the operator, Session 30)
 
@@ -152,6 +172,34 @@ existing convention (133/133 passing as of Session 29).
 - Duplication across CLAUDE.md/DECISIONS.md/SESSIONS.md/README.md is fine;
   drift is the enemy — if a fact changes, grep for every place it's stated
   and fix all of them, not just the one being actively edited.
+- **`SIGNAL_REGISTER.md` is a standing document** — a tiered register of
+  candidate unconventional data sources (official NOAA weather-modification
+  filings, ADS-B, solar/lunar/geophysical events, crowd-sourced claim data,
+  Farmer's Almanac) with a mandatory statistical gate. The operator
+  explicitly wants an open mind here: nothing pre-judged, track record
+  decides. **Add to it whenever a new candidate comes up**, and populate
+  its "tested — no edge" section as things fail, because a recorded failure
+  stops the same idea being re-proposed. The gate (Bonferroni/FDR, n≥20,
+  3-period replication, ≥2h lead, out-of-sample, market-price baseline) is
+  not optional — the failure mode of an open mind on a small sample is
+  confidently trading noise, which is precisely what S1 was.
+  One item there is worth acting on early if weather work continues: NOAA's
+  weather-modification registry requires filing **≥10 days before** activity
+  commences, which is real advance public notice with a direct physical path
+  to precipitation markets. Whether filings are visible at submission or only
+  at quarterly publication is **unverified and decisive** — check it.
+
+## Recommended model / effort for this session
+
+**Opus, not Sonnet.** This is not a general preference — it is specific to
+what this session does. The work is a probability-calibration harness whose
+whole job is to avoid fooling itself: converting a deterministic forecast
+plus an ensemble spread into a probability, scoring it against the right
+baseline, and resisting the many ways a backtest can look profitable and be
+wrong. Every expensive bug in this project's history has been of exactly
+that shape — a sign error, a unit mismatch, the wrong side of the book, a
+default multiplier — and every one passed its tests. Sonnet is a reasonable
+choice for mechanical work in this repo; it is the wrong economy here.
 
 ## Before ending this session
 
