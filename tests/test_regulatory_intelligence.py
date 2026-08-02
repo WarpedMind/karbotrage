@@ -22,6 +22,7 @@ Tests:
 """
 
 import asyncio
+import contextlib
 import json
 import sys
 import tempfile
@@ -33,6 +34,48 @@ import pytest
 PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+
+# ---------------------------------------------------------------------------
+# asyncio.timeout landed in Python 3.11. The development machine runs 3.14 and
+# the VPS runs 3.10, so these ten tests passed locally and errored on the box
+# with `AttributeError: module 'asyncio' has no attribute 'timeout'` — found
+# Session 32, the first time the suite was ever run on the VPS.
+#
+# The fallback below really does enforce the deadline rather than yielding
+# unguarded. A timeout guard that silently stops guarding on the platform you
+# actually deploy to is worse than the AttributeError it replaces: the tests
+# would go green while a hang would block forever.
+#
+# The live trading path does NOT use asyncio.timeout — checked across agents/,
+# karbot/, core/, execution/, data/ and karbot_runner.py — so this was only ever
+# a test-suite portability bug, not a production one.
+# ---------------------------------------------------------------------------
+@contextlib.asynccontextmanager
+async def _timeout_fallback(seconds):
+    task = asyncio.current_task()
+    expired = False
+
+    def _expire():
+        nonlocal expired
+        expired = True
+        task.cancel()
+
+    handle = asyncio.get_running_loop().call_later(seconds, _expire)
+    try:
+        yield
+    except asyncio.CancelledError:
+        if expired:
+            raise TimeoutError(f"timed out after {seconds}s") from None
+        raise
+    finally:
+        handle.cancel()
+
+
+if hasattr(asyncio, "timeout"):
+    timeout = asyncio.timeout
+else:
+    timeout = _timeout_fallback
 
 from core.events import (
     EventBus,
@@ -160,7 +203,7 @@ async def test_overflow_queue_holds_excess_items():
 
     items = [_matching_item(i) for i in range(5)]
 
-    async with asyncio.timeout(5):
+    async with timeout(5):
         task = asyncio.create_task(bus.run())
         await agent._run_cycle_with_items(items, weekly_sweep=False)
         await asyncio.sleep(0.1)
@@ -188,7 +231,7 @@ async def test_urgency_1_2_no_telegram():
     telegram_events = []
     bus.subscribe(TelegramNotificationEvent, lambda e: telegram_events.append(e))
 
-    async with asyncio.timeout(5):
+    async with timeout(5):
         task = asyncio.create_task(bus.run())
         await agent._run_cycle_with_items([_matching_item()], weekly_sweep=False)
         await asyncio.sleep(0.1)
@@ -215,7 +258,7 @@ async def test_urgency_3_publishes_telegram_no_pause():
     telegram_events = []
     bus.subscribe(TelegramNotificationEvent, lambda e: telegram_events.append(e))
 
-    async with asyncio.timeout(5):
+    async with timeout(5):
         task = asyncio.create_task(bus.run())
         await agent._run_cycle_with_items([_matching_item()], weekly_sweep=False)
         await asyncio.sleep(0.1)
@@ -252,7 +295,7 @@ async def test_urgency_5_pauses_risk_gate():
     from core.events import RejectedOpportunityEvent
     bus.subscribe(RejectedOpportunityEvent, lambda e: rejected_events.append(e))
 
-    async with asyncio.timeout(5):
+    async with timeout(5):
         task = asyncio.create_task(bus.run())
 
         # Trigger urgency-5 alert
@@ -312,7 +355,7 @@ async def test_operator_clear_resumes_risk_gate():
     bus.subscribe(ApprovedOpportunityEvent, lambda e: approved_events.append(e))
     bus.subscribe(RejectedOpportunityEvent, lambda e: rejected_events.append(e))
 
-    async with asyncio.timeout(5):
+    async with timeout(5):
         task = asyncio.create_task(bus.run())
 
         # Pre-seed RiskGate with a position snapshot
@@ -371,7 +414,7 @@ async def test_deduplication_same_url_once():
 
     item = _matching_item()
 
-    async with asyncio.timeout(5):
+    async with timeout(5):
         task = asyncio.create_task(bus.run())
         # First cycle
         await agent._run_cycle_with_items([item], weekly_sweep=False)
@@ -401,7 +444,7 @@ async def test_daily_cap_blocks_calls_and_alerts():
     telegram_events = []
     bus.subscribe(TelegramNotificationEvent, lambda e: telegram_events.append(e))
 
-    async with asyncio.timeout(5):
+    async with timeout(5):
         task = asyncio.create_task(bus.run())
 
         # First cycle: 2 items → hits the cap
@@ -445,7 +488,7 @@ async def test_circuit_breaker_trips_and_blocks():
     telegram_events = []
     bus.subscribe(TelegramNotificationEvent, lambda e: telegram_events.append(e))
 
-    async with asyncio.timeout(5):
+    async with timeout(5):
         task = asyncio.create_task(bus.run())
 
         # 3 calls trips the breaker (threshold == 3 already in window)
@@ -486,7 +529,7 @@ async def test_compliance_officer_logs_regulatory_alert(tmp_path):
         officer = ComplianceOfficer(bus=bus, config=config)
         officer.register_subscriptions()
 
-        async with asyncio.timeout(5):
+        async with timeout(5):
             task = asyncio.create_task(bus.run())
 
             await bus.publish(RegulatoryAlertEvent(
@@ -545,7 +588,7 @@ async def test_bad_api_response_defaults_to_urgency_3():
     regulatory_alerts = []
     bus.subscribe(RegulatoryAlertEvent, lambda e: regulatory_alerts.append(e))
 
-    async with asyncio.timeout(5):
+    async with timeout(5):
         task = asyncio.create_task(bus.run())
         await agent._run_cycle_with_items([_matching_item()], weekly_sweep=False)
         await asyncio.sleep(0.15)
