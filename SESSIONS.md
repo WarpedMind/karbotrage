@@ -261,6 +261,54 @@ legs, with each test's original intent preserved.
 157/157 passing; runner smoke test exits cleanly with S1 canary firing as
 designed.
 
+### Deployed to the VPS and verified live — which surfaced a real regression
+Deployed (`git pull` + `systemctl restart`), VPS now at `f88584e` = `main`.
+Checked the config first rather than pulling blind: the box's `config.yaml`
+contains only `system:`, `trading:`, `telegram:` and
+`regulatory_intelligence:` — all sections that were *already* parsed — so
+the config-parsing change is a **no-op** there and could not silently alter
+live behaviour. Post-restart: service active, `config_resolved` shows
+`telegram_enabled=True kalshi_ws_enabled=True polymarket_ws_enabled=False
+regulatory_intelligence_enabled=True paper_mode=True phase=1`, **no
+`config_unknown_keys` warnings** (so no typos in the live config), zero
+tracebacks, no restarts.
+
+**Then the check that mattered.** Rather than stopping at "it started,"
+measured the event mix over 10 minutes:
+```
+book_snapshot_requested   2174
+book_reset_rest_failed      16     (all HTTP 429)
+book_snapshot_applied        0
+```
+**Zero successful book-snapshot applications.** That is the pre-fix Session
+22 signature, not the Session 23 CONFIRMED-LIVE result of 1,764 applied in
+2.5 minutes. Written up in CLAUDE.md KNOWN DEBT with the mechanism
+explicitly **not** claimed — the most likely benign explanation is that the
+10s per-market throttle is absorbing the requests and logging
+`book_reset_throttled` at DEBUG, which has been invisible in production
+since the Session 26 disk-fill fix filtered DEBUG globally. Cheap decisive
+next step recorded: re-enable DEBUG for `price_watcher` **only** (never
+globally — global DEBUG is what filled the disk and killed the VPS for 9
+days) and re-measure the ratio.
+
+Why it was worth catching: per Session 28/29, unrecovered sequence gaps
+leaving stale phantom bids are one of the two confirmed mechanisms that
+manufacture fake crossed books — the artifacts that made S1 look profitable
+for a year. Nothing is at risk today (S1 is canary-only, nothing trades),
+but it corrupts the order-book data any future strategy would price against.
+Raised in the priority list as 11b.
+
+Also noticed and newly documented: `RSS parse error: mismatched tag: line
+26, column 4` fires twice at every startup in `RegulatoryIntelligenceAgent`
+— one configured feed serves malformed XML and is silently contributing
+nothing. The cycle survives it. Low severity, previously unrecorded.
+
+**Process note**: this is the third time in one session that going one step
+past "it looks fine" found something real (maker-fee multiplier, SSH key
+path, now this). Restating the standing rule because it keeps paying:
+"deployed" is not "confirmed live," and "the service is active" is not
+"the service is working."
+
 ### Alternative / unconventional data — SIGNAL_REGISTER.md created
 Operator raised a broad set of candidate data sources (weather-modification
 and cloud-seeding trackers, ADS-B, satellite loops, solar/lunar/tidal and

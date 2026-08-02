@@ -189,6 +189,32 @@ convention (157/157 as of Session 30).
   to precipitation markets. Whether filings are visible at submission or only
   at quarterly publication is **unverified and decisive** — check it.
 
+## One live regression found at the very end of Session 30 — decide early whether to take it first
+
+Deploying Session 30's work and then actually measuring (rather than
+stopping at "the service is active") surfaced this on the VPS:
+```
+book_snapshot_requested   2174
+book_reset_rest_failed      16     (all HTTP 429)
+book_snapshot_applied        0     <-- zero, over 10 minutes
+```
+Full write-up in CLAUDE.md KNOWN DEBT and priority 11b. It is **not**
+diagnosed — the leading benign explanation is that the 10s per-market
+throttle is absorbing the requests while logging at DEBUG, which has been
+invisible in production since Session 26 filtered DEBUG globally. The cheap
+decisive test is recorded there: enable DEBUG for `price_watcher` **only**
+(never globally — global DEBUG filled the disk and killed the VPS for 9
+days) and re-measure.
+
+**Judgement call for this session**: nothing is at risk today (S1 is
+canary-only, nothing trades), so this does not block the Phase 1 backtest,
+which reads Kalshi's REST/candlestick history rather than the live
+reconstructed book. But it does corrupt the live order-book data any future
+strategy prices against, and unrecovered gaps are one of the two confirmed
+generators of the phantom crossed books that made S1 look profitable for a
+year. Taking the ~30-minute diagnostic first is defensible; so is deferring
+it. Decide deliberately rather than by default, and say which you chose.
+
 ## Recommended model / effort for this session
 
 **Opus, not Sonnet.** This is not a general preference — it is specific to
