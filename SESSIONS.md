@@ -365,6 +365,15 @@ paper clock (target 2026-07-29) should be considered restarted-in-
 spirit for whatever strategy replaces S1 — its S1 data measures
 artifact frequency, not edge.
 
+## 2026-07-16 (Session 27 — first real trades under the Session 26 fixes observed and hand-verified; scheduled viability-check task found broken; a Telegram display bug found and fixed)
+
+*(Header restored 2026-07-16, Session 29 addendum — this entry existed in
+full below but was missing its own `## ` heading, making it read as if
+it were part of Session 28's "review-only, no code changed" entry
+immediately above, which directly contradicts what it describes. No
+content changed, only this heading added, once diagnosed as a real doc
+bug rather than assumed away.)*
+
 ### Context
 Operator scheduled a one-time task (`karbot-s1-viability-check`, fireAt
 2026-07-15T09:00 EDT) at the end of Session 26 to check S1 viability data
