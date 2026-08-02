@@ -1,6 +1,80 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-08-02 — Session 32 (addendum): an honest assessment of whether this project is likely to trade profitably
+
+The operator asked directly, at the end of Session 32: *"do you think there's any
+chance of us having any sort of successful trading?"* Recorded here so no future
+session inherits more optimism than the evidence supports — and so none inherits
+more pessimism either.
+
+### What is now ruled out, and it is a lot
+- **S1 single-market arbitrage: structurally impossible.** Not "hard" —
+  impossible. The trigger condition is algebraically a crossed book, which
+  Kalshi's matching engine deletes on contact. Confirmed live, 0/778.
+- **S6 external-model divergence via NOAA: measured worse than the market**, at
+  every lead NOAA publishes, with the mechanism identified.
+- **S5a/S5b riskless basket/ladder arbitrage: no evidence it exists at usable
+  frequency.** Three independent looks now — Session 29's hand check, Session
+  32's 13,094 event-evaluations, and the deployed canary — all zero. Not
+  disproven, and the canary continues, but the *pattern* is more informative
+  than the count: the near misses sit at $1.01–$1.09 for a guaranteed $1.00,
+  exactly one spread wide. That is the signature of a competed, functioning
+  market, not of an opportunity nobody noticed.
+
+### The honest read on what remains
+**Pure riskless arbitrage on Kalshi is very unlikely to be a business.** If it
+existed at size, participants with faster infrastructure would already have it,
+and the observed spreads say they do. The canary may catch rare windows; rare ×
+small size × ceil'd per-leg fees is unlikely to add up to much.
+
+**Market-making is the one candidate with a real economic story**, and it is
+different in kind from everything tried so far. It is not a mispricing to be
+found — it is payment for providing liquidity and bearing inventory risk. That
+is a genuine service with a genuine return, the measured surface is real (489
+markets at ≥2¢ spread with ≥100 contracts both sides and no maker fee), and
+Kalshi sanctions it. But it is a **risk-bearing business, not free money**:
+adverse selection is the thing that kills market-makers, returns depend on
+operational reliability more than on cleverness, and the zero-fee mid-volume
+series are less professionally made precisely *because* they are thinner and
+carry more inventory risk. A realistic good outcome there is a modest,
+capacity-constrained return — not a large one.
+
+**The base rate is unkind.** Part-time algorithmic trading against a competitive
+venue mostly does not make money. Nothing measured here contradicts that, and
+the most likely single outcome remains "no durable edge found."
+
+### What this project has actually achieved, which is not nothing
+It has built a **falsification discipline**, and that is the variable that
+decides whether a project like this loses money. Most retail trading systems
+discover they have no edge by bleeding out slowly; this one killed S1 for **$0**,
+killed S6 for **one session**, and is measuring S5a/S5b continuously for free.
+Every "opportunity" this system has ever reported has been chased down to either
+a confirmed artifact or a measured negative — including five paper trades that
+looked hand-verified and were not.
+
+That is worth stating plainly because it is easy to read a string of negative
+results as failure. The negatives *are* the product so far. A system that
+correctly refuses to trade is strictly better than one that trades on artifacts,
+and this system spent Sessions 26–29 being the latter without knowing it.
+
+### What would change the assessment, concretely
+1. The canary logging **`confirmed`** candidates (surviving an order-book
+   re-check) at any non-trivial rate over weeks. `vanished_on_recheck` piling up
+   instead would say the opposite — that our view of the book, not the market,
+   is the source of apparent opportunities.
+2. Kalshi's market-maker programme being **open to individual participants**,
+   ideally with rebates. "Institution-only" closes the strongest remaining door.
+3. Once quoting: a **measured adverse-selection number**. That single figure
+   decides market-making, and it cannot be known before doing it — which is why
+   the order layer must be built to be shut off quickly.
+
+**Scope note**: this is an engineering assessment of the project's prospects, not
+investment advice, and it should not be read as a recommendation to deploy
+capital. Nothing here has yet earned a real dollar.
+
+---
+
 ## 2026-08-02 — Session 32 (addendum): the direction question, and why the infrastructure items are on market-making's critical path rather than an alternative to it
 
 Recorded so the analysis survives whatever is decided. The three candidates have
