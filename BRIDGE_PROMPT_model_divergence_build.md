@@ -142,6 +142,45 @@ convention (157/157 as of Session 30).
   on repeated fetches. The operator can retrieve pages via Brave when a
   fetch is blocked; ask.
 
+## The single most important practice — carry this forward deliberately
+
+The operator asked explicitly that this session apply **the same diligence
+used in Session 30 to proactively find issues and contradictions**, rather
+than only doing the task in front of it. Concretely, that session found:
+Session 28's maker-fee premise was wrong (then that its own correction was
+wrong); the SSH key wasn't where it looked; a misnamed log line that had
+been quietly misrepresenting book-reset health for multiple sessions;
+`from_yaml()` ignoring four config sections; and three tests that passed
+only because they never exercised what they claimed to. **None of those
+were the assigned task.** All were found by pulling one thread further than
+strictly required.
+
+Two rules that produced all of it:
+
+1. **Verify one level deeper than feels necessary, especially on a negative
+   or a confident conclusion.** Session 30 got four things wrong, and every
+   single one was a confident conclusion drawn from an *incomplete search*:
+   three agreeing secondary sources that all omitted the same field; one
+   directory listing treated as a search; two log names taken at face value
+   without reading the code emitting them. The instinct to check was right
+   every time — the stopping point was too early. "I couldn't find X" is
+   never "X doesn't exist." **This applies directly to this session**: if
+   the NBM data doesn't look right, or the calibration looks too good,
+   assume the pipeline before assuming the finding.
+2. **Actively look for contradictions between the docs and reality.** Where
+   two docs disagree, or a doc disagrees with the code, or a comment
+   disagrees with what a function does — that gap is usually a real bug,
+   not a documentation lapse. Every major find in Sessions 26–30 started as
+   exactly that kind of mismatch. When you find one, fix *all* the places
+   it's stated, and record the retraction rather than quietly editing.
+
+Corollaries worth stating: label every claim **confirmed vs. argued**; treat
+"the tests pass" as weak evidence (this codebase's expensive bugs all had
+passing tests); and when you are wrong, retract it in the docs explicitly
+rather than silently — Session 30 has three retractions written into
+DECISIONS.md/SESSIONS.md on purpose, because a wrong claim that was quietly
+deleted teaches nobody.
+
 ## Standing practices for this session
 
 - **Quality, security, and privacy are non-negotiable defaults, not
@@ -189,31 +228,17 @@ convention (157/157 as of Session 30).
   to precipitation markets. Whether filings are visible at submission or only
   at quarterly publication is **unverified and decisive** — check it.
 
-## One live regression found at the very end of Session 30 — decide early whether to take it first
+## Book-reset health: RESOLVED, do not re-raise
 
-Deploying Session 30's work and then actually measuring (rather than
-stopping at "the service is active") surfaced this on the VPS:
-```
-book_snapshot_requested   2174
-book_reset_rest_failed      16     (all HTTP 429)
-book_snapshot_applied        0     <-- zero, over 10 minutes
-```
-Full write-up in CLAUDE.md KNOWN DEBT and priority 11b. It is **not**
-diagnosed — the leading benign explanation is that the 10s per-market
-throttle is absorbing the requests while logging at DEBUG, which has been
-invisible in production since Session 26 filtered DEBUG globally. The cheap
-decisive test is recorded there: enable DEBUG for `price_watcher` **only**
-(never globally — global DEBUG filled the disk and killed the VPS for 9
-days) and re-measure.
-
-**Judgement call for this session**: nothing is at risk today (S1 is
-canary-only, nothing trades), so this does not block the Phase 1 backtest,
-which reads Kalshi's REST/candlestick history rather than the live
-reconstructed book. But it does corrupt the live order-book data any future
-strategy prices against, and unrecovered gaps are one of the two confirmed
-generators of the phantom crossed books that made S1 look profitable for a
-year. Taking the ~30-minute diagnostic first is defensible; so is deferring
-it. Decide deliberately rather than by default, and say which you chose.
+Session 30 briefly reported the book-reset recovery as regressed to ~0%
+completion, then found the alarm was a log-naming artifact and fixed it.
+**The mechanism is healthy: ~2,174 successful REST recoveries per 10 minutes
+against 16 failures (0.7%), better than Session 23's confirmed 5.5%.** The
+INFO log is now `book_snapshot_applied_rest`. One thing to carry: **any
+historical analysis grepping `book_snapshot_requested` was counting
+successes, not attempts** — including Session 22's own regression evidence.
+There is currently no attempt counter; add one deliberately if needed. The
+separate Session 26 "stuck reset loop" item is unaffected and still open.
 
 ## Recommended model / effort for this session
 

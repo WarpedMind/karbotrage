@@ -273,41 +273,54 @@ regulatory_intelligence_enabled=True paper_mode=True phase=1`, **no
 `config_unknown_keys` warnings** (so no typos in the live config), zero
 tracebacks, no restarts.
 
-**Then the check that mattered.** Rather than stopping at "it started,"
-measured the event mix over 10 minutes:
+**Then a check that produced a false alarm — the session's fourth wrong
+conclusion, and the most instructive.** Measured the event mix over 10
+minutes:
 ```
 book_snapshot_requested   2174
 book_reset_rest_failed      16     (all HTTP 429)
 book_snapshot_applied        0
 ```
-**Zero successful book-snapshot applications.** That is the pre-fix Session
-22 signature, not the Session 23 CONFIRMED-LIVE result of 1,764 applied in
-2.5 minutes. Written up in CLAUDE.md KNOWN DEBT with the mechanism
-explicitly **not** claimed — the most likely benign explanation is that the
-10s per-market throttle is absorbing the requests and logging
-`book_reset_throttled` at DEBUG, which has been invisible in production
-since the Session 26 disk-fill fix filtered DEBUG globally. Cheap decisive
-next step recorded: re-enable DEBUG for `price_watcher` **only** (never
-globally — global DEBUG is what filled the disk and killed the VPS for 9
-days) and re-measure the ratio.
+Reported this as a regression to ~0% book-reset completion, matching the
+pre-fix Session 22 signature. **Wrong.** Reading the code instead of the log
+names showed both halves were naming artifacts:
+- `book_snapshot_requested` was logged **after** a successful
+  `apply_snapshot()`, so despite its name it counted *completed recoveries*.
+- `book_snapshot_applied` exists only inside `OrderBook.apply_snapshot` at
+  **DEBUG**, filtered out of production since Session 26 — it could never
+  have appeared at any health level.
 
-Why it was worth catching: per Session 28/29, unrecovered sequence gaps
-leaving stale phantom bids are one of the two confirmed mechanisms that
-manufacture fake crossed books — the artifacts that made S1 look profitable
-for a year. Nothing is at risk today (S1 is canary-only, nothing trades),
-but it corrupts the order-book data any future strategy would price against.
-Raised in the priority list as 11b.
+**Correct reading: 2,174 successful REST recoveries in 10 minutes against 16
+failures — 0.7%, better than Session 23's confirmed 5.5%.** The mechanism is
+healthy.
+
+Fixed rather than just retracted: the INFO log is renamed
+`book_snapshot_applied_rest` and now carries `bid_levels`/`ask_levels`, with
+a comment recording why the name matters. **Consequence for historical
+analysis: any prior session's numbers that grep `book_snapshot_requested`
+were counting successes, not attempts** — including Session 22's own
+regression evidence, which should be re-read with that in mind. There is
+currently no attempt counter at all; add one deliberately if the
+attempt-vs-success ratio is ever wanted.
 
 Also noticed and newly documented: `RSS parse error: mismatched tag: line
 26, column 4` fires twice at every startup in `RegulatoryIntelligenceAgent`
 — one configured feed serves malformed XML and is silently contributing
 nothing. The cycle survives it. Low severity, previously unrecorded.
 
-**Process note**: this is the third time in one session that going one step
-past "it looks fine" found something real (maker-fee multiplier, SSH key
-path, now this). Restating the standing rule because it keeps paying:
-"deployed" is not "confirmed live," and "the service is active" is not
-"the service is working."
+**Process note — four wrong conclusions in one session, same root cause.**
+Maker fees (three agreeing secondary sources, none mentioning the default
+multiplier), VPS access (one directory listing treated as a search), the
+book-reset "regression" (two log names taken at face value without reading
+the code that emits them), and the build-order sequencing. Every one was a
+confident negative or positive conclusion drawn from an *incomplete search*,
+and every one was caught by going one step further — reading the primary
+source, asking the operator, grepping the emitting code. The instinct to
+verify was right every time; the stopping point was too early. That is the
+specific discipline to carry forward, and it is worth more than any
+individual finding here: **"deployed" is not "confirmed live," "the service
+is active" is not "the service is working," and a log line's name is not
+evidence of what it measures.**
 
 ### Alternative / unconventional data — SIGNAL_REGISTER.md created
 Operator raised a broad set of candidate data sources (weather-modification

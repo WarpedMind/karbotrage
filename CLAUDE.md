@@ -286,43 +286,34 @@ book-reconstruction artifact (Session 29). **The clock restarts when a
 strategy that has passed its gates actually begins paper trading.** No live
 trading on anything until that clock has genuinely run.
 
-### book-reset recovery appears to be at ~0% completion again — OBSERVED LIVE, Session 30 (2026-08-02), mechanism NOT diagnosed
-Measured on the VPS ~10 minutes after this session's deploy/restart:
-```
-book_snapshot_requested   2174
-book_reset_rest_failed      16     (all HTTP 429)
-book_snapshot_applied        0
-```
-2,174 requests, 16 explicit failures, and **zero successful applications**.
-That is the same signature Session 22 recorded *before* the REST fix
-("`book_snapshot_requested` climbing to 3,365 in an 18-minute window while
-`book_snapshot_applied` fell to zero"), and it directly contradicts Session
-23's CONFIRMED LIVE result of 1,764 `book_snapshot_applied` in ~2.5 minutes.
+### book-reset recovery is HEALTHY — a Session 30 "regression" alarm that was a log-naming artifact, plus the rename that fixes it
+**Do not re-raise this as a regression.** Session 30 briefly reported the
+recovery mechanism as being at ~0% completion, based on a VPS measurement of
+2,174 `book_snapshot_requested` against 0 `book_snapshot_applied`. **That
+conclusion was wrong**, and both halves of it were log-naming problems:
+1. `book_snapshot_requested` was logged **after** a successful
+   `apply_snapshot()` in `_request_snapshot` — so despite its name it counted
+   *completed recoveries*, not attempts.
+2. `book_snapshot_applied` exists only inside `OrderBook.apply_snapshot` at
+   **DEBUG** level, which has been filtered out of production since the
+   Session 26 disk-fill fix. It could never have appeared in the logs
+   regardless of system health.
 
-**What is NOT yet known** — do not assume any of these without checking:
-- Whether the ~2,158 unaccounted requests are being swallowed by the 10s
-  per-market throttle (which logs `book_reset_throttled` at DEBUG, and DEBUG
-  is filtered out in production since the Session 26 disk-fill fix — so the
-  throttle path is currently *invisible* in logs). This is the most likely
-  explanation and would make the numbers benign-ish, but it is unverified.
-- Whether this is the known "stuck order-book reset loop" (Session 26 KNOWN
-  DEBT) having grown from a few markets to most of them.
-- Whether Session 23's "confirmed live" measurement was taken during an
-  unrepresentative window.
+**Correct reading of the same measurement: 2,174 successful REST book
+recoveries in 10 minutes against 16 failures — a 0.7% failure rate, better
+than Session 23's confirmed 5.5%.** The Session 22/23 fix is working.
 
-**Why this matters more than it looks**: per Session 28/29, unrecovered
-sequence gaps leaving stale phantom bids are one of the two known mechanisms
-that manufacture fake crossed books — the artifacts that made S1 appear
-profitable for a year. A recovery mechanism at 0% completion means that
-generator is running unchecked. It does not risk money today (S1 is
-canary-only, nothing else trades), but it corrupts the order-book data that
-any future strategy would price against.
+**Fixed Session 30**: the INFO-level log in `_request_snapshot` is renamed to
+`book_snapshot_applied_rest` and now carries `bid_levels`/`ask_levels`, so it
+reads as the completion signal it actually is. **Any log analysis written
+before 2026-08-02 that greps for `book_snapshot_requested` is counting
+successes, not attempts** — re-read prior sessions' numbers with that in mind.
+Note this also means there is currently **no** counter for reset *attempts*;
+add one deliberately if attempt-vs-success ratio is ever needed.
 
-**First step for whoever picks this up**: temporarily re-enable DEBUG for
-`price_watcher` only (NOT globally — global DEBUG is what filled the disk
-and killed the VPS for 9 days in Session 26) to make `book_reset_throttled`
-visible, and re-measure the ratio. That single number distinguishes "throttle
-working as designed" from "recovery genuinely broken."
+The separate, still-open "stuck order-book reset loop" item (Session 26 —
+specific markets logging `book_needs_reset`/`book_reset_throttled` on every
+delta indefinitely) is unaffected by this and remains real.
 
 ### Minor, undocumented: RSS parse errors in RegulatoryIntelligenceAgent
 Observed live Session 30: `RSS parse error: mismatched tag: line 26, column 4`
@@ -979,15 +970,11 @@ from this list; this list is the ordering.**
    prices, and decide single-leg (statistical) vs paired-leg (riskless-
    if-relation-holds) semantics. `s4_settlement_arb_enabled` already
    defaults False as of Session 29.
-11b. **[RAISED, Session 30] Diagnose the ~0% book-reset completion rate** —
-   observed live 2026-08-02: 2,174 `book_snapshot_requested` / 0
-   `book_snapshot_applied` in 10 minutes (KNOWN DEBT above). Cheap first
-   step: re-enable DEBUG for `price_watcher` **only** to make
-   `book_reset_throttled` visible, and re-measure. This subsumes and
-   supersedes the older "stuck reset loop" item below — same underlying
-   mechanism, now measurable. Matters because unrecovered gaps are one of
-   the two confirmed generators of the phantom crossed books that made S1
-   look profitable for a year.
+11b. ~~Diagnose the ~0% book-reset completion rate~~ — **WITHDRAWN same
+   session: there was no regression.** The alarm came from two misleading
+   log names (see KNOWN DEBT above); the real rate is 2,174 successful
+   recoveries per 10 minutes against 16 failures (0.7%). Log renamed to
+   `book_snapshot_applied_rest`. No action needed.
 12. **Investigate the stuck order-book reset loop** (Session 26) — specific
    markets (e.g. `KXWORLDNEWSMENTION-26JUL10-WILD`) get stuck logging
    `book_needs_reset`/`book_reset_throttled` on every delta indefinitely,

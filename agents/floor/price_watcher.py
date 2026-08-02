@@ -748,7 +748,22 @@ class PriceWatcherAgent:
             self._books[market_id] = book
 
         book.apply_snapshot(bids, asks, seq=0)
-        log.info("book_snapshot_requested", market=market_id)
+        # NAME MATTERS HERE. This fires only after apply_snapshot() has
+        # succeeded, so it records a completed RECOVERY, not an attempt. It was
+        # previously called "book_snapshot_requested", which read as an attempt
+        # counter and directly caused a false alarm in Session 30: an operator
+        # comparing 2,174 "requested" against 0 "book_snapshot_applied"
+        # concluded the recovery mechanism had regressed to 0% completion. In
+        # fact every one of those 2,174 was a success, and "book_snapshot_
+        # applied" (OrderBook.apply_snapshot, above) is emitted at DEBUG, which
+        # has been filtered out of production since the Session 26 disk-fill
+        # fix — so it could never have appeared. Two misleading names, one
+        # invisible level, one wrong conclusion. Keep this at INFO and keep the
+        # name honest.
+        log.info("book_snapshot_applied_rest",
+                 market=market_id,
+                 bid_levels=len(bids),
+                 ask_levels=len(asks))
 
     async def _handle_health_change(
         self, platform: str, connected: bool, latency_ms: float, error: str = ""
