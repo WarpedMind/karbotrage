@@ -44,8 +44,25 @@ class TestFees:
         assert fee < 100 * 0.01
 
     def test_fee_is_charged_once_per_leg_per_order(self):
+        """Ten legs, ten ceil'd cent-minimum fees.
+
+        `approx`, not `==`, and the reason is worth recording: this assertion
+        passed on the dev machine and FAILED on the VPS. CPython 3.12 gave
+        `sum()` compensated (Neumaier) summation for floats, so ten values of
+        0.01 add to exactly 0.1 on Python 3.14 and to 0.09999999999999999 on
+        the VPS's 3.10. Same code, different arithmetic — which is also why
+        `is_candidate` compares against an epsilon rather than zero.
+        """
         legs = [Leg(f"L{i}", "yes", 0.04, 100) for i in range(10)]
-        assert basket_fee(legs, 1) == 0.10
+        assert basket_fee(legs, 1) == pytest.approx(0.10)
+
+    def test_a_break_even_basket_is_not_a_candidate(self):
+        """Exactly zero edge must not be logged as an opportunity because an
+        accumulated float landed 1e-17 above zero."""
+        legs = [Leg("A", "yes", 0.5, 1000), Leg("B", "no", 0.5, 1000)]
+        econ = evaluate_basket(legs, payout_per_set=1.0)
+        assert econ.cost_per_set == pytest.approx(1.0)
+        assert not econ.is_candidate
 
     def test_fee_is_symmetric_in_price(self):
         """P x (1-P) means a leg costs the same fee priced as YES at p or NO at

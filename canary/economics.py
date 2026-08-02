@@ -42,6 +42,12 @@ from typing import List, Optional, Sequence
 
 from backtest.costs import assert_matches_live_fee_model, taker_fee_dollars
 
+# Guard against float representation error in accumulated sums, NOT a minimum
+# edge. Dollars are the unit and a cent is the smallest real quantity, so this
+# is nine orders of magnitude below anything economically meaningful. See
+# BasketEconomics.is_candidate for why it is needed at all.
+EPSILON = 1e-9
+
 
 @dataclass(frozen=True)
 class Leg:
@@ -82,8 +88,18 @@ class BasketEconomics:
         Deliberately *not* "profitable at one contract": a basket whose edge
         exists only below the per-order fee floor is not tradeable, and one
         that is unprofitable at one contract but profitable at 500 is.
+
+        ``EPSILON`` guards against representation error, not against thin
+        edges. Every number here is an accumulated float, and a basket priced
+        at exactly break-even can land a few times 1e-16 either side of zero
+        depending on summation order -- or on the Python version: CPython 3.12
+        gave ``sum()`` compensated (Neumaier) summation for floats, so the
+        development machine (3.14) and the VPS (3.10) genuinely disagree about
+        whether ten one-cent fees add to 0.1. A dollar is the unit here and the
+        smallest real quantity is a cent, so 1e-9 is far below anything
+        economically meaningful and far above the dust.
         """
-        return self.max_contracts >= 1 and self.net_total_at_max > 0.0
+        return self.max_contracts >= 1 and self.net_total_at_max > EPSILON
 
     def to_dict(self) -> dict:
         out = asdict(self)
