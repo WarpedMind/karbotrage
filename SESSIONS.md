@@ -54,11 +54,56 @@ different metrics.
    postponed game or unplayed match as `result: "scalar"`, `status: "finalized"`
    on every leg — **0.7% of KXMLBGAME events and 4.1% of KXATPMATCH events**. The
    first implementation filed these under "unsettled" and dropped them, so the
-   profile reported `exhaustive: confirmed` while the basket's guaranteed dollar
-   quietly failed on 4% of real ATP events. That is Session 31's failure mode
-   reproduced in brand-new code. Now measured and carried onto every candidate.
-   **Open**: whether Kalshi refunds voided positions at cost — a policy question
-   the API cannot answer, and decisive for how much that 4% costs.
+   profile reported `exhaustive: confirmed` while nothing had checked whether
+   the basket's guaranteed dollar survived. That is Session 31's failure mode
+   reproduced in brand-new code. Now split, measured — **and then resolved**.
+
+### The void question was framed wrong, and the framing is the lesson
+It was escalated as a binary: does Kalshi refund a voided position **at cost**
+or **not**? Both wrong. Kalshi's own `rules_secondary` — which ships on every
+market, so it is the cheapest primary source available — says a cancelled match
+*"will resolve to a **fair price** in accordance with the rules"*. Neither a
+refund nor a zero. So the question that actually decides the basket is a third
+one: **do a cancelled event's fair prices sum to $1?**
+
+They do. Every leg carries `settlement_value_dollars`, a field nobody had
+noticed. **243 of 243 scalar-settled events across 8 series (236 two-leg, 7
+three-leg) sum to exactly $1.00** — zero violations, zero unverifiable,
+reconciled. A YES-basket still pays `Σ settlement = $1`; a NO-basket still pays
+`Σ(1 − settlement) = $(N−1)`. Now checked per series in
+`qualify.scalar_sum_to_one`, with an unverifiable cancellation counting
+**against**, never for.
+
+The transferable part: *before escalating a question as "open and decisive",
+check whether the data already in hand answers it.* This one had been sitting in
+`rules_secondary` and `settlement_value_dollars` the whole time.
+
+### Deployed — and deploying found two things nothing else would have
+Installed as `karbot-canary.service` (enabled, active, `Restart=always`,
+`Nice=10`) after confirming the VPS was 10 commits behind and that **none of
+those commits touched the live path** (`git diff --name-only` over the agent
+dirs returned nothing — checked, not assumed).
+
+1. **`requests` was an undeclared dependency** — documented by `backtest/` since
+   Session 31, present locally by coincidence, `ModuleNotFoundError` on the VPS.
+2. **The dev machine and production disagree on floating-point arithmetic.** A
+   test asserting `basket_fee(...) == 0.10` passed locally and failed on the
+   VPS: local Python is 3.14, the VPS is 3.10, and CPython 3.12 gave `sum()`
+   compensated summation for floats. **"301/301 passing locally" was never
+   evidence about production.** Fixed with `approx` in the test and an `EPSILON`
+   in `is_candidate`, so a break-even basket can't be logged because a float
+   landed 1e-16 above zero.
+
+### The rate-limit coupling: predicted, then measured, after one false alarm
+`canary` and `karbot.service` share one IP and therefore Kalshi's rate limit —
+raised and documented *before* deploying. A first measurement said the canary
+made no difference; that was wrong, because it counted `grep 429`, which matches
+sequence numbers containing those digits (`expected=27854299`). The real counter
+is `book_reset_rest_failed`: **0 failures across 38,752 REST snapshots in the 84
+minutes before, 4 across 2,390 in the 13 minutes after (~0.17%)**. Real, an
+order of magnitude below Session 23's 5.5%, and absorbed by the existing retry
+path. The zero-failure pre-canary baseline is itself new information about the
+REST snapshot path's health.
 
 ### Confirmed live
 - **NO-leg depth is `yes_bid_size_fp`** — the field with the opposite name; there
@@ -94,8 +139,11 @@ sporadic by nature. What exists now is the instrument, verified against real
 books rather than fixtures.
 
 ### Not done
-Not deployed to the VPS (needs the operator's call — it is a new systemd unit).
-Phase 0 item 4 (paper resolution against real outcomes) and `--mode` remain open.
+Phase 0 item 4 (paper resolution against real outcomes) and `--mode` remain
+open. 11 pre-existing test failures on the VPS (10 in
+`test_regulatory_intelligence.py`, 1 in `test_config_resolved_log.py`) are
+environment differences unrelated to this work and were not investigated — all
+76 canary tests pass there.
 
 ---
 

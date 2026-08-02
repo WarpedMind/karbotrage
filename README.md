@@ -465,13 +465,13 @@ first, and it held.
   `FairValueProvider`, and infrastructure consolidation all remain on the table
   to revisit; this was sequencing, not elimination. The larger direction
   question is still open.
-- **Does Kalshi refund a voided position at cost?** **Open and decisive.**
-  Kalshi finalizes a postponed game or unplayed match as `result: "scalar"` on
-  every leg — measured at 0.7% of KXMLBGAME events and **4.1% of KXATPMATCH
-  events**. On one of those, no basket pays its guaranteed amount. Whether the
-  position refunds at cost (loss = the fees) or not (loss = the principal) is a
-  settlement-policy question the API cannot answer, and it decides whether any
-  basket is ever tradeable. Needs Kalshi's own rules.
+- ~~**Does Kalshi refund a voided position at cost?**~~ **Answered — and the
+  question was framed wrong.** Kalshi's own `rules_secondary` says a cancelled
+  match *"will resolve to a fair price in accordance with the rules"* — neither
+  a refund nor a zero. So the deciding question was a third one: do those fair
+  prices sum to $1? **243 of 243 cancelled events across 8 series sum to exactly
+  $1.00**, so the basket guarantee survives cancellation intact. Now checked per
+  series rather than assumed.
 - ~~**Is there a usable archive of past NWS forecasts?**~~ **Answered and
   used.** NBM on AWS (`noaa-nbm-grib2-pds`, anonymous, 2020→now). Better than
   expected: the bucket's `text/` suite publishes plain-ASCII *station*
@@ -574,15 +574,21 @@ hours of logs instead of waiting days for an actual trade.
    (`result: "scalar"` — 4.1% of ATP matches), which breaks the payout guarantee
    outright. Session 31's weather finding held up independently.
 
+7a. ✅ **Deployed** as `karbot-canary.service` on the VPS (enabled, active,
+    `Restart=always`, `Nice=10`), sweeping every 5 minutes. Deploying found two
+    things nothing else would have: an **undeclared `requests` dependency**, and
+    that the dev machine (Python 3.14) and the VPS (3.10) **disagree on
+    floating-point summation** — CPython 3.12 gave `sum()` compensated
+    summation — so "all tests pass locally" was never evidence about production.
+7b. ✅ **Void-settlement question answered**, see Open questions above.
+
 **Now next**
 
-7a. **Deploy the canary** (`scripts/karbot-canary.service`, written and
-    documented, not installed) — frequency-over-weeks is its whole purpose and
-    it currently only runs when someone runs it.
-7b. **Answer the void-settlement question from Kalshi's own rules** — does a
-    voided position refund at cost? It decides whether that 4.1% is a fee-sized
-    drag or a principal-sized one, and therefore whether any basket is ever
-    tradeable.
+7c. **Read the log after it has run for a while.** The measurement that matters
+    is the **`confirmed` vs `vanished_on_recheck` ratio**, not just the
+    candidate count — that separates real resting arbitrage from a noisy view of
+    the book. Heartbeat check:
+    `tail -1 logs/basket_candidates.jsonl | python3 -m json.tool`.
 
 **Standing**
 

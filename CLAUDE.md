@@ -220,14 +220,25 @@ What is true now:
   `exclusive + exhaustive confirmed`. Session 29 correctly noted they were
   absent from its sample; they are now in scope and still show nothing.
 
-**OPEN AND DECISIVE — do not trade a basket before resolving it**: Kalshi
-finalizes a postponed game or unplayed match as `result: "scalar"`,
-`status: "finalized"` on every leg — **0.7% of KXMLBGAME events and 4.1% of
-KXATPMATCH events**, measured. On one of those, no basket pays its guaranteed
-amount. Whether Kalshi refunds those positions **at cost** (making the loss just
-the fees) is a settlement-policy question the API cannot answer; it needs
-Kalshi's own rules. The rate is measured and attached to every logged candidate
-so it can never be read as unconditional.
+**RESOLVED same session, in the guarantee's favour — cancelled events do NOT
+break the basket.** Kalshi finalizes a postponed game or unplayed match as
+`result: "scalar"`, `status: "finalized"` on every leg — 0.7% of KXMLBGAME and
+**4.1% of KXATPMATCH** events. This was flagged as open and decisive, then
+answered from the primary source plus a measurement:
+- Kalshi's own `rules_secondary` says a cancelled match *"will resolve to a
+  **fair price** in accordance with the rules"* — so it is neither a refund at
+  cost nor a zero, which were the only two options originally considered. The
+  right question was whether those fair prices preserve the sum-to-one
+  invariant both baskets rest on.
+- They do. Every leg carries `settlement_value_dollars`, and across **243
+  scalar-settled events in 8 series (236 two-leg, 7 three-leg), 243 sum to
+  exactly $1.00** — zero violations, zero unverifiable, reconciled. So a
+  YES-basket still pays `Σ settlement = $1` and a NO-basket still pays
+  `Σ(1 − settlement) = $(N−1)`: exactly the binary guarantee.
+- Now **checked per series rather than assumed globally**
+  (`qualify.scalar_sum_to_one`). A violation, or an unverifiable cancellation,
+  disqualifies that series' baskets — both fail together, since both payouts
+  are functions of `Σ settlement`.
 
 **The processes are isolated but SHARE KALSHI'S RATE LIMIT** — noted Session 32
 before deploying, because "separate process" was overstating the independence.
@@ -244,6 +255,26 @@ is deployed, this is the first place to look**, and the fix is to raise
 `--interval-seconds` or lower `max_new_profiles`, not to assume a Kalshi-side
 change.
 
+**MEASURED after deploying, Session 32 — the effect is real but small.**
+Counting `book_reset_rest_failed` (the actual 429 counter; a naive
+`grep 429` is worthless here because it matches sequence numbers containing
+those digits, e.g. `expected=27854299` — a false alarm this session raised and
+then retracted):
+
+| window | `book_reset_rest_failed` | `book_snapshot_applied_rest` |
+|---|---|---|
+| 21:00–21:59 (pre-canary) | 0 | 30,354 |
+| 22:00–22:23 (pre-canary) | 0 | 8,398 |
+| 22:24 → (canary running) | 4 | 2,390 |
+
+Zero failures across 38,752 REST snapshots in the 84 minutes before, four in the
+13 minutes after — so the canary does cause some, at **~0.17%**. That is an
+order of magnitude below Session 23's confirmed 5.5% and below Session 30's
+0.7%, and the existing failure path absorbs it (log, keep `_gap_detected=True`,
+retry on the next throttled window). **Worth re-checking over a longer window**;
+the pre-canary baseline of literally zero also updates KNOWN DEBT item 15/16
+favourably — the REST snapshot path was healthier than previously recorded.
+
 **Also open**: a separate systemd unit does not inherit `karbot_runner.py`'s
 supervision or Telegram alerting, so the canary can die quietly.
 `Restart=always` covers a crash, not a silent hang. The per-sweep heartbeat line
@@ -251,9 +282,31 @@ in `logs/basket_candidates.jsonl` is the check to actually run — this project
 has been bitten by exactly this before (`karbot-disk-alert.sh`, silently
 non-functional Session 26→29). **Recorded as a gap, not claimed as parity.**
 
-**NOT DEPLOYED.** `scripts/karbot-canary.service` is written and documented but
-has not been installed on the VPS — that is a new unit and needs the operator's
-call.
+**DEPLOYED AND CONFIRMED LIVE, Session 32.** `karbot-canary.service` installed
+from `scripts/karbot-canary.service`, enabled at boot, active, `Restart=always`,
+`Nice=10`, 300s interval. Confirmed against the box itself: `systemctl is-active`
+= active, `is-enabled` = enabled, `karbot` still active alongside it, and real
+sweep records landing in `logs/basket_candidates.jsonl` (22:24/22:25/22:30 UTC,
+684→765 evaluated, zero errors, all reconciling). The VPS was 10 commits behind
+when this started; **none of those commits touched the live path** — verified
+via `git diff --name-only` over `agents/ karbot/ core/ execution/ data/
+karbot_runner.py`, which returned nothing, so the pull could not change trading
+behaviour.
+
+**Two things only deploying could have found**: `requests` was an undeclared
+dependency (documented by `backtest/` since Session 31, present locally by
+coincidence, `ModuleNotFoundError` on the VPS — now in `requirements.txt`); and
+**the dev machine and the VPS disagree on floating-point arithmetic** (local
+Python 3.14 vs VPS 3.10; CPython 3.12 gave `sum()` compensated summation, so ten
+one-cent fees add to 0.1 on one and 0.09999999999999999 on the other). A test
+passed locally and failed there — **"all tests pass locally" is not evidence
+about production.** Fixed with `approx` in the test and an `EPSILON` in
+`is_candidate` so a break-even basket can't be logged on float dust.
+
+Note: 11 pre-existing test failures on the VPS (10 in
+`test_regulatory_intelligence.py`, 1 in `test_config_resolved_log.py`) are
+unrelated environment differences and were not investigated. All 76 canary tests
+pass there.
 
 ### S6 WEATHER DIVERGENCE — TESTED AND DEAD, Session 31 (2026-08-02). Gate G2 FAILED.
 **This is the current state of the strategy direction. Read this before the
@@ -1032,19 +1085,23 @@ DECISIONS.md Session 32 (authoritative) and the KNOWN DEBT entry above. It has
 found **zero candidates so far**, which is information about the market, not
 about the code: every near miss is exactly one spread wide.
 
-**The immediate next steps are small and specific:**
-1. **Decide whether to deploy the canary to the VPS** (`scripts/karbot-canary.service`,
-   written and documented, not installed). Without it the canary only runs when
-   someone runs it, and frequency-over-weeks is its entire purpose.
-2. **Resolve the void-settlement question from Kalshi's own rules** — see KNOWN
-   DEBT. 4.1% of ATP events settle `scalar`; whether that refunds at cost
-   decides whether it is a fee-sized drag or a principal-sized one. Cheap to
-   answer, decisive for whether any basket is ever tradeable, and exactly the
-   kind of primary-source check this project has learned to do first.
-3. **Let it run, then read the log.** The measurement to watch is not just
-   candidate count but the **`confirmed` vs `vanished_on_recheck` ratio** —
-   that is what separates "real resting arbitrage" from "our view of the book is
-   noisy", the question Session 29 could not answer from one snapshot.
+**Both of Session 32's follow-ups were completed the same session:**
+1. ~~Deploy the canary~~ — **DONE. `karbot-canary.service` is installed,
+   enabled and active on the VPS**, sweeping every 5 minutes at `Nice=10`.
+   Verified live: sweeps at 22:24/22:25/22:30 UTC, coverage climbing 684→765
+   evaluated events, zero errors, every sweep reconciling, and the fee model
+   confirmed agreeing with the live trading path at startup.
+2. ~~Resolve the void-settlement question~~ — **DONE, and the question was
+   framed wrong**; see KNOWN DEBT. The basket guarantee survives cancellation.
+
+**The one live thing to do next:**
+- **Let it run, then read the log.** The measurement to watch is not just
+  candidate count but the **`confirmed` vs `vanished_on_recheck` ratio** —
+  that is what separates "real resting arbitrage" from "our view of the book is
+  noisy", the question Session 29 could not answer from one snapshot. Heartbeat:
+  `tail -1 logs/basket_candidates.jsonl | python3 -m json.tool` on the VPS.
+  Also re-check the canary's effect on `book_reset_rest_failed` over a longer
+  window than the 13 minutes measured so far.
 
 **The larger direction question is still open**, and the other candidates remain
 explicitly on the table (operator, Session 31: *"let's continue to have the

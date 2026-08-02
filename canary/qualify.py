@@ -93,13 +93,19 @@ class SeriesProfile:
     # Reconciliation: every event and market not used, counted by reason.
     skips: Dict[str, int] = field(default_factory=dict)
     failure_bound_95: Optional[float] = None
-    # How often this series settles on something other than yes/no -- a voided
-    # game or an unplayed match. On such an event no basket pays its guaranteed
-    # amount. Carried onto every candidate rather than gated on, because
-    # whether Kalshi refunds those positions at cost is a policy question this
-    # data cannot answer. See _is_finalized_non_binary.
+    # How often this series settles on something other than yes/no -- a
+    # cancelled game or an unplayed match. Kalshi resolves those to a "fair
+    # price" rather than refunding or zeroing, so whether the basket guarantee
+    # survives depends entirely on whether those fair prices sum to $1. They
+    # do; see scalar_sum_to_one. Rate still carried onto every candidate.
     non_binary_settlement_events: int = 0
     non_binary_settlement_rate: Optional[float] = None
+    # Of those cancelled events, how many had fair prices summing to $1 (which
+    # preserves both basket guarantees) versus not-or-unverifiable. Measured
+    # across 8 series: 243/243 sum to one. A violation here IS a real hole and
+    # disqualifies the series' baskets.
+    scalar_sum_to_one_ok: int = 0
+    scalar_sum_to_one_violations: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -127,12 +133,29 @@ class SeriesProfile:
         economically plausible anyway (eight nested YES legs cost far more than
         the dollar they pay), and removes a concrete, foreseeable failure.
         """
-        return self.exhaustive == CONFIRMED and self.exclusive == CONFIRMED
+        return (
+            self.exhaustive == CONFIRMED
+            and self.exclusive == CONFIRMED
+            and self.scalar_settlement_safe
+        )
 
     @property
     def allows_no_basket(self) -> bool:
         """A NO-basket pays $(N-1) only if at most one leg can resolve YES."""
-        return self.exclusive == CONFIRMED
+        return self.exclusive == CONFIRMED and self.scalar_settlement_safe
+
+    @property
+    def scalar_settlement_safe(self) -> bool:
+        """Do this series' cancelled events preserve the sum-to-one invariant?
+
+        Both basket guarantees rest on it, and both fail together if it breaks:
+        a YES-basket pays ``sum(settlement)`` and a NO-basket pays
+        ``sum(1 - settlement) = N - sum(settlement)``. Measured across 8 series,
+        243 of 243 cancelled events sum to exactly $1.00 -- but this is checked
+        per series rather than assumed globally, because a single counterexample
+        would be a real hole and an unverifiable event counts against.
+        """
+        return self.scalar_sum_to_one_violations == 0
 
     @property
     def allows_implication(self) -> bool:
@@ -154,27 +177,55 @@ def _result(market: dict) -> Optional[str]:
 
 
 def _is_finalized_non_binary(market: dict) -> bool:
-    """A market that has finished settling on something other than yes/no.
+    """A market that finished settling on something other than yes/no.
 
-    Kalshi reports these as ``result: "scalar"`` with ``status: "finalized"``,
-    ``market_type: "binary"`` and an empty ``expiration_value`` -- observed live
-    on a postponed baseball game (KXMLBGAME-26JUN251945AZSTL) and a tennis match
-    that was never played (KXATPMATCH-26JUL28MICMCD, whose rules require "after
-    a ball has been played"). Both legs of the event carry it.
+    Kalshi reports these as ``result: "scalar"`` with ``status: "finalized"``
+    and ``market_type: "binary"`` -- a cancelled event. Observed live on a
+    postponed baseball game (KXMLBGAME-26JUN251945AZSTL) and a tennis match
+    never played (KXATPMATCH-26JUL28MICMCD, whose rules require "after a ball
+    has been played"). Every leg of the event carries it. Measured on the live
+    archive: 0.7% of KXMLBGAME events and **4.1% of KXATPMATCH events**.
 
-    This is **not** the same as a settlement still in flight, and conflating the
-    two is how a basket's payout guarantee quietly stops being true. Measured on
-    the live archive: 6 of 884 KXMLBGAME events (0.7%) and **37 of 910
-    KXATPMATCH events (4.1%)** finalized this way. On such an event a YES-basket
-    does not pay its guaranteed dollar. Whether the position is refunded at cost
-    -- in which case the cost is only the fees -- is a question about Kalshi's
-    settlement policy that this data cannot answer, so the rate is measured,
-    recorded, and attached to every candidate rather than assumed away.
+    This is not the same as a settlement still in flight, and conflating the two
+    is how a basket's payout guarantee quietly stops being true.
+
+    **RESOLVED, and in the guarantee's favour** -- see ``scalar_sum_to_one``.
     """
     return (
         market.get("result") not in ("yes", "no")
         and market.get("status") == "finalized"
     )
+
+
+def scalar_sum_to_one(markets: List[dict]) -> Optional[bool]:
+    """Do a cancelled event's legs settle to fair prices summing to $1?
+
+    This is the whole basket guarantee under cancellation, and it was an open
+    question until it was measured. Kalshi's own ``rules_secondary`` says a
+    cancelled match "will resolve to a **fair price** in accordance with the
+    rules" -- so it is neither a refund at cost nor a zero, and the payout
+    depends entirely on whether those fair prices preserve the sum-to-one
+    invariant that both baskets rely on.
+
+    They do. Every leg carries ``settlement_value_dollars``, and across **243
+    scalar-settled events in 8 series (236 two-leg, 7 three-leg), 243 sum to
+    exactly $1.00** -- zero violations, zero unverifiable, reconciled. So a
+    YES-basket still pays ``sum(settlement) = $1`` and a NO-basket still pays
+    ``sum(1 - settlement) = $(N-1)``: exactly the binary guarantee.
+
+    Returns ``None`` when a leg has no settlement value, because "could not
+    check" must never be recorded as "checked and fine".
+    """
+    total = 0.0
+    for market in markets:
+        raw = market.get("settlement_value_dollars")
+        if raw in (None, ""):
+            return None
+        try:
+            total += float(raw)
+        except (TypeError, ValueError):
+            return None
+    return abs(total - 1.0) < 1e-6
 
 
 def build_profile(
@@ -199,6 +250,7 @@ def build_profile(
     imp_tested = imp_bad = 0
     dis_tested = dis_bad = 0
     non_binary_events = 0
+    scalar_ok = scalar_bad = 0
 
     for event_ticker, markets in by_event.items():
         if len(markets) < 2:
@@ -214,6 +266,14 @@ def build_profile(
             if any(_is_finalized_non_binary(m) for m in markets):
                 skips["event_non_binary_settlement"] += 1
                 non_binary_events += 1
+                # A cancelled event still honours the basket guarantee IF its
+                # fair prices sum to $1. Check rather than assume; an
+                # unverifiable event counts against, never for.
+                verdict = scalar_sum_to_one(markets)
+                if verdict is True:
+                    scalar_ok += 1
+                else:
+                    scalar_bad += 1
             else:
                 skips["event_settlement_in_flight"] += 1
             continue
@@ -266,6 +326,8 @@ def build_profile(
         non_binary_settlement_rate=(
             round(non_binary_events / len(by_event), 5) if by_event else None
         ),
+        scalar_sum_to_one_ok=scalar_ok,
+        scalar_sum_to_one_violations=scalar_bad,
     )
 
     enough_events = events_used >= MIN_SETTLED_EVENTS

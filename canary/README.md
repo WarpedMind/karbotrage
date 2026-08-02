@@ -70,14 +70,23 @@ derived from the former are marked `inferred` and barred from disjointness
 claims — a wrong inference cannot create a false implication between two upper
 rays, but it could create a false disjointness against a bounded interval.
 
-**Some events settle on neither YES nor NO.** Kalshi finalizes a postponed game
-or an unplayed match as `result: "scalar"`, `status: "finalized"`, on every leg.
-Measured: **0.7% of KXMLBGAME events and 4.1% of KXATPMATCH events.** On one of
-those, no basket pays its guaranteed amount. The rate is measured, stored on the
-profile and attached to every candidate. **Open question, deliberately not
-guessed at:** whether Kalshi refunds those positions at cost (making the loss
-just the fees) is a settlement-policy question the API cannot answer. It must be
-resolved from Kalshi's own rules before any basket candidate is ever traded.
+**Some events settle on neither YES nor NO — and it turns out not to matter.**
+Kalshi finalizes a postponed game or an unplayed match as `result: "scalar"`,
+`status: "finalized"`, on every leg: **0.7% of KXMLBGAME events and 4.1% of
+KXATPMATCH events.** Kalshi's own `rules_secondary` says such a market *"will
+resolve to a **fair price** in accordance with the rules"* — neither a refund at
+cost nor a zero, which were the only two possibilities considered when this was
+first flagged. The real question is whether those fair prices preserve the
+sum-to-one invariant both baskets rest on.
+
+They do. Every leg carries `settlement_value_dollars`, and across **243
+scalar-settled events in 8 series (236 two-leg, 7 three-leg), all 243 sum to
+exactly $1.00** — zero violations, zero unverifiable. So a YES-basket still pays
+`Σ settlement = $1` and a NO-basket still pays `Σ(1 − settlement) = $(N−1)`.
+Checked per series in `qualify.scalar_sum_to_one` rather than assumed globally:
+a violation, or a cancellation whose values can't be read, disqualifies that
+series' baskets — both payouts are functions of `Σ settlement`, so both fail
+together.
 
 ## Structure proposes, history disposes
 
@@ -150,9 +159,16 @@ fetches) — a few hours after a cold start, recurring weekly as profiles age ou
 At the default 300s interval that is a low sustained rate, and `kalshi_rest.get`
 backs off on 429 rather than retrying hot.
 
-**If PriceWatcher's 429 rate rises after this is deployed, look here first.**
-The levers are `--interval-seconds` (up) and `max_new_profiles` (down), not a
-theory about Kalshi changing something.
+**Measured after deploying:** counting `book_reset_rest_failed` (the real 429
+counter — a naive `grep 429` matches sequence numbers containing those digits
+and is worthless), the trading process logged **0 failures across 38,752 REST
+snapshots in the 84 minutes before** the canary started and **4 across 2,390 in
+the 13 minutes after** — about **0.17%**. Real, but an order of magnitude below
+Session 23's 5.5%, and absorbed by the existing retry path.
+
+**If that rate climbs, look here first.** The levers are `--interval-seconds`
+(up) and `max_new_profiles` (down), not a theory about Kalshi changing
+something.
 
 ## Not on the live trading path
 

@@ -242,28 +242,72 @@ class TestEvidenceThresholds:
         assert p.skips.get("event_settlement_in_flight") == 1
         assert p.non_binary_settlement_events == 0
 
+    def _cancel(self, markets, values):
+        for m, v in zip(markets, values):
+            m["result"] = "scalar"
+            m["status"] = "finalized"
+            m["settlement_value_dollars"] = f"{v:.4f}"
+
     def test_a_voided_event_is_measured_not_filed_under_unsettled(self, patched):
         """The live find that this split exists for.
 
-        Kalshi finalizes a postponed game or an unplayed match as
+        Kalshi finalizes a cancelled game or unplayed match as
         ``result: "scalar"``, ``status: "finalized"`` on every leg. Filed under
         'unsettled' it vanishes, and the profile then reports
-        ``exhaustive: confirmed`` while the basket's guaranteed dollar quietly
-        fails on 4.1% of real ATP events. It has to come back as a measured rate.
+        ``exhaustive: confirmed`` while nothing has checked whether the basket's
+        guaranteed dollar survived. It has to come back as a measured rate.
         """
         events = weather_events(40)
-        for m in events["KXHIGHX-DAY00"]:
-            m["result"] = "scalar"
-            m["status"] = "finalized"
+        self._cancel(events["KXHIGHX-DAY00"], [0.5, 0.2, 0.1, 0.1, 0.05, 0.05])
         patched(events)
         p = build_profile("KXHIGHX")
         assert p.skips.get("event_non_binary_settlement") == 1
         assert p.skips.get("event_settlement_in_flight") is None
         assert p.non_binary_settlement_events == 1
         assert p.non_binary_settlement_rate == pytest.approx(1 / 40)
-        # Still qualifies on the 39 binary events -- the caveat is carried on
-        # the candidate, not used to silently disqualify the series.
-        assert p.exhaustive == CONFIRMED
+
+    def test_a_cancelled_event_whose_fair_prices_sum_to_one_keeps_the_guarantee(
+        self, patched
+    ):
+        """Kalshi resolves a cancelled event to a "fair price", not a refund and
+        not a zero. Measured across 8 series, 243 of 243 cancelled events have
+        fair prices summing to exactly $1.00 -- so a YES-basket still pays
+        sum(settlement) = $1 and a NO-basket still pays N - 1."""
+        events = weather_events(40)
+        self._cancel(events["KXHIGHX-DAY00"], [0.5, 0.2, 0.1, 0.1, 0.05, 0.05])
+        patched(events)
+        p = build_profile("KXHIGHX")
+        assert p.scalar_sum_to_one_ok == 1
+        assert p.scalar_sum_to_one_violations == 0
+        assert p.scalar_settlement_safe
+        assert p.allows_yes_basket and p.allows_no_basket
+
+    def test_fair_prices_that_do_not_sum_to_one_disqualify_the_baskets(self, patched):
+        """A single counterexample is a real hole: both basket payouts are
+        functions of sum(settlement), so both fail together."""
+        events = weather_events(40)
+        self._cancel(events["KXHIGHX-DAY00"], [0.5, 0.2, 0.1, 0.1, 0.05, 0.30])
+        patched(events)
+        p = build_profile("KXHIGHX")
+        assert p.scalar_sum_to_one_violations == 1
+        assert not p.scalar_settlement_safe
+        assert not p.allows_yes_basket and not p.allows_no_basket
+        # The binary evidence is untouched -- it is the cancellation path that
+        # is unsafe, not the exhaustiveness finding.
+        assert p.exhaustive == CONFIRMED and p.exclusive == CONFIRMED
+
+    def test_an_unverifiable_cancellation_counts_against_not_for(self, patched):
+        """No settlement value means "could not check", which must never be
+        recorded as "checked and fine"."""
+        events = weather_events(40)
+        for m in events["KXHIGHX-DAY00"]:
+            m["result"] = "scalar"
+            m["status"] = "finalized"  # no settlement_value_dollars
+        patched(events)
+        p = build_profile("KXHIGHX")
+        assert p.scalar_sum_to_one_ok == 0
+        assert p.scalar_sum_to_one_violations == 1
+        assert not p.allows_yes_basket
 
     def test_totals_reconcile(self, patched):
         """seen == used + skipped. Session 31's bug survived because a rate

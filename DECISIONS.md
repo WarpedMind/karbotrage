@@ -176,10 +176,74 @@ Three things were nearly missed and are worth recording as process, not trivia:
    ATP events. **That is the Session 31 failure mode reproduced in new code**: an
    inconvenient case dropped under a benign label, leaving a clean-looking rate.
    Now split, measured, stored on the profile and attached to every candidate.
-   **Left as an open question rather than resolved by assumption**: whether
-   Kalshi refunds voided positions at cost — in which case the cost is only the
-   fees — is a settlement-policy question the API cannot answer. It must be read
-   from Kalshi's own rules before any basket candidate is ever traded.
+   **Then resolved the same session — see below.**
+
+### The void-settlement question, asked properly and answered — the framing was wrong before the answer was
+Flagged above as open and decisive, and put to the operator as a binary: does
+Kalshi refund a voided position **at cost** (loss = the fees) or **not**
+(loss = the principal)? Both were wrong, and the framing is the lesson.
+
+Kalshi's own `rules_secondary`, which ships on every market and is therefore the
+cheapest primary source available, says a cancelled match *"will resolve to a
+**fair price** in accordance with the rules"*. Not a refund. Not a zero. A
+settled scalar value between $0 and $1 — which is exactly why `result` reads
+`"scalar"`. So the question that actually decides the basket is neither of the
+two asked: **do a cancelled event's fair prices sum to $1?** If they do, a
+YES-basket pays `Σ settlement = $1` and a NO-basket pays
+`Σ(1 − settlement) = $(N−1)` — precisely the binary guarantee, and the
+cancellation is a non-event.
+
+They do. Every leg carries `settlement_value_dollars`, a field not previously
+noticed. Reconciled across 8 series:
+
+| | scalar events seen | checked | sum to $1.00 | unverifiable |
+|---|---|---|---|---|
+| ATP / WTA / ITF / ATP-Challenger | 149 | 149 | **149** | 0 |
+| CS2 / LoL | 82 | 82 | **82** | 0 |
+| MLB game / MLB F5 | 12 | 12 | **12** | 0 |
+| **total** | **243** | **243** | **243** | **0** |
+
+236 two-leg events and 7 three-leg, zero violations, totals reconciling.
+
+**Implemented rather than merely recorded**: `qualify.scalar_sum_to_one` checks
+the invariant per series, and `allows_yes_basket`/`allows_no_basket` both
+require `scalar_sum_to_one_violations == 0`. A cancellation whose values cannot
+be read counts **against**, never for — "could not check" must never be stored
+as "checked and fine". Both basket payouts are functions of `Σ settlement`, so
+they are gated together rather than separately.
+
+**The generalisable lesson is about the question, not the answer.** A decision
+was framed as a binary between two plausible outcomes, and reality was a third
+thing that made the whole concern evaporate. It took one API call to a field
+already being fetched. *Before escalating a question to the operator as
+"open and decisive", check whether the data already on hand answers it* — this
+one had been sitting in `rules_secondary` and `settlement_value_dollars` the
+entire time.
+
+### The rate-limit coupling: predicted, then measured, after one false alarm
+"Separate process" overstated the isolation — `canary` and `karbot.service`
+reach Kalshi from one IP and share its rate limit. Raised before deploying and
+documented, then measured after.
+
+A first measurement said the canary made **no** difference. That was wrong, and
+the reason is worth recording: it counted lines matching `grep -i "429"`, which
+matches sequence numbers containing those digits (`expected=27854299`). The
+real counter is `book_reset_rest_failed`:
+
+| window | `book_reset_rest_failed` | `book_snapshot_applied_rest` |
+|---|---|---|
+| 21:00–21:59 (pre-canary) | 0 | 30,354 |
+| 22:00–22:23 (pre-canary) | 0 | 8,398 |
+| 22:24 → (canary running) | 4 | 2,390 |
+
+So the effect is **real** — zero failures across 38,752 REST snapshots in the 84
+minutes before, four in the 13 minutes after, about **0.17%**. That is an order
+of magnitude below Session 23's confirmed 5.5%, well below Session 30's 0.7%,
+and absorbed by the existing failure path. Not a problem; not nothing either.
+Two by-products: the standing debt item "only worth prioritizing if 429s become
+a recurring pattern" now has a **zero-failure pre-canary baseline** it never
+had, and this is one more instance of the standing rule — *never treat a grep,
+a log name or a metric name as evidence of what it measures*.
 
 ### First live result: zero candidates, and every near miss is one spread wide
 **12 consecutive sweeps, 13,094 event-evaluations, zero candidates, zero errors,
@@ -217,6 +281,34 @@ riskless NO-basket". It is not: buying NO on eleven nested "over N runs" legs
 pays `11 − (number of YES)`, and on a nested ladder several are YES at once. The
 gate refutes the series and the scanner never logs it. Session 29's trap,
 reproduced on live data, caught.
+
+### Deployed, and what deploying surfaced
+Installed on the VPS as `karbot-canary.service` (enabled, active, `Restart=always`,
+`Nice=10`), after confirming the box was **10 commits behind main** and that
+**none of those commits touched the live path** — verified with
+`git diff --name-only` over `agents/ karbot/ core/ execution/ data/
+karbot_runner.py`, which returned nothing. So the pull could not alter trading
+behaviour; that is checked, not assumed.
+
+Two things only deploying could have found:
+
+1. **`requests` was an undeclared dependency.** `backtest/` has documented
+   "stdlib + `requests`" since Session 31 and `canary/` uses it too, but
+   `requirements.txt` never listed it. It was present in the local dev venv by
+   coincidence and surfaced as `ModuleNotFoundError` the first time anything
+   imported those packages on the VPS. Now declared.
+2. **The dev machine and production do not agree on floating-point arithmetic.**
+   A test asserting `basket_fee(...) == 0.10` passed locally and failed on the
+   VPS. Local Python is 3.14, the VPS is 3.10, and CPython 3.12 gave `sum()`
+   compensated (Neumaier) summation for floats — so ten one-cent fees add to
+   exactly `0.1` on one and `0.09999999999999999` on the other. **"301/301
+   passing locally" was therefore never evidence about production**, which is
+   the confirmed-vs-argued distinction in miniature. Fixed in two places: the
+   test asserts `approx`, and `is_candidate` compares against an `EPSILON` of
+   1e-9 rather than `0.0`, so a basket priced at exactly break-even cannot be
+   logged as an opportunity because an accumulated float landed 1e-16 above
+   zero. The epsilon guards representation error, **not** thin edges — a cent is
+   the smallest real quantity here, nine orders of magnitude above the guard.
 
 ### Cost, and what this does not claim
 One session. No order layer, no capital, no paper trades, no live exposure, and
