@@ -91,14 +91,21 @@ Confirm against `git log` rather than trusting this list, but do not re-derive:
 
 226/226 tests passing; runner smoke test clean.
 
-## The actual job this session: pick a direction, then execute it
+## The actual job this session: build the S5a/S5b passive arb canary
 
-**This is a genuine fork and it belongs to the operator — ask it early, with
-reasoning, before building anything.** CLAUDE.md's priority list states the
-candidates; the short form:
+**The fork was already put to the operator and answered at the end of Session
+31: build the S5a/S5b canary next.** The operator's exact framing —
+*"Option 1, but let's continue to have the other options be considered (where
+appropriate and justified) later"* — so this is **sequencing, not elimination**.
+Market-making especially is not rejected; it is waiting on a live order layer
+and on the willingness to build a large subsystem that cannot be falsified
+offline. Do not re-ask the fork; do surface it again if something you find
+changes its premise.
 
-1. **S5a/S5b passive arb canary** — cheapest, safest, parallel to anything
-   else. REST poller plus arithmetic: no LLM, no orders, no hot path. Never
+The other candidates, kept live for later:
+
+1. **S5a/S5b passive arb canary — THIS SESSION.** Cheapest, safest, parallel to
+   anything else. REST poller plus arithmetic: no LLM, no orders, no hot path. Never
    disproven (Session 29 found nothing in *one snapshot*, which is not the same
    as nothing existing). Converts a snapshot into real frequency data over
    weeks. `backtest/kalshi_history.py` already does the discovery.
@@ -324,22 +331,29 @@ round-trip and trains them to skim the options:
 
 ## Recommended model / effort for this session
 
-**Depends on the fork, so decide after asking it — but default to Opus.**
-- If the answer is **market-making (S8)**: Opus, high effort. It is the
-  largest new subsystem in the project's history, it is a *live order* path
-  (place/cancel/amend/reconcile, cancel-on-disconnect, rate limits), and it
-  cannot be falsified offline — so correctness has to come from design care
-  rather than from measurement, which is the expensive direction to get wrong.
-- If the answer is **the S5a/S5b canary**: Opus, medium-to-high. The logic is
-  arithmetic, but the trap is subtle and specific (exhaustiveness vs mutual
-  exclusivity, pricing the executable side, ceil'd fees × N legs) and it is
-  exactly the class this project has repeatedly got wrong.
-- If the answer is **infrastructure consolidation**: Sonnet is reasonable for
-  most of it; switch to Opus for anything touching RiskGate or money paths.
+**Opus, medium-to-high effort.** Not max, and not Sonnet, for specific reasons.
 
-Not max in any case — the statistical reasoning that justified max-adjacent
-effort last session has been done, and what remains is mostly implementation
-with a few sharp edges.
+The S5a/S5b canary is small — a REST poller and some arithmetic, publishing
+nothing tradeable. That argues for a cheaper model. What argues against it is
+that **every trap in this work is of the exact class this project has already
+paid for three times**: pricing the wrong side of the book (Session 26),
+mistaking a structural impossibility for an opportunity (Session 28), and
+mis-reading a strike-field convention (Session 31). Specifically here —
+exhaustiveness versus mutual exclusivity are *different conditions* and the
+YES-basket and NO-basket cases need different ones; every leg must be priced at
+the **ask**, not the bid or the mid; and the fee is **ceil'd per order and
+multiplied by N legs**, which is exactly where a thin basket edge dies. Those
+are cheap to write and easy to get subtly wrong, and a wrong version produces a
+confident stream of fake opportunities rather than an error.
+
+Not max effort: there is no open modelling or statistical question this time.
+The measurement work that justified max-adjacent effort in Session 31 is done,
+and what remains is bounded implementation against a spec that already exists
+(DECISIONS.md Session 28's roadmap entry, plus Session 29's empirical check).
+
+Sonnet is a reasonable choice in this repo for mechanical work — doc sweeps,
+test scaffolding, refactors confined to code already being changed — and it is
+the wrong economy for anything that decides whether a trade is profitable.
 
 ## Before ending this session
 

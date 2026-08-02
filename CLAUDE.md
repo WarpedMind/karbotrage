@@ -960,8 +960,20 @@ negative.** S6 weather divergence was built, measured and FAILED gate G2 in
 Session 31 — see DECISIONS.md's Session 31 entry (authoritative) and the
 KNOWN DEBT entry above. **Phases 1 and 2 of the Session 30 plan are closed, not
 pending.** The open question is now *what to do instead*, which is a direction
-fork for the operator, not something to pick unilaterally. The candidates, with
-their state:
+fork for the operator, not something to pick unilaterally.
+
+**DECIDED (operator, 2026-08-02, end of Session 31): the S5a/S5b passive arb
+canary is next. The other options stay explicitly on the table to be
+reconsidered later where appropriate and justified — this is a sequencing
+choice, not an elimination.** Rationale: it is the only candidate that
+produces real live evidence without building new risk surface, it runs in the
+background accumulating frequency data while the larger direction question
+stays open, and `backtest/` already supplies its market discovery. Market-making
+in particular is NOT rejected — it is waiting on a live order layer and on
+someone being willing to build a large subsystem that cannot be falsified
+offline.
+
+The candidates, with their state:
 
 - **Market-making (S8)** — Session 30's deferred option, untouched by the S6
   result and on better footing than that entry first concluded once the maker

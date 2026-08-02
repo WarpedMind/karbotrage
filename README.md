@@ -446,11 +446,12 @@ first, and it held.
 
 ## Open questions (flagged live, not yet resolved)
 
-- **What replaces S6?** An open direction fork, not a decision to make
-  unilaterally. Candidates: market-making (needs the live order layer that
-  doesn't exist), the S5a/S5b passive canary (cheap, parallel, never
-  disproven), a different `FairValueProvider` (subject to the screening
-  question above), or consolidating the infrastructure backlog.
+- **What replaces S6?** **Decided 2026-08-02: the S5a/S5b passive arb canary
+  goes next** — the only candidate that produces live evidence without
+  building new risk surface, and it accumulates data in the background while
+  the larger question stays open. Market-making, a different
+  `FairValueProvider`, and infrastructure consolidation all remain on the
+  table to revisit; this is sequencing, not elimination.
 - ~~**Is there a usable archive of past NWS forecasts?**~~ **Answered and
   used.** NBM on AWS (`noaa-nbm-grib2-pds`, anonymous, 2020→now). Better than
   expected: the bucket's `text/` suite publishes plain-ASCII *station*
