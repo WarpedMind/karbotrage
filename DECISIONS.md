@@ -1,6 +1,97 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-08-02 — Session 32 (addendum): the direction question, and why the infrastructure items are on market-making's critical path rather than an alternative to it
+
+Recorded so the analysis survives whatever is decided. The three candidates have
+been carried unchanged since Session 31; what changed in Session 32 is that two
+of them are now **cheaply gated on information that is already in motion**,
+which reorders them.
+
+### The state of each candidate
+
+**1. Market-making (S8).** Still the strongest statistical candidate, and its
+measured surface is untouched: 3,651 of 3,858 tradeable two-sided markets carry
+no maker fee at a 2¢ median spread, 489 of them with ≥2¢ spread and ≥100
+contracts resting both sides. Its cost is unchanged too, and it is severe — a
+full live order-management layer built entirely up front, and **it cannot be
+falsified offline at all.** Every other strategy this project has considered
+could be killed cheaply by a measurement first. S1 died for $0. S6 died for one
+session. Market-making cannot die cheaply; it can only die expensively.
+
+**Newly gated**: `documentation/kalshi-mm-enquiry-draft.md` asks the exchange
+four questions whose answers change the decision materially — chiefly whether
+the programme is open to individual participants at all, and what the order
+rate limits are. Sending it costs minutes. Building the order layer costs
+sessions. **Ask first.**
+
+**2. A different `FairValueProvider`.** The abstraction and the divergence shape
+both survive Session 31 — one provider on one market family failed, for a
+legible reason. But this is the weakest option *right now* for a specific
+reason: **there is no concrete candidate that clears the screening question.**
+"Find a better data source" is a research task with no defined target, and
+`SIGNAL_REGISTER.md`'s own multiple-comparisons budget is ~71 independent dates,
+which supports very few hypotheses. The one item there with a genuine structural
+advantage — NOAA's weather-modification registry, which requires filing **≥10
+days before** activity commences — is precipitation-specific and turns on an
+unverified question (are filings visible at submission, or only at quarterly
+publication?). Worth a free check; not worth a session's build on spec.
+
+**3. Infrastructure consolidation.** Usually the consolation prize. It is not
+here, and this is the observation that reorders the whole fork:
+
+> **The two most substantial infrastructure items are prerequisites for
+> market-making, not alternatives to it.**
+
+- **The Health Monitor / dead-lettered `AgentHeartbeat` events.** CLAUDE.md has
+  said for many sessions that this "stops being cosmetic once positions carry
+  real variance and a silently-stopped agent means unmanaged inventory."
+  *Market-making is precisely that scenario* — quoting both sides while an agent
+  has silently died is the single worst failure mode available to this system.
+  A canary that dies quietly loses data; a market-maker that dies quietly holds
+  inventory it is not managing.
+- **The stuck order-book reset loop** (Session 26, still open). Market-making
+  depends on the book view being correct far more acutely than taking does: a
+  stale book makes a taker miss a trade, but it makes a maker quote a price that
+  is wrong in a direction someone will take.
+
+So a session spent on those is not deferring the decision. It is **phase one of
+the market-making build**, and it retains its value even if market-making is
+never chosen — because both items are also required before *anything* carries
+real variance.
+
+### The recommendation
+Sequence it as: **send the enquiry → let the canary accumulate → spend
+intervening sessions on the two infrastructure prerequisites → decide
+market-making with the exchange's answer and weeks of canary data in hand.**
+
+Nothing in that sequence is idle. The canary measures continuously for free and
+alerts on its own. The enquiry is minutes of operator time. The infrastructure
+work is on market-making's critical path regardless.
+
+### The honest counter-argument
+This could be a way of never making the decision. "Infrastructure first" is the
+classic shape of a project that builds forever and ships nothing, and this one
+has now spent Sessions 28–32 on analysis, measurement and instrumentation
+without placing a real order. Two guards against that, stated so they can be
+checked rather than assumed:
+1. **The infrastructure list is bounded to the two items named above.** Health
+   Monitor and the reset loop. The rest of the standing list (fee variance,
+   `--mode`, Telegram mute) is genuinely cosmetic and must not be used to fill
+   sessions.
+2. **The decision has an information trigger, not a date.** When the Kalshi
+   answer arrives and the canary has ~2 weeks of data, market-making gets
+   decided yes or no. If the answer is "institution-only", it is decided *no*
+   immediately and the direction question reopens properly.
+
+It is also worth saying plainly: **the honest possibility remains that none of
+these is profitable.** S1 was an artifact, S6 lost to the market, S5a/S5b shows
+zero so far. The project's real achievement across Sessions 28–32 is that each
+of those was established cheaply and definitively rather than discovered through
+losses. That is worth something, but it is not the same as an edge.
+
+---
+
 ## 2026-08-02 — Session 32 (addendum): should this project pay for data? Not yet, and the reason is structural rather than budgetary
 
 Operator asked directly whether paying for services or data might make some of

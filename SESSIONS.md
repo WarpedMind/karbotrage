@@ -175,9 +175,40 @@ data-constrained anyway — S5a/S5b is arithmetic on Kalshi's own books, and
 market-making needs an order layer, which is engineering. Three specific,
 testable conditions that would change the answer are recorded in DECISIONS.md.
 
+### Test suite green on the VPS for the first time — two portability bugs
+Running the suite on the box (never done before) found two failures, both the
+same root cause as the float-summation find: **dev machine Python 3.14, VPS
+3.10**.
+- **`asyncio.timeout` landed in 3.11**, so ten regulatory-intelligence tests
+  errored with `AttributeError`. Added a fallback that **really enforces** the
+  deadline rather than yielding unguarded — a timeout guard that silently stops
+  guarding on the platform you deploy to is worse than the error it replaces.
+  Confirmed the live path never uses it, so this was only ever a test bug.
+- **`test_config_resolved_log` asserted `telegram_enabled=False`** on the
+  grounds that no `config.yaml` exists in the test environment. The VPS has a
+  real one with Telegram enabled — created in Session 24 precisely so alerting
+  would stop being a silent no-op. The test was asserting the *absence of a
+  production config file*: it could never catch a real regression on the box it
+  was meant to protect, and went red for correct behaviour. Now derives expected
+  values from a freshly loaded `KarbotConfig`.
+
+**305/305 on the VPS.** A red suite on production hides the next failure.
+
+### Direction analysed; Kalshi enquiry drafted
+`documentation/kalshi-mm-enquiry-draft.md` — four questions to the exchange
+before any order-layer build, because market-making **cannot be falsified
+offline at all** and asking costs minutes while building costs sessions. Full
+direction reasoning in DECISIONS.md's Session 32 addendum. Conclusion: the
+**Health Monitor** and the **stuck order-book reset loop** are *prerequisites*
+for market-making rather than alternatives to it, so working on them is phase
+one of that build and retains value regardless. Recorded with its honest
+counter-argument — this is the shape of a project that builds forever and ships
+nothing — plus two guards: a bounded list, and an information trigger rather
+than a date.
+
 ### Not done
 Phase 0 item 4 (paper resolution against real outcomes) and `--mode` remain
-open. 11 pre-existing test failures on the VPS (10 in
+open. The Kalshi enquiry is drafted but **not sent** — operator action. 11 pre-existing test failures on the VPS (10 in
 `test_regulatory_intelligence.py`, 1 in `test_config_resolved_log.py`) are
 environment differences unrelated to this work and were not investigated — all
 76 canary tests pass there.

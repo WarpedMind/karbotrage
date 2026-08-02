@@ -596,8 +596,18 @@ hours of logs instead of waiting days for an actual trade.
     candidate count — that separates real resting arbitrage from a noisy view of
     the book. Heartbeat check:
     `tail -1 logs/basket_candidates.jsonl | python3 -m json.tool`.
-7e. **Then the direction question** — market-making, a different
-    `FairValueProvider`, or infrastructure consolidation. Operator's call.
+7e. **Send the Kalshi market-maker enquiry** —
+    `documentation/kalshi-mm-enquiry-draft.md`, drafted but not sent. Four
+    questions whose answers materially change the market-making decision,
+    chiefly whether the programme is open to individual participants at all.
+    Asking costs minutes; building the order layer costs sessions, and
+    market-making **cannot be falsified offline at all**.
+7f. **Then the two infrastructure prerequisites** — the Health Monitor
+    (dead-lettered `AgentHeartbeat`) and the stuck order-book reset loop. These
+    are on market-making's critical path rather than alternatives to it: a
+    quoting system whose agent silently dies holds inventory nobody is managing,
+    and a maker with a stale book quotes a price someone will take. Full
+    reasoning, with the honest counter-argument, in DECISIONS.md Session 32.
 
 **Standing**
 

@@ -1118,6 +1118,21 @@ about the code: every near miss is exactly one spread wide.
 2. ~~Resolve the void-settlement question~~ — **DONE, and the question was
    framed wrong**; see KNOWN DEBT. The basket guarantee survives cancellation.
 
+**Direction — analysed Session 32, sequencing recommended, not yet committed.**
+Full reasoning in DECISIONS.md's Session 32 addendum ("the direction question,
+and why the infrastructure items are on market-making's critical path"). The
+sequence: **send the Kalshi market-maker enquiry
+(`documentation/kalshi-mm-enquiry-draft.md`, drafted, NOT sent) → let the canary
+accumulate → spend intervening sessions on the two infrastructure prerequisites
+→ decide market-making with the exchange's answer and ~2 weeks of data in hand.**
+The load-bearing point: the **Health Monitor** and the **stuck order-book reset
+loop** are prerequisites for market-making, not alternatives to it — a quoting
+system whose agent silently dies holds inventory nobody is managing, and a maker
+with a stale book quotes a price someone will take. The infrastructure list for
+this purpose is **bounded to those two items**; the rest of the standing list is
+cosmetic and must not be used to fill sessions. The decision has an
+**information trigger, not a date**.
+
 **The one live thing to do next:**
 - **Let it run, then read the log.** The measurement to watch is not just
   candidate count but the **`confirmed` vs `vanished_on_recheck` ratio** —

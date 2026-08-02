@@ -188,6 +188,28 @@ market-making needs an order layer, which is engineering. Three specific,
 testable conditions that *would* change the answer are recorded there — quote
 those rather than re-deriving the argument.
 
+**The direction analysis is already written** — DECISIONS.md's Session 32
+addendum, "the direction question, and why the infrastructure items are on
+market-making's critical path rather than an alternative to it". Read it rather
+than re-deriving. Its conclusion, in one line: **send the Kalshi enquiry → let
+the canary accumulate → spend intervening sessions on the two infrastructure
+prerequisites (Health Monitor, stuck order-book reset loop) → decide
+market-making with the exchange's answer and ~2 weeks of canary data in hand.**
+
+The load-bearing observation is that those two infrastructure items are
+**prerequisites for market-making, not alternatives to it**: a quoting system
+whose agent silently dies is holding inventory it is not managing, and a maker
+with a stale book quotes a price someone will take. So that work is phase one of
+the build, and retains value even if market-making is never chosen.
+
+The counter-argument is recorded there too and should be honoured: this is the
+classic shape of a project that builds forever and ships nothing. Two guards —
+the infrastructure list is **bounded to those two items** (the rest of the
+standing list is genuinely cosmetic and must not be used to fill sessions), and
+the decision has an **information trigger, not a date** (when the Kalshi answer
+arrives and the canary has ~2 weeks of data, market-making is decided yes or
+no; "institution-only" decides it *no* immediately and reopens the fork).
+
 The candidates stay explicitly on the table (operator, Session 31: *"let's
 continue to have the other options be considered where appropriate and justified
 later"*):
