@@ -147,6 +147,34 @@ twenty-five minutes on a Sunday afternoon is not weeks, and real arbitrage is
 sporadic by nature. What exists now is the instrument, verified against real
 books rather than fixtures.
 
+### Watchdog: the "dies quietly" gap closed the same session
+A separate systemd unit inherits none of `karbot_runner.py`'s supervision or
+Telegram alerting, and `Restart=always` covers a crash but not a hang. So
+`scripts/karbot-canary-alert.sh` now runs from cron every 15 minutes, mirroring
+`karbot-disk-alert.sh`'s conventions (secrets from `/etc/karbot/secrets/`,
+edge-triggered state, nothing echoing the token). It alerts on **CANARY
+STALLED** (no sweep for 20 minutes, with a recovery message) and on **CANARY
+FOUND N CANDIDATE(S)** with the candidate's economics and its
+`confirmed`/`vanished_on_recheck` status.
+
+**Both alert paths plus the silent no-op were exercised with real Telegram sends
+before being trusted**, against a scratch file via `CANARY_LOG`/
+`CANARY_STATE_DIR` overrides. Deliberate: an untested watchdog is worse than
+none, and the precedent is `karbot-disk-alert.sh` — the watchdog built to
+prevent a silent outage — being itself silently non-functional from Session 26
+to Session 29.
+
+### Asked and answered: should the project pay for data?
+Operator asked directly. **Recommendation: not yet**, for a structural reason
+rather than a budgetary one — full entry in DECISIONS.md. The short form: the
+binding question is not "is it paid?" but "do the participants setting the price
+already have it?", and on Kalshi 75.4% of volume is sports, where the sharpest
+public forecast is nearly free and the counterparties already buy better feeds
+than any subscription would provide. Neither remaining strategy is
+data-constrained anyway — S5a/S5b is arithmetic on Kalshi's own books, and
+market-making needs an order layer, which is engineering. Three specific,
+testable conditions that would change the answer are recorded in DECISIONS.md.
+
 ### Not done
 Phase 0 item 4 (paper resolution against real outcomes) and `--mode` remain
 open. 11 pre-existing test failures on the VPS (10 in

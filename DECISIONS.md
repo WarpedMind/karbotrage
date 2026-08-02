@@ -1,6 +1,83 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-08-02 — Session 32 (addendum): should this project pay for data? Not yet, and the reason is structural rather than budgetary
+
+Operator asked directly whether paying for services or data might make some of
+this worth it. Answering honestly rather than defaulting to "more data is
+better", because the question has a specific answer given what has been measured
+here.
+
+**The recommendation is: do not spend money yet.** Not because paid data is
+useless, but because nothing in this project's current position is
+data-constrained, and the one thing that has been measured about signal quality
+argues the opposite of what intuition suggests.
+
+### Why paid data does not fix what is actually broken
+Session 31 measured that NOAA/NBM — free, public — loses to the Kalshi price
+because *every participant reads it*. The generalised screening question in
+`SIGNAL_REGISTER.md` is **"is there a reason the market does not already know
+this?"**, and a paywall is one of the few structural answers to it. That is the
+real argument for paid data and it is not a bad one.
+
+But the binding question is not "is it paid?", it is **"do the participants who
+set the price already have it?"** On Kalshi, by measured volume:
+- **Sports is 75.4% of volume.** This is the worst possible place to buy an
+  informational edge. The participants setting sports prices are the ones who
+  already buy the best feeds and run better models, and the sharpest public
+  forecast — a devigged closing line — is nearly free. Paying to enter that
+  contest is paying for the privilege of being the least-informed party with a
+  subscription.
+- **Weather is 3.2%.** Measured dead for NBM, and the bar is not "beat NBM" —
+  Session 31 showed the market's implied forecast is already ~20% more accurate
+  than NBM. A commercial vendor would have to beat *that*, and there is no
+  evidence any does.
+- **Fed/CPI/econ is 0.1%** — 46,953 contracts of 24h volume across 453 markets.
+  Effectively no liquidity to trade against even with a perfect signal.
+
+### What the project is actually constrained by
+Neither remaining strategy is short of data:
+- **S5a/S5b** needs no external data at all. It is arithmetic on Kalshi's own
+  order books. Its constraint is whether the opportunity exists, which the
+  canary now measures for $0.
+- **Market-making (S8)** needs an order-management layer — engineering, not a
+  subscription. Its measured surface (489 markets, ≥2¢ spread, ≥100 contracts
+  both sides, zero maker fee) is already known from free public data.
+
+The honest summary: **this project has never made a real dollar.** S1 was a
+book-reconstruction artifact, S6 failed its calibration gate, and S5a/S5b shows
+zero candidates so far. Spending money before any strategy has demonstrated an
+edge is spending ahead of information, which is the same error as trading ahead
+of a measurement — the error this project has spent four sessions learning not
+to make.
+
+### What would change this, specifically
+Stated concretely so it is a testable condition rather than a vague "later":
+1. **The canary logs `confirmed` candidates at a real rate over weeks.** Then
+   the constraint becomes execution latency, and *that* is where money helps —
+   colocation or a faster feed, not a fundamental-data subscription.
+2. **Market-making is chosen and reaches a working order layer.** Then Kalshi's
+   own market-maker program is worth investigating — it is a rebate/status
+   arrangement rather than a purchase, so it costs nothing to ask about.
+3. **A candidate signal source clears `SIGNAL_REGISTER.md`'s screening question
+   on a free sample first.** If a paid source is the only way to test a
+   hypothesis that already has a plausible informational advantage, a one-month
+   subscription to measure it is cheap and rational. Paying to go *looking* for
+   a hypothesis is not.
+
+The one free action worth taking whenever weather work resumes is already in
+`SIGNAL_REGISTER.md`: NOAA's weather-modification registry requires filing **≥10
+days before** activity commences. That is genuine advance public notice, it
+clears the screening question in a way NBM never did, and it costs nothing —
+only the question of whether filings are visible at submission or only at
+quarterly publication is unresolved, and that is a phone call, not a purchase.
+
+**Note on scope**: this is an engineering-spend judgement about the project, not
+investment advice, and it should not be read as a view on whether trading
+prediction markets is a good use of capital.
+
+---
+
 ## 2026-08-02 — Session 32: the S5a/S5b canary is built as a SEPARATE PROCESS, and its arbitrage relations are gated on settled history rather than on strike arithmetic or Kalshi's own event flag
 
 ### Status of each claim, labeled up front

@@ -119,7 +119,8 @@ canary/                   # S5a/S5b arbitrage canary — separate process, NEVER
   scan.py                 # Two-stage sweep — bulk snapshot, then per-leg re-confirmation
   run_canary.py           # Loop, JSONL output, per-sweep heartbeat
 scripts/
-  karbot-canary.service   # systemd unit for the canary (written, NOT deployed)
+  karbot-canary.service     # systemd unit for the canary (deployed)
+  karbot-canary-alert.sh    # cron watchdog: Telegram on stall or on a candidate
 ```
 
 ## Recent fixes (order-book gap recovery, feed monitoring)
@@ -582,13 +583,21 @@ hours of logs instead of waiting days for an actual trade.
     summation — so "all tests pass locally" was never evidence about production.
 7b. ✅ **Void-settlement question answered**, see Open questions above.
 
+7c. ✅ **Watchdog installed** — `karbot-canary-alert.sh` runs from cron every 15
+    minutes and sends Telegram if the canary stalls for 20 minutes or if a real
+    candidate appears. Both alert paths were exercised with real sends before
+    being trusted; an untested watchdog is worse than none, and this project's
+    previous one was silently broken for three sessions.
+
 **Now next**
 
-7c. **Read the log after it has run for a while.** The measurement that matters
+7d. **Read the log once it has run for a while.** The measurement that matters
     is the **`confirmed` vs `vanished_on_recheck` ratio**, not just the
     candidate count — that separates real resting arbitrage from a noisy view of
     the book. Heartbeat check:
     `tail -1 logs/basket_candidates.jsonl | python3 -m json.tool`.
+7e. **Then the direction question** — market-making, a different
+    `FairValueProvider`, or infrastructure consolidation. Operator's call.
 
 **Standing**
 

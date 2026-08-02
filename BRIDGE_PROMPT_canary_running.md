@@ -30,13 +30,21 @@ That is a functioning market, and it reproduces Session 29's hand check (closest
 a Sunday afternoon is not weeks, and real arbitrage is sporadic by nature.
 301/301 tests pass. Nothing was deployed to the VPS.
 
-**It is deployed and running.** `karbot-canary.service` is installed, enabled at
-boot and active on the VPS, sweeping every 5 minutes at `Nice=10`. Its measured
-effect on the trading process is small but real: `book_reset_rest_failed` went
-from 0 across 38,752 REST snapshots in the 84 minutes before, to 4 across 2,390
-in the 13 minutes after — about 0.17%, an order of magnitude below Session 23's
-5.5%, absorbed by the existing retry path. Worth re-checking over a longer
-window.
+**It is deployed, running, and watched.** `karbot-canary.service` is installed,
+enabled at boot and active on the VPS, sweeping every 5 minutes at `Nice=10`.
+`karbot-canary-alert.sh` runs from cron every 15 minutes and sends Telegram on
+two edges — **CANARY STALLED** (no sweep for 20 minutes, with a recovery
+message) and **CANARY FOUND N CANDIDATE(S)** with the candidate's economics and
+its `confirmed`/`vanished_on_recheck` status. Both paths were exercised with
+real Telegram sends before being trusted. So **the operator will be told if a
+candidate appears** — you do not need to poll for one, and a session that starts
+with "did it find anything" can answer that from the log in one command.
+
+The canary's measured effect on the trading process is small but real:
+`book_reset_rest_failed` went from 0 across 38,752 REST snapshots in the 84
+minutes before, to 4 across 2,390 in the 13 minutes after — about 0.17%, an
+order of magnitude below Session 23's 5.5%, absorbed by the existing retry path.
+Worth re-checking over a longer window.
 
 Four things worth internalising before starting. First, **the design decision
 that carries the correctness is "structure proposes, history disposes."** Strike
@@ -118,6 +126,12 @@ Confirm against `git log` rather than trusting this list, but do not re-derive:
   PGA top-N, spreads) that were never basket candidates. Checked per series in
   `qualify.scalar_sum_to_one`, and the gate currently blocks 0 qualifying
   series.
+- **The "dies quietly" gap is closed.** `scripts/karbot-canary-alert.sh` +
+  `/etc/cron.d/karbot-canary-alert`, mirroring `karbot-disk-alert.sh`'s
+  conventions. Both alert paths and the silent no-op were exercised with real
+  Telegram sends, against a scratch file via `CANARY_LOG`/`CANARY_STATE_DIR`
+  overrides. **An untested watchdog is worse than none** — the precedent is
+  `karbot-disk-alert.sh` being silently non-functional Session 26→29.
 - **Deploying found two things nothing else would have**: `requests` was an
   undeclared dependency since Session 31 (present locally by coincidence), and
   **the dev machine and the VPS disagree on floating-point arithmetic** — local
@@ -159,9 +173,24 @@ than the 13 minutes measured so far — count `book_reset_rest_failed`, **never
 produced a false alarm that had to be retracted.
 
 **Then: the direction question, which is the operator's call.** Do not open a
-large build without putting it to them. The candidates stay explicitly on the
-table (operator, Session 31: *"let's continue to have the other options be
-considered where appropriate and justified later"*):
+large build without putting it to them.
+
+**One thing already settled, so do not re-open it unprompted**: the operator
+asked in Session 32 whether paying for data or services would make this worth
+it. Answer, with full reasoning in DECISIONS.md's Session 32 addendum: **not
+yet, for a structural rather than budgetary reason.** The binding question is
+not "is it paid?" but *"do the participants setting the price already have
+it?"*, and 75.4% of Kalshi volume is sports — the worst possible place to buy
+an edge, since the counterparties already buy better feeds and the sharpest
+public forecast (a devigged closing line) is nearly free. Neither remaining
+strategy is data-constrained: S5a/S5b is arithmetic on Kalshi's own books, and
+market-making needs an order layer, which is engineering. Three specific,
+testable conditions that *would* change the answer are recorded there — quote
+those rather than re-deriving the argument.
+
+The candidates stay explicitly on the table (operator, Session 31: *"let's
+continue to have the other options be considered where appropriate and justified
+later"*):
 
 - **Market-making (S8)** — the strongest remaining statistical candidate,
   untouched by the S6 result, with a measured surface: 489 markets at ≥2¢ spread
@@ -307,6 +336,13 @@ as new items are learned; never thin it out.**
   (a field already being fetched). A question framed as a binary between two
   plausible outcomes is a warning sign that the third possibility has not been
   looked for.
+- **An untested watchdog is worse than none.** Anything whose job is to notice a
+  failure must have its alerting path fired for real before it is trusted, and
+  the no-op case checked too. `karbot-disk-alert.sh` was built to prevent a
+  silent outage and was itself silently non-functional for three sessions.
+  Design monitoring scripts with an override (an env var for the log path and
+  state dir) so both edges can be exercised against a scratch file without
+  touching real data.
 - **`grep` is not a measurement.** Session 32 reported a 429 rate by counting
   `grep -i "429"`, which matched sequence numbers containing those digits
   (`expected=27854299`), and had to retract it. Grep for the *emitting

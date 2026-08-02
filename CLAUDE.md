@@ -286,12 +286,25 @@ retry on the next throttled window). **Worth re-checking over a longer window**;
 the pre-canary baseline of literally zero also updates KNOWN DEBT item 15/16
 favourably — the REST snapshot path was healthier than previously recorded.
 
-**Also open**: a separate systemd unit does not inherit `karbot_runner.py`'s
-supervision or Telegram alerting, so the canary can die quietly.
-`Restart=always` covers a crash, not a silent hang. The per-sweep heartbeat line
-in `logs/basket_candidates.jsonl` is the check to actually run — this project
-has been bitten by exactly this before (`karbot-disk-alert.sh`, silently
-non-functional Session 26→29). **Recorded as a gap, not claimed as parity.**
+**The "dies quietly" gap is now CLOSED — `karbot-canary-alert.sh`, Session 32.**
+A separate systemd unit does not inherit `karbot_runner.py`'s supervision or
+Telegram alerting, and `Restart=always` covers a crash but not a hang. So an
+external watchdog now runs from cron every 15 minutes
+(`/etc/cron.d/karbot-canary-alert`), mirroring `karbot-disk-alert.sh`'s
+conventions (secrets from `/etc/karbot/secrets/karbot.env`, edge-triggered state
+files in `/var/lib`, nothing echoing the token). Two alerts:
+- **CANARY STALLED** if no sweep record has been written for 20 minutes
+  (tolerates three missed cycles plus a restart), with a recovery message.
+- **CANARY FOUND N CANDIDATE(S)** the moment a real candidate appears, with its
+  economics and its `confirmed` / `vanished_on_recheck` status — because a
+  candidate sitting unread in a JSONL file is worth nothing.
+
+**Both paths were exercised with real Telegram sends before being trusted**,
+plus the silent no-op case, using `CANARY_LOG`/`CANARY_STATE_DIR` overrides
+against a scratch file so no real data was touched. That is deliberate: an
+untested watchdog is worse than none, and the precedent is
+`karbot-disk-alert.sh` being silently non-functional from Session 26 to Session
+29 — the watchdog built to prevent a silent outage was itself the silent outage.
 
 **DEPLOYED AND CONFIRMED LIVE, Session 32.** `karbot-canary.service` installed
 from `scripts/karbot-canary.service`, enabled at boot, active, `Restart=always`,

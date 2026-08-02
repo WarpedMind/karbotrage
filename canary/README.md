@@ -146,6 +146,30 @@ That is what a functioning market looks like, and it matches Session 29's ladder
 check (closest 1.01) exactly. One snapshot is not a verdict — accumulating the
 frequency data is the point.
 
+## Watchdog
+
+Every sweep writes a `record: "sweep"` line whether or not it found anything, so
+that line doubles as a heartbeat. On the VPS the check is automated:
+`scripts/karbot-canary-alert.sh` runs from cron every 15 minutes and sends
+Telegram on two edges — **CANARY STALLED** if no sweep has been written for 20
+minutes (with a recovery message), and **CANARY FOUND N CANDIDATE(S)** the
+moment a real one appears, carrying its economics and its
+`confirmed`/`vanished_on_recheck` status. A candidate sitting unread in a JSONL
+file is worth nothing.
+
+Both alert paths, plus the silent no-op case, were exercised with real Telegram
+sends before being trusted, against a scratch file via the `CANARY_LOG` and
+`CANARY_STATE_DIR` overrides so no real data was touched. An untested watchdog
+is worse than none: `karbot-disk-alert.sh`, built to prevent a silent outage,
+was itself silently non-functional from Session 26 to Session 29.
+
+Manual check:
+
+```bash
+tail -1 logs/basket_candidates.jsonl | python3 -m json.tool
+grep -c '"record": "candidate"' logs/basket_candidates.jsonl
+```
+
 ## Isolated in process, NOT isolated in rate limit
 
 Worth stating plainly, because "separate process" overstates the independence:
