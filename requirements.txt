@@ -13,3 +13,10 @@ pytest-asyncio>=0.20.0
 black>=22.0.0
 flake8>=4.0.0
 python-dotenv>=1.0.0
+# Used ONLY by the offline research packages (backtest/, canary/), never by the
+# live trading path — which is async and uses aiohttp. Added Session 32: it had
+# been an undeclared dependency since backtest/ shipped in Session 31, and it
+# surfaced as a ModuleNotFoundError the first time anything imported those
+# packages on the VPS. It was present locally by coincidence of the dev
+# environment, which is exactly how an undeclared dependency stays invisible.
+requests>=2.31.0
