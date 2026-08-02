@@ -354,13 +354,21 @@ direction that can be killed cheaply beats one that can only be evaluated
 expensively. That is the same discipline that killed S1 for $0.
 
 Market-making stays on the roadmap, deferred behind a live
-order-management layer that doesn't exist yet. Also corrected this
-session: Kalshi's maker fee is **not** $0 as previously recorded — it's
-25% of the taker fee, `ceil(0.0175 × C × P × (1−P))`, which at 1 contract
-on a 50¢ market is 1¢ per side against a 2¢ median spread. Nothing is
-being deleted: S1's canary detector, the S2/S3/S4 groundwork, the event
-bus, order-book reconstruction, RiskGate, PaperExecutor, the compliance
-and Telegram agents all remain as substrate.
+order-management layer that doesn't exist yet — and it looks *better*
+than expected once Kalshi's published fee schedule is read carefully. The
+maker and taker fee formulas share a shape but not a default multiplier:
+`round up(M × 0.0175 × C × P × (1−P))` for makers where **M defaults to
+0**, versus `M × 0.07 × …` for takers where M defaults to 1. So maker
+fees are **$0** except on ~76 explicitly enumerated series — which works
+out to **42.5% of exchange volume and 3,651 of 3,858 tradeable markets
+paying nothing to rest an order**, 489 of them with a ≥2¢ spread and ≥100
+contracts on both sides. Tellingly, the series that *do* charge maker fees
+are also the tightest (1¢ spreads on KXPGATOUR and KXMLBGAME) — already
+professionally market-made.
+
+Nothing is being deleted: S1's canary detector, the S2/S3/S4 groundwork,
+the event bus, order-book reconstruction, RiskGate, PaperExecutor, the
+compliance and Telegram agents all remain as substrate.
 
 Full spec — architecture, Kelly derivation, backtest design, and the
 G1–G5 gates that must pass before any of it sees paper money — is in
@@ -376,9 +384,11 @@ G1–G5 gates that must pass before any of it sees paper money — is in
   serves only the current forecast. This is the single biggest unknown in
   the plan — with an archive the backtest takes a session, without one it
   takes weeks of forward data collection.
-- **VPS state is currently unknown** — SSH has been failing with
-  `Permission denied (publickey)` since 2026-08-01. Access needs restoring
-  before any "confirmed live" claim can be re-audited.
+- **Every "CONFIRMED LIVE" claim in CLAUDE.md still needs re-auditing**
+  against the VPS directly — the VPS was once found 4 commits behind
+  `main` while docs claimed otherwise. The box itself is healthy as of
+  2026-08-02 (service active, 35 days uptime, disk 17%), with a pending
+  reboot and 3 outstanding security updates.
 - **S5a/S5b viability** — checked against one real snapshot, not yet
   disproven but not yet confirmed either. Continues as a cheap passive
   detect-and-log canary rather than as a priority.
@@ -436,16 +446,15 @@ hours of logs instead of waiting days for an actual trade.
 
 **Standing**
 
-8. Restore VPS access, then re-audit every "CONFIRMED LIVE" claim.
-9. Confirm Kalshi's maker fee against the primary source (currently
-   secondary-sourced only).
-10. Build the Health Monitor agent — no longer cosmetic once positions
-    carry real variance.
-11. Investigate the stuck order-book reset loop; the paper-trade fee
+8. Re-audit every "CONFIRMED LIVE" claim against the VPS directly, and
+   schedule its pending reboot / security updates.
+9. Build the Health Monitor agent — no longer cosmetic once positions
+   carry real variance.
+10. Investigate the stuck order-book reset loop; the paper-trade fee
     variance; a concurrency limiter on `_request_snapshot`; Telegram
     `/mute` `/unmute`.
-12. Live executor, then market-making — gated, last, and re-derived
-    against the corrected maker fee.
+11. Live executor, then market-making — gated, last. Target the
+    zero-maker-fee series, not the headline ones.
 
 ## License
 

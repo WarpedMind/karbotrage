@@ -28,11 +28,24 @@ measured grounds — a live scan of 40,000 open Kalshi markets showed
 Fed/econ markets are effectively dead (0.1% of volume), sports is 75% but
 benchmarked against sharp closing lines, and weather is small (3.2%) but
 uniquely tractable because Kalshi weather markets settle on NWS's own
-Climatological Report for a named station. Session 30 also found that
-Session 28's market-making premise was wrong: Kalshi's maker fee is not
-$0, it is 25% of taker. **Session 30 wrote no code** — it was spec-only,
-by mandate. All the numbers and the reasoning are in the docs above; don't
-take this paragraph's word for any of it.
+Climatological Report for a named station. **Session 30 wrote no code** —
+it was spec-only, by mandate.
+
+Two corrections were made *within* Session 30 that the docs record in full
+and that are worth internalizing before starting: it published a
+"correction" claiming Kalshi's maker fee is 25% of taker (wrong — the
+maker formula's multiplier defaults to **0**, so maker fees are $0 outside
+~76 enumerated series, and Session 28 was right), and it published
+"VPS access lost, state unknown" (wrong — the SSH key simply wasn't in
+`~/.ssh/`). Both wrong claims reached a commit before being caught. Both
+came from the same failure: **a confident negative conclusion drawn from
+an incomplete search.** Three agreeing secondary sources were not
+confirmation; one directory listing was not a search. Carry that forward —
+it applies directly to this session's NOAA-archive question, where "I
+couldn't find an archive" must not become "no archive exists."
+
+All the numbers and the reasoning are in the docs above; don't take this
+paragraph's word for any of it.
 
 ## What must NOT be touched or deleted
 
@@ -82,6 +95,32 @@ in CLAUDE.md, in order. Do not skip ahead to writing strategy code.
 
 Tests are expected for anything that ships, matching this project's
 existing convention (133/133 passing as of Session 29).
+
+## Operating notes for this environment (from the operator, Session 30)
+
+- **Bash breaks under `auto` permission mode.** The failure looks like
+  "claude-opus-5 is temporarily unavailable, so auto mode cannot determine
+  the safety of Bash." When it happens, **use `AskUserQuestion` to ask the
+  operator to switch to acceptEdits** — do not silently work around it or
+  abandon the check. (Note: `AskUserQuestion` always supplies its own
+  "Other" option automatically; don't add one.)
+- **SSH to the VPS uses a key OUTSIDE `~/.ssh/`:**
+  `ssh -i ~/kalshi-keys/oracle-vps.key ubuntu@147.224.209.18`. Session 30
+  wasted effort and published a wrong conclusion by checking only
+  `~/.ssh/`. If something looks absent, ask before concluding it's gone.
+- **The operator wants to stay in one turn where possible.** Batch
+  questions; use `AskUserQuestion` rather than ending the turn to ask
+  something. If you need a task done outside your reach (fetching a doc,
+  running something locally, checking a dashboard), **ask via
+  `AskUserQuestion` and continue in the same turn** rather than stopping.
+  Do not end the session without explicitly saying so and confirming.
+- **Supporting documents the operator fetches go in a `supporting docs/`
+  folder** in the repo. Check there before assuming a source is
+  unreachable. Kalshi's fee schedule (effective 2026-07-07) is one of
+  these.
+- **Web access works** — one caveat: `kalshi.com` rate-limits (HTTP 429)
+  on repeated fetches. The operator can retrieve pages via Brave when a
+  fetch is blocked; ask.
 
 ## Standing practices for this session
 

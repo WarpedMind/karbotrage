@@ -77,38 +77,85 @@ does not have to re-derive it:
   single late-evening snapshot; the implementation session should collect
   across the day rather than reason from this one.
 
-### CORRECTION to Session 28: Kalshi's maker fee is NOT zero
-Session 28's market-making recommendation (DECISIONS.md, "strategy
-roadmap" entry, and SESSIONS.md Session 28 item S8) states "maker fee = $0
-on most Kalshi markets" and reasons from there that books sitting just
-outside taker break-even sit just *inside* maker break-even. **That premise
-appears to be wrong.** Three independent third-party fee references agree
-that Kalshi's maker fee is **25% of the taker fee** — i.e.
-`ceil(0.0175 × C × P × (1−P))` against the taker's
-`ceil(0.07 × C × P × (1−P))`. This also matches this repo's own
-`KalshiFeeModel` docstring ("Maker orders (resting limit orders) pay ~25%
-of the taker rate"), which has been sitting there correct and unreconciled
-against the Session 28 claim.
+### Kalshi's real fee structure — PRIMARY-SOURCE CONFIRMED, and a correction-of-a-correction
+This section was written twice in one session. Recording both passes,
+because the mistake is instructive.
 
-Why it matters, with the ceil rounding applied:
-```
-1 contract, P = $0.50, maker:  0.0175 × 1 × 0.25 = $0.004375 → ceil → $0.01
-```
-That is **1¢ per side on a 50¢ contract**, against a *median observed
-spread of 2¢*. At small size, maker fees consume the entire spread. The
-ceil amortizes with size — at 100 contracts the same maker fee is $0.44
-total, i.e. 0.44¢/contract — so market-making is only viable at size, and
-size on a binary contract means carrying real directional inventory. The
-strategy's true exposure is therefore adverse selection and inventory, not
-spread capture.
+**First pass (wrong).** Three independent third-party fee references say
+Kalshi's maker fee is "25% of the taker fee," and this repo's own
+`KalshiFeeModel` docstring says the same. On that basis this entry
+originally declared Session 28's "maker fee = $0 on most Kalshi markets"
+to be wrong. **That declaration was itself wrong.**
 
-This does not kill market-making. It does mean the one quantitative
-argument that made it look like the obvious next move was built on a wrong
-number, and it must be re-derived from the corrected fee before anyone
-builds an order layer for it. **Action taken**: the Session 28 entry is not
-edited (history stays intact); this entry supersedes it, and CLAUDE.md's
-KNOWN DEBT records the correction. **Still open**: confirm against Kalshi's
-own published fee schedule (PDF was rate-limiting this session).
+**Second pass (correct).** The operator supplied Kalshi's actual published
+fee schedule (effective 2026-07-07). Verbatim:
+```
+Trading (taker) fees:  round up(M × 0.07   × C × P × (1−P))
+    M = the multiplier for each contract (default is 1 unless otherwise indicated)
+Maker fees:            round up(M × 0.0175 × C × P × (1−P))
+    M = the multiplier for each contract (default is 0 unless otherwise indicated)
+```
+**The two formulas have different default multipliers.** Taker M defaults
+to **1**; maker M defaults to **0**. So the maker fee is **$0 by default**,
+and is charged only on the ~76 series explicitly enumerated in the
+schedule's "Non-Standard Fees" table with a Maker Multiplier of 1.
+Session 28 was substantially right; the secondary sources quote the
+formula's coefficient (0.0175 = 25% of 0.07) while omitting that the
+multiplier it is applied to defaults to zero.
+
+**The lesson, recorded deliberately**: three agreeing secondary sources
+and a matching internal docstring still produced a wrong conclusion,
+because all four described the *coefficient* and none described the
+*default multiplier*. Agreement among secondary sources is not
+confirmation. This is the same failure mode as Session 26's "tests
+internally consistent with a wrong formula" and Session 28's "0 candidates
+is a wiring fact, not a market fact" — and it happened here in the middle
+of a session whose entire premise was verified-beats-argued.
+
+**Measured consequence (live, same session, ~04:15 UTC — note total volume
+read 69.4M on this pass vs 74.7M an hour earlier, so treat all these as
+intraday snapshots, not constants):**
+| | share of 24h volume | tradeable two-sided markets | median spread | spread ≥2¢ AND ≥100 contracts both sides |
+|---|---|---|---|---|
+| Maker fee **$0** (M defaults 0) | **42.5%** (29.5M contracts) | **3,651** | **2¢** | **489** |
+| Maker fee charged (M=1) | 57.5% (39.9M contracts) | 207 | 1¢ | 27 |
+
+The shape of that split is the interesting part: the fee-charging series
+are the highest-volume ones (KXPGATOUR, KXMLBGAME) **and** the tightest —
+1¢ median spread, i.e. already professionally market-made. The wide
+spreads sit in the zero-maker-fee series, which still carry real volume:
+KXMLBTOTAL (2.45M), KXBOXING (2.28M), KXLIGAMXGAME (2.17M), KXMLBSPREAD
+(1.64M), KXMLSGAME (1.33M). **489 markets currently offer a ≥2¢ spread
+with ≥100 contracts resting on both sides and no maker fee at all.**
+
+Two further details from the primary source worth carrying forward:
+- **Rounding**: the schedule's prose says fees round up "such that the fee
+  + positionCost is rounded to a centicent" ($0.0001), but its own
+  published fee table shows 1 contract at $0.10 paying $0.01 — i.e.
+  ceil-to-the-cent behavior for small orders. The table is authoritative
+  for behavior; the prose may relate to the sub-cent (`deci_cent`)
+  `price_level_structure` now present on some markets. **Implement against
+  the table, and verify against a real fill before trusting either.**
+- **Ten series carry BOTH multipliers at 0** — no taker fee and no maker
+  fee (KXBTCY, KXETHY, KXCITRINI, KXDOED, KXGREENLAND, KXIRANDEMOCRACY,
+  KXELECTIRAN, KXGAMBLINGREPEAL, KXLAYOFFSYINFO, KXPAHLAVIHEAD). Measured
+  volume in these across tradeable markets: **zero**. Free to trade,
+  nothing to trade.
+- **Kalshi now lists perpetual futures** with a tiered bps maker/taker
+  schedule (taker 12.0 bps at tier 0, maker 5.0 bps). A new instrument
+  class on a CFTC-regulated venue — noted for the multi-asset scoping
+  section below, not acted on.
+
+**Does this change the direction decision?** It weakens one of the four
+arguments for divergence-first, and only one. Reasons 1, 2 and 4 below —
+divergence can be falsified offline while market-making cannot;
+market-making requires a live order layer built entirely up front; the
+fair-value abstraction transfers to other venues and an order layer does
+not — are untouched by the fee correction. Reason 3 (the fee argument) is
+withdrawn. Market-making is now a **stronger** candidate than this entry
+first concluded, and the 489-market zero-fee surface should be treated as
+a real finding when it is picked up. The sequencing stands on the
+remaining three reasons, not on the fee.
 
 ### The decision
 **Near-term direction: S6 — External Model Divergence, weather/NOAA first,
@@ -137,7 +184,11 @@ parallel as a cheap, passive canary — not as a competing priority.
    cancel-on-disconnect — and it needs all of it built *before* the first
    bit of evidence arrives. That is the largest and riskiest new
    subsystem in the project's history, spent entirely up front.
-3. **Its quantitative case was built on the maker-fee error above.**
+3. ~~**Its quantitative case was built on the maker-fee error above.**~~
+   **WITHDRAWN** — this reason was itself based on the mistaken fee
+   reading, and the primary source shows market-making's fee economics are
+   *better* than this entry first concluded, not worse. See the fee
+   section above. The other three reasons stand on their own.
 4. **Divergence transfers to the stated multi-asset ambition; market-making
    does not.** "Compute an external fair value, compare to market price,
    trade the gap" is the shape of essentially all discretionary and
@@ -341,12 +392,17 @@ Same discipline the arb strategies got, in order. Each is a stop:
 Only then `s6_detect_and_log_only = False`, in paper mode, small.
 
 ### Market-making (S8) — deferred, and what would unblock it
-Kept on the roadmap, explicitly not next. Measured surface, for whenever it
-is picked up: **486 markets** currently show a spread ≥2¢ with ≥100
-contracts resting on both sides; **384** show ≥3¢ with ≥50; median
+Kept on the roadmap, explicitly not next — but on better footing than this
+entry's first draft concluded, once the fee schedule was read correctly.
+Measured surface for whenever it is picked up, **restricted to series that
+pay no maker fee at all**: **489 markets** with a spread ≥2¢ and ≥100
+contracts resting on both sides; **391** with ≥3¢ and ≥50; median
 top-of-book `min(bid,ask)` across all traded markets is **42 contracts**.
-That is a real but modest surface, and the corrected maker fee has to be
-applied to it before any expectation is formed.
+The zero-maker-fee universe is 3,651 tradeable markets carrying 42.5% of
+exchange volume at a 2¢ median spread. Concentrate any future work there
+rather than on the headline series (KXPGATOUR, KXMLBGAME), which both
+charge maker fees *and* quote at a 1¢ median spread — the signature of
+existing professional market-makers.
 Prerequisites, all currently missing: a live order-management layer
 (`live_order_manager.py` — place/cancel/amend/reconcile, order state
 machine, cancel-on-disconnect, rate-limit handling); an inventory tracker
@@ -850,14 +906,22 @@ markets; observed books sit just outside break-even for takers, i.e.
 just INSIDE it for makers) but requires a live order-management layer
 that doesn't exist yet — statistical inventory risk, flag it clearly as
 a departure from pure arb if pursued.
-> **→ CORRECTED, Session 30 (2026-08-01): "maker fees are zero on most
-> Kalshi markets" is wrong.** Kalshi's maker fee is 25% of the taker fee
-> — `ceil(0.0175 × C × P × (1−P))` — which at 1 contract on a 50¢ market
-> is 1¢ per side against a measured *median spread of 2¢*. The
-> "just INSIDE it for makers" inference above does not hold at small
-> size. Market-making is not ruled out, but its case must be re-derived
-> from the corrected fee. See the Session 30 entry at the top of this
-> file. (Secondary-sourced; primary confirmation still outstanding.)
+> **→ CONFIRMED CORRECT, Session 30 (2026-08-02), against Kalshi's own
+> published fee schedule.** "Maker fees are zero on most Kalshi markets"
+> holds: the maker formula's multiplier `M` **defaults to 0** (the taker
+> formula's defaults to 1), so maker fees apply only to the ~76 series
+> explicitly listed in the schedule's Non-Standard Fees table. Measured
+> live: **42.5% of 24h volume, and 3,651 of 3,858 tradeable two-sided
+> markets, carry no maker fee** — including 489 with a ≥2¢ spread and
+> ≥100 contracts resting on both sides.
+> Two refinements to the inference above, though: the fee-charging series
+> are the *highest-volume* ones (KXPGATOUR, KXMLBGAME) and also the
+> *tightest* (1¢ median spread — already professionally made), so the
+> zero-fee opportunity lives in the mid-volume series, not the headline
+> ones. Session 30 briefly published a contrary "correction" to this entry
+> based on three agreeing secondary sources that quoted the coefficient
+> but omitted the default multiplier; that correction was wrong and has
+> been retracted. See the Session 30 entry at the top of this file.
 
 ---
 

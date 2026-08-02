@@ -44,11 +44,27 @@ class KalshiFeeModel:
     Kalshi's official fee schedule/help center): fee per contract =
     round(0.07 * price * (1 - price), 2) dollars, where price is the
     contract price in dollars. Peaks at 1.75% on a 50c contract, falls
-    toward zero at the extremes (near 1c or 99c). Maker orders (resting
-    limit orders) pay ~25% of the taker rate — not modeled here, since S1
-    always crosses the spread (prices off the ask — see DECISIONS.md
-    Session 26, "S1 arb formula uses BID prices for both legs of a BUY
-    trade"), a taker action, so the taker rate applies.
+    toward zero at the extremes (near 1c or 99c).
+
+    Maker fees are NOT modeled here, and the reason matters if this class
+    is ever reused for a market-making strategy. Kalshi's published
+    schedule (effective 2026-07-07, read directly in Session 30) gives:
+        taker: round_up(M * 0.07   * C * P * (1-P))   M defaults to 1
+        maker: round_up(M * 0.0175 * C * P * (1-P))   M defaults to 0
+    The coefficient is 25% of the taker rate, but the MULTIPLIER DEFAULTS
+    TO ZERO — so the maker fee is $0 on every series except the ~76
+    explicitly listed in the schedule's "Non-Standard Fees" table with
+    Maker Multiplier 1 (which includes the high-volume KXPGATOUR and
+    KXMLBGAME). An earlier version of this docstring said only "maker
+    orders pay ~25% of the taker rate," which is the coefficient without
+    the multiplier and reads as though maker fees always apply; that
+    phrasing contributed to a wrong conclusion in Session 30. Do not model
+    maker fees as a flat fraction of taker — look the series up.
+
+    Irrelevant to S1 either way: S1 always crosses the spread (prices off
+    the ask — see DECISIONS.md Session 26, "S1 arb formula uses BID prices
+    for both legs of a BUY trade"), a taker action, so the taker rate
+    applies.
 
     Replaces a prior flat-14%-of-trade-value approximation (found
     2026-07-13 while assessing strategy viability after the S1 pricing

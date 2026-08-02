@@ -181,20 +181,36 @@ pointer, not a summary to build from). The short form:
   order-book reconstruction, RiskGate, PaperExecutor, ComplianceOfficer,
   and the Telegram agent stay as reusable substrate.
 
-### CORRECTION to Session 28: Kalshi's maker fee is NOT $0 — found Session 30 (2026-08-01)
-Session 28 recommended market-making partly on "maker fee = $0 on most
-Kalshi markets" (DECISIONS.md Session 28 roadmap entry; SESSIONS.md Session
-28 item S8). Three independent third-party references give the real maker
-fee as **25% of taker** — `ceil(0.0175 × C × P × (1−P))` — which also
-matches this repo's own `KalshiFeeModel` docstring, unreconciled until now.
-With ceil rounding, 1 contract at 50¢ pays **1¢ per side**, against a
-**median observed spread of 2¢** — at small size the fee is the whole
-spread. Market-making is therefore only viable at size, where the real
-exposure is inventory/adverse selection rather than spread capture.
-**SECONDARY-SOURCED — needs primary confirmation**: Kalshi's own fee
-schedule PDF returned HTTP 429 on three attempts. Confirm before any
-market-making work proceeds. Session 28's entry is intentionally left
-intact; the Session 30 DECISIONS.md entry supersedes it.
+### Kalshi fee structure — PRIMARY-SOURCE CONFIRMED, Session 30 (2026-08-02)
+From Kalshi's published fee schedule (effective 2026-07-07), supplied by
+the operator. **The taker and maker formulas have different default
+multipliers — this is the detail every secondary source omits:**
+```
+taker:  round up(M × 0.07   × C × P × (1−P))    M defaults to 1
+maker:  round up(M × 0.0175 × C × P × (1−P))    M defaults to 0
+```
+So **the maker fee is $0 by default**, charged only on the ~76 series
+explicitly listed in the schedule's "Non-Standard Fees" table with Maker
+Multiplier 1. Session 28's "maker fee = $0 on most Kalshi markets" is
+**correct**. Session 30 briefly published a contrary correction based on
+three agreeing secondary sources (and this repo's own `KalshiFeeModel`
+docstring) that all quote the 0.0175 coefficient while omitting the
+zero default multiplier; that correction was wrong and has been retracted
+in DECISIONS.md. **Standing lesson: agreement among secondary sources is
+not confirmation.**
+Measured live consequence: **42.5% of 24h volume and 3,651 of 3,858
+tradeable two-sided markets carry no maker fee**, at a 2¢ median spread;
+489 of them show ≥2¢ spread with ≥100 contracts both sides. The
+fee-charging series (KXPGATOUR, KXMLBGAME) are the highest-volume *and*
+the tightest at 1¢ — already professionally market-made. Zero-fee volume
+leaders: KXMLBTOTAL, KXBOXING, KXLIGAMXGAME, KXMLBSPREAD, KXMLSGAME.
+Also from the primary source: rounding prose says "centicent" ($0.0001)
+but the published fee table shows ceil-to-the-cent behavior on small
+orders — implement against the table and verify against a real fill.
+Ten series carry zero taker *and* maker multiplier, but have zero measured
+volume. Kalshi now also lists **perpetual futures** on a tiered bps
+schedule (taker 12.0 / maker 5.0 bps at tier 0) — new instrument class,
+noted, not acted on.
 
 ### Live Kalshi universe measurements — CONFIRMED LIVE, Session 30 (2026-08-02 ~03:00 UTC)
 Public REST, no auth, 40,000 open markets (`mve_filter=exclude`),
@@ -236,17 +252,30 @@ book-reconstruction artifact (Session 29). **The clock restarts when a
 strategy that has passed its gates actually begins paper trading.** No live
 trading on anything until that clock has genuinely run.
 
-### VPS access lost as of Session 30 (2026-08-01) — VPS state is UNKNOWN, not assumed
-`ssh ubuntu@147.224.209.18` fails with `Permission denied (publickey)`
-using `~/.ssh/id_rsa` (the only key present; `ssh-add -l` reports no
-identities; no `~/.ssh/config` entry for the host). Prior sessions had
-working SSH. Session 30 therefore **cannot** confirm whether the VPS is
-running, what commit it is on, or its disk state — and makes no claim
-either way. Restoring access is a prerequisite for the standing "re-audit
-every CONFIRMED LIVE claim against actual VPS state" item below.
-Separately and unexplained: a local `logs/audit_trail.jsonl` `DailySummary`
-write at 2026-08-02T03:11 UTC with **no** `karbot_runner` process running
-locally. Not investigated; flagged rather than waved off.
+### VPS SSH — the key is NOT in ~/.ssh; use `-i ~/kalshi-keys/oracle-vps.key`
+Recorded so no future session repeats Session 30's mistake. The VPS key
+lives at **`~/kalshi-keys/oracle-vps.key`**, not `~/.ssh/id_rsa` and not
+in any `~/.ssh/config` entry. The correct command is:
+```
+ssh -i ~/kalshi-keys/oracle-vps.key ubuntu@147.224.209.18
+```
+Session 30 initially checked only `~/.ssh/`, found `id_rsa` rejected, and
+wrongly concluded "VPS access lost, state unknown" — a conclusion that was
+committed to three docs before the operator corrected it. The lesson is
+the project's own standing one: an absence found in one location is not
+evidence of absence, and asking costs less than a wrong claim in a doc.
+
+**VPS state CONFIRMED LIVE, Session 30 (2026-08-02 ~04:00 UTC)**: service
+`karbot` **active**; uptime 35 days; disk **17% of 49G** (healthy — for
+contrast, the Session 26 outage was 100%); repo at `d1ac08c`, i.e. one
+commit behind `main` after this session's docs-only push (expected; no
+code change to deploy). A `*** System restart required ***` notice is
+showing, and 12 pending updates including 3 security updates — worth
+scheduling, not urgent.
+
+Separately and still unexplained: a local `logs/audit_trail.jsonl`
+`DailySummary` write at 2026-08-02T03:11 UTC with **no** `karbot_runner`
+process running locally. Not investigated; flagged rather than waved off.
 
 ### S5a/S5b checked against real live data BEFORE building — neither shows a currently-exploitable edge, Session 29 (2026-07-16)
 Before writing any S5a/S5b code, ran the same empirical-first discipline
@@ -843,14 +872,15 @@ from this list; this list is the ordering.**
    can be shared with the S6 provider.
 
 ### Standing / infrastructure
-8. **Restore VPS access, then re-audit every "CONFIRMED LIVE" claim in
-   this file against actual VPS state.** SSH has been failing with
-   `Permission denied (publickey)` since Session 30 — VPS state is
-   currently unknown and must not be assumed. "Confirmed live" means
-   checked against `git log -1` on the VPS itself plus fresh log output.
-9. **Confirm Kalshi's maker fee from the primary source** (KNOWN DEBT
-   above) — currently secondary-sourced only; the fee schedule PDF was
-   rate-limiting. Blocks any market-making work.
+8. **Re-audit every "CONFIRMED LIVE" claim in this file against actual VPS
+   state.** SSH works — use `ssh -i ~/kalshi-keys/oracle-vps.key
+   ubuntu@147.224.209.18` (the key is NOT in `~/.ssh/`). "Confirmed live"
+   means checked against `git log -1` on the VPS itself plus fresh log
+   output, never inferred from a local commit. Also schedule the pending
+   VPS reboot (restart-required notice, 3 security updates outstanding).
+9. ~~Confirm Kalshi's maker fee from the primary source~~ — **DONE,
+   Session 30**: primary fee schedule obtained; maker M defaults to 0, so
+   maker fees are $0 outside ~76 enumerated series. See KNOWN DEBT above.
 10. **Build the Health Monitor agent / investigate dead-lettered
    `AgentHeartbeat` events** firing every ~30s. Deferred for many sessions
    as cosmetic; it stops being cosmetic once positions carry real variance

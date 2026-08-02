@@ -42,21 +42,65 @@ going in:
    ladders with machine-parseable `strike_type`/`floor_strike` (no LLM
    needed); `KXHIGHLAX` alone did 616,690 contracts/24h.
 
-### Found this session: Session 28's market-making premise is wrong
+### A mistake made and corrected inside the same session: the maker-fee "correction" that was itself wrong
+Worth recording in full, because the failure mode is one this project
+keeps meeting in new costumes.
+
 Session 28 recommended market-making partly on "maker fee = $0 on most
-Kalshi markets." Three independent third-party fee references agree the
-real maker fee is **25% of taker** — `ceil(0.0175 × C × P × (1−P))` — and
-this repo's own `KalshiFeeModel` docstring has said the same thing
-("~25% of the taker rate") the whole time, unreconciled. With ceil
-rounding, 1 contract at 50¢ pays **1¢ maker fee per side** against a
-**median observed spread of 2¢** — at small size the fee is the entire
-spread. Market-making only works at size, and size on a binary contract
-means carrying directional inventory, so the real exposure is adverse
-selection, not spread capture.
-**Labeled honestly**: secondary-sourced. Kalshi's own fee-schedule PDF
-returned HTTP 429 on three attempts; primary confirmation is a next-session
-task. Session 28's entry left intact for the historical record; the new
-DECISIONS.md entry supersedes it.
+Kalshi markets." Three independent third-party fee references say the maker
+fee is "25% of the taker fee," and this repo's own `KalshiFeeModel`
+docstring says the same. On that basis this session declared Session 28
+wrong, wrote it into four docs, and committed it.
+
+Then the operator supplied Kalshi's actual published fee schedule
+(effective 2026-07-07), which shows the two formulas have **different
+default multipliers**:
+```
+taker:  round up(M × 0.07   × C × P × (1−P))    M defaults to 1
+maker:  round up(M × 0.0175 × C × P × (1−P))    M defaults to 0
+```
+Maker fees are therefore **$0 by default**, charged only on the ~76 series
+explicitly enumerated in the schedule's Non-Standard Fees table.
+**Session 28 was right; the correction was wrong and has been retracted**
+across DECISIONS.md, CLAUDE.md and README.md.
+
+The instructive part: three independent sources agreed with each other
+*and* with an internal docstring, and all four were still insufficient —
+because every one of them described the coefficient (0.0175 = 25% of 0.07)
+and none described the multiplier it multiplies. This is the same shape as
+Session 26's "tests internally consistent with a wrong formula" and Session
+28's "0 candidates is a wiring fact, not a market fact," and it happened in
+a session whose stated premise was verified-beats-argued. **Standing
+lesson: agreement among secondary sources is not confirmation.**
+
+Measured consequence, live (~04:15 UTC; note total volume read 69.4M on
+this pass vs 74.7M an hour earlier — intraday snapshots, not constants):
+
+| | share of 24h volume | tradeable two-sided markets | median spread | spread ≥2¢ AND ≥100 both sides |
+|---|---|---|---|---|
+| Maker fee **$0** | **42.5%** (29.5M) | **3,651** | **2¢** | **489** |
+| Maker fee charged | 57.5% (39.9M) | 207 | 1¢ | 27 |
+
+The split matters more than the headline: the fee-charging series are both
+the highest-volume (KXPGATOUR, KXMLBGAME) **and** the tightest at 1¢ —
+already professionally market-made. The wide spreads sit in mid-volume
+zero-fee series: KXMLBTOTAL (2.45M), KXBOXING (2.28M), KXLIGAMXGAME
+(2.17M), KXMLBSPREAD (1.64M). So market-making is a **stronger** candidate
+than this session first concluded, concentrated somewhere other than the
+obvious markets.
+
+**Does it flip the direction?** No — but it does retire one of the four
+arguments. Reasons 1, 2 and 4 (offline falsifiability; the order layer
+must be built entirely up front; the fair-value abstraction transfers to
+other venues) are untouched by the fee. Reason 3 was the fee argument and
+is withdrawn. The sequencing now rests on the remaining three.
+
+Two other details from the primary source: the rounding prose says
+"centicent" ($0.0001) while the schedule's own table shows ceil-to-cent on
+small orders (implement against the table, verify against a real fill);
+and Kalshi now lists **perpetual futures** on a tiered bps schedule (taker
+12.0 / maker 5.0 bps at tier 0) — a new instrument class on a
+CFTC-regulated venue, noted for multi-asset scoping, not acted on.
 
 ### The decision
 **S6 — External Model Divergence, NOAA/weather first, detect-and-log,
@@ -136,17 +180,27 @@ book-reconstruction artifact (Session 29). Clock restarts when a strategy
 that passes its gates actually begins paper trading. CLAUDE.md updated so
 the stale dates stop reading as live.
 
-### Two things could not be verified this session — reported, not assumed
-1. **VPS state is unknown.** `ssh ubuntu@147.224.209.18` fails with
-   `Permission denied (publickey)` using `~/.ssh/id_rsa` (the only key
-   present; `ssh-add -l` reports no identities, no `~/.ssh/config` entry).
-   Prior sessions had working SSH. So this session **cannot** confirm
-   whether the VPS is running, what commit it is on, or its disk state —
-   and does not claim to. CLAUDE.md's standing item 7 ("re-audit every
-   CONFIRMED LIVE claim against actual VPS state") is therefore still
-   open, now additionally blocked on restoring access. Local `main` is at
-   `d1ac08c` and clean apart from this session's doc changes.
-2. **A local `logs/audit_trail.jsonl` write at 2026-08-02T03:11 UTC** (a
+### A second self-inflicted error the same session: "VPS access lost"
+This session checked `~/.ssh/`, found only `id_rsa`, saw it rejected by
+the VPS, and concluded **"VPS access lost — state unknown"** — writing
+that into CLAUDE.md, SESSIONS.md and README.md and committing it. The
+operator then simply logged in: the key lives at
+**`~/kalshi-keys/oracle-vps.key`**, outside `~/.ssh/` entirely.
+
+`ssh -i ~/kalshi-keys/oracle-vps.key ubuntu@147.224.209.18` — recorded in
+CLAUDE.md so no future session repeats this. Same root cause as the
+maker-fee error an hour earlier: a confident negative conclusion drawn
+from an incomplete search, when asking would have cost one question.
+
+**VPS state, now actually CONFIRMED LIVE (2026-08-02 ~04:00 UTC)**:
+service `karbot` **active**, uptime 35 days, disk **17% of 49G** (healthy
+— the Session 26 outage was 100%), repo at `d1ac08c` = one commit behind
+`main` after this session's docs-only push, which is expected since no
+code changed. Pending: a `*** System restart required ***` notice and 12
+updates including 3 security updates — worth scheduling.
+
+### Still unverified — reported, not assumed
+1. **A local `logs/audit_trail.jsonl` write at 2026-08-02T03:11 UTC** (a
    `DailySummary` compliance checkpoint) with **no** `karbot_runner`
    process currently running locally (`ps` count 0). Something started and
    exited, or the file is being synced from elsewhere. Not investigated,
