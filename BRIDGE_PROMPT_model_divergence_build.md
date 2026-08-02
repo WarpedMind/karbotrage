@@ -116,7 +116,13 @@ trusting this list, but do not re-derive:
 Tests are expected for anything that ships, matching this project's
 convention (157/157 as of Session 30).
 
-## Operating notes for this environment (from the operator, Session 30)
+## CARRY-FORWARD BLOCK — copy this whole section into the next bridge prompt, and every one after it
+
+Everything in this section is **operating knowledge, not project state**.
+Project state lives in CLAUDE.md/DECISIONS.md/SESSIONS.md and should only be
+*pointed at* from a bridge. The items below are the things nothing else
+carries — if a future bridge drops them, they are gone. **Add to this block
+as new items are learned; never thin it out.**
 
 - **Bash breaks under `auto` permission mode.** The failure looks like
   "claude-opus-5 is temporarily unavailable, so auto mode cannot determine
@@ -140,7 +146,44 @@ convention (157/157 as of Session 30).
   these.
 - **Web access works** — one caveat: `kalshi.com` rate-limits (HTTP 429)
   on repeated fetches. The operator can retrieve pages via Brave when a
-  fetch is blocked; ask.
+  fetch is blocked; ask. Retrieved documents go in `documentation/`
+  (Kalshi's fee schedule is already there).
+- **VPS**: `karbot.service` is enabled at boot, as is `cron` and the
+  `/etc/cron.d/karbot-disk-alert` watchdog — so a reboot is safe. Never
+  enable DEBUG logging globally: that is what filled the disk and killed
+  the box for 9 days in Session 26. Per-module DEBUG only.
+
+### Behavioural disciplines — restate these every time, they are what actually works
+- **Verify one level deeper than feels necessary, especially on a negative.**
+  See the diligence section below; this is the single highest-value habit on
+  this project and it evaporates if not restated.
+- **Agreement among secondary sources is not verification** — get the
+  primary document.
+- **Never treat a log name, metric name, or comment as evidence of what it
+  measures** — read the emitting code, including its level.
+- **Label every claim confirmed vs. argued.** "Deployed" is not "confirmed
+  live"; "the service is active" is not "the service is working."
+- **Retract errors explicitly in the docs**, with the wrong claim, the
+  correction, and why it was wrong — never silently edit them away.
+- **Ask the decision question after the investigation that informs it**, not
+  before. Session 30 put a strategy fork to the operator and had to reopen
+  it an hour later when a primary source overturned the premise.
+
+### How the operator wants to work
+- **Stay in one turn.** Use `AskUserQuestion` rather than ending the turn —
+  including to hand off tasks outside your reach (fetching a blocked page,
+  flipping a permission mode, running something locally). Do not end a
+  session without explicitly saying so and confirming.
+- **Explain reasoning, not just recommendations.** The operator usually
+  defers to the recommendation, which makes an unexplained one an unreviewed
+  decision. Give the reasons and the honest counter-argument. When something
+  seems to contradict an earlier decision, explain the distinction rather
+  than assuming it is understood.
+- **Proactively surface issues and contradictions**, not just the assigned
+  task. Most of Session 30's real finds were not the task.
+- Keep all four docs current (CLAUDE.md, DECISIONS.md, SESSIONS.md,
+  README.md), commit and push, and confirm `git status` clean +
+  `git log origin/main -1` matching local before signing off.
 
 ## The single most important practice — carry this forward deliberately
 
@@ -242,8 +285,10 @@ separate Session 26 "stuck reset loop" item is unaffected and still open.
 
 ## Recommended model / effort for this session
 
-**Opus, not Sonnet.** This is not a general preference — it is specific to
-what this session does. The work is a probability-calibration harness whose
+**Opus, high effort** (not max — the work is mostly implementation once the
+approach is right; not medium — the statistical reasoning is where the risk
+lives). This is not a general preference — it is specific to what this
+session does. The work is a probability-calibration harness whose
 whole job is to avoid fooling itself: converting a deterministic forecast
 plus an ensemble spread into a probability, scoring it against the right
 baseline, and resisting the many ways a backtest can look profitable and be
@@ -265,8 +310,21 @@ local before signing off.
 **Last step of this session, always**: write the next bridge prompt
 (`BRIDGE_PROMPT_<topic>.md`, matching this file's naming convention —
 topical, not just a session number) reflecting whatever actually got
-decided and built this session, and make sure that new bridge prompt
-repeats this same closing instruction so the chain doesn't drop. Follow the
-same structure this file used: where things stand (pointing at the durable
-docs, not restating them), what must not be touched/deleted, the actual
-next job, standing practices, and this closing instruction.
+decided and built this session. Follow the same structure this file used:
+where things stand (pointing at the durable docs, not restating them), what
+must not be touched/deleted, the actual next job, standing practices, and
+this closing instruction.
+
+**Two things the new bridge prompt MUST do, or the chain degrades:**
+1. **Copy the entire CARRY-FORWARD BLOCK above into it, verbatim**, adding
+   any new operating knowledge learned this session. Never thin it out. That
+   block holds environment quirks, behavioural disciplines and working
+   preferences — none of which live anywhere else, so if a bridge drops
+   them they are permanently lost. Project *state* does not belong there;
+   point at CLAUDE.md/DECISIONS.md/SESSIONS.md for that.
+2. **Repeat these two instructions themselves**, so the next bridge carries
+   them forward too. This instruction is what makes the chain
+   self-sustaining rather than dependent on each session remembering.
+
+Also recommend a model and effort level for the next session, with the
+reason — not a generic default.
