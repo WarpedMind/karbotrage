@@ -170,10 +170,20 @@ as new items are learned; never thin it out.**
   it an hour later when a primary source overturned the premise.
 
 ### How the operator wants to work
-- **Stay in one turn.** Use `AskUserQuestion` rather than ending the turn —
-  including to hand off tasks outside your reach (fetching a blocked page,
-  flipping a permission mode, running something locally). Do not end a
-  session without explicitly saying so and confirming.
+- **NEVER end a turn without calling `AskUserQuestion` first.** This is a
+  hard rule, not a preference, and it applies **especially** when the work
+  looks finished — that is exactly when it keeps getting forgotten. Ending
+  the turn with a summary and no question forces the operator to spend a
+  whole extra round-trip just to say "actually, one more thing," which is
+  the specific cost this rule exists to prevent. The final call of every
+  turn is a question announcing you are done and asking whether anything
+  else is needed. (`AskUserQuestion` supplies its own "Other" option
+  automatically — do not add one, and do not ask the operator to use it.)
+- **Stay in one turn** more generally. Use `AskUserQuestion` rather than
+  ending the turn, including to hand off tasks outside your reach —
+  retrieving a rate-limited page, flipping a permission mode, running
+  something locally. Blocked work should be unblocked mid-turn, not
+  deferred to the next session.
 - **Explain reasoning, not just recommendations.** The operator usually
   defers to the recommendation, which makes an unexplained one an unreviewed
   decision. Give the reasons and the honest counter-argument. When something
@@ -328,3 +338,9 @@ this closing instruction.
 
 Also recommend a model and effort level for the next session, with the
 reason — not a generic default.
+
+**Then, as the actual final action of the session**: call
+`AskUserQuestion` to announce you are done and ask whether anything else is
+needed. Do not end the turn with a summary alone — see the hard rule in the
+carry-forward block above. This applies even when everything is committed,
+pushed and verified; *especially* then.
