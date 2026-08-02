@@ -86,6 +86,18 @@ trusting this list, but do not re-derive:
 
 157/157 tests passing; runner smoke test clean.
 
+## Book-reset health: RESOLVED, do not re-raise
+
+Session 30 briefly reported the book-reset recovery as regressed to ~0%
+completion, then found the alarm was a log-naming artifact and fixed it.
+**The mechanism is healthy: ~2,174 successful REST recoveries per 10 minutes
+against 16 failures (0.7%), better than Session 23's confirmed 5.5%.** The
+INFO log is now `book_snapshot_applied_rest`. One thing to carry: **any
+historical analysis grepping `book_snapshot_requested` was counting
+successes, not attempts** — including Session 22's own regression evidence.
+There is currently no attempt counter; add one deliberately if needed. The
+separate Session 26 "stuck reset loop" item is unaffected and still open.
+
 ## The actual job this session: Phase 1 — the calibration report
 
 1. **Finish the last Phase 0 item** (real-outcome paper resolution) if you
@@ -115,6 +127,45 @@ trusting this list, but do not re-derive:
 
 Tests are expected for anything that ships, matching this project's
 convention (157/157 as of Session 30).
+
+## The single most important practice — carry this forward deliberately
+
+The operator asked explicitly that this session apply **the same diligence
+used in Session 30 to proactively find issues and contradictions**, rather
+than only doing the task in front of it. Concretely, that session found:
+Session 28's maker-fee premise was wrong (then that its own correction was
+wrong); the SSH key wasn't where it looked; a misnamed log line that had
+been quietly misrepresenting book-reset health for multiple sessions;
+`from_yaml()` ignoring four config sections; and three tests that passed
+only because they never exercised what they claimed to. **None of those
+were the assigned task.** All were found by pulling one thread further than
+strictly required.
+
+Two rules that produced all of it:
+
+1. **Verify one level deeper than feels necessary, especially on a negative
+   or a confident conclusion.** Session 30 got four things wrong, and every
+   single one was a confident conclusion drawn from an *incomplete search*:
+   three agreeing secondary sources that all omitted the same field; one
+   directory listing treated as a search; two log names taken at face value
+   without reading the code emitting them. The instinct to check was right
+   every time — the stopping point was too early. "I couldn't find X" is
+   never "X doesn't exist." **This applies directly to this session**: if
+   the NBM data doesn't look right, or the calibration looks too good,
+   assume the pipeline before assuming the finding.
+2. **Actively look for contradictions between the docs and reality.** Where
+   two docs disagree, or a doc disagrees with the code, or a comment
+   disagrees with what a function does — that gap is usually a real bug,
+   not a documentation lapse. Every major find in Sessions 26–30 started as
+   exactly that kind of mismatch. When you find one, fix *all* the places
+   it's stated, and record the retraction rather than quietly editing.
+
+Corollaries worth stating: label every claim **confirmed vs. argued**; treat
+"the tests pass" as weak evidence (this codebase's expensive bugs all had
+passing tests); and when you are wrong, retract it in the docs explicitly
+rather than silently — Session 30 has three retractions written into
+DECISIONS.md/SESSIONS.md on purpose, because a wrong claim that was quietly
+deleted teaches nobody.
 
 ## CARRY-FORWARD BLOCK — copy this whole section into the next bridge prompt, and every one after it
 
@@ -225,45 +276,6 @@ round-trip and trains them to skim the options:
   README.md), commit and push, and confirm `git status` clean +
   `git log origin/main -1` matching local before signing off.
 
-## The single most important practice — carry this forward deliberately
-
-The operator asked explicitly that this session apply **the same diligence
-used in Session 30 to proactively find issues and contradictions**, rather
-than only doing the task in front of it. Concretely, that session found:
-Session 28's maker-fee premise was wrong (then that its own correction was
-wrong); the SSH key wasn't where it looked; a misnamed log line that had
-been quietly misrepresenting book-reset health for multiple sessions;
-`from_yaml()` ignoring four config sections; and three tests that passed
-only because they never exercised what they claimed to. **None of those
-were the assigned task.** All were found by pulling one thread further than
-strictly required.
-
-Two rules that produced all of it:
-
-1. **Verify one level deeper than feels necessary, especially on a negative
-   or a confident conclusion.** Session 30 got four things wrong, and every
-   single one was a confident conclusion drawn from an *incomplete search*:
-   three agreeing secondary sources that all omitted the same field; one
-   directory listing treated as a search; two log names taken at face value
-   without reading the code emitting them. The instinct to check was right
-   every time — the stopping point was too early. "I couldn't find X" is
-   never "X doesn't exist." **This applies directly to this session**: if
-   the NBM data doesn't look right, or the calibration looks too good,
-   assume the pipeline before assuming the finding.
-2. **Actively look for contradictions between the docs and reality.** Where
-   two docs disagree, or a doc disagrees with the code, or a comment
-   disagrees with what a function does — that gap is usually a real bug,
-   not a documentation lapse. Every major find in Sessions 26–30 started as
-   exactly that kind of mismatch. When you find one, fix *all* the places
-   it's stated, and record the retraction rather than quietly editing.
-
-Corollaries worth stating: label every claim **confirmed vs. argued**; treat
-"the tests pass" as weak evidence (this codebase's expensive bugs all had
-passing tests); and when you are wrong, retract it in the docs explicitly
-rather than silently — Session 30 has three retractions written into
-DECISIONS.md/SESSIONS.md on purpose, because a wrong claim that was quietly
-deleted teaches nobody.
-
 ## Standing practices for this session
 
 - **Quality, security, and privacy are non-negotiable defaults, not
@@ -310,18 +322,6 @@ deleted teaches nobody.
   commences, which is real advance public notice with a direct physical path
   to precipitation markets. Whether filings are visible at submission or only
   at quarterly publication is **unverified and decisive** — check it.
-
-## Book-reset health: RESOLVED, do not re-raise
-
-Session 30 briefly reported the book-reset recovery as regressed to ~0%
-completion, then found the alarm was a log-naming artifact and fixed it.
-**The mechanism is healthy: ~2,174 successful REST recoveries per 10 minutes
-against 16 failures (0.7%), better than Session 23's confirmed 5.5%.** The
-INFO log is now `book_snapshot_applied_rest`. One thing to carry: **any
-historical analysis grepping `book_snapshot_requested` was counting
-successes, not attempts** — including Session 22's own regression evidence.
-There is currently no attempt counter; add one deliberately if needed. The
-separate Session 26 "stuck reset loop" item is unaffected and still open.
 
 ## Recommended model / effort for this session
 
