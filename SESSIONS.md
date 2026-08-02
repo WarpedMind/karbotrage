@@ -74,6 +74,15 @@ reconciled. A YES-basket still pays `Σ settlement = $1`; a NO-basket still pays
 `qualify.scalar_sum_to_one`, with an unverifiable cancellation counting
 **against**, never for.
 
+Then confirmed on the deployed VPS across all 60 live profiles, which is
+stronger evidence than the hand-picked sample: the **19 partition series** show
+**361 cancellations and 0 violations**; the **6 non-partition series**
+(KXMLBHIT, KXMLBHR, KXMLBKS, KXMLBSPREAD, KXPGATOP5/10/20) show **96 violations
+and 0 clean**. The invariant holds exactly where it structurally must and is
+correctly absent where it needn't — independent player props on one event have
+no reason to sum to $1. Zero exceptions in either direction. And the gate
+currently blocks **0** qualifying series, so it costs no coverage.
+
 The transferable part: *before escalating a question as "open and decisive",
 check whether the data already in hand answers it.* This one had been sitting in
 `rules_secondary` and `settlement_value_dollars` the whole time.

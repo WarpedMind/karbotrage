@@ -212,6 +212,27 @@ be read counts **against**, never for — "could not check" must never be stored
 as "checked and fine". Both basket payouts are functions of `Σ settlement`, so
 they are gated together rather than separately.
 
+**Then confirmed on the deployed VPS across every profiled series, which is a
+much stronger result than the original 8-series sample.** Of 60 profiles built
+live, 19 are partitions (`exclusive: confirmed`) and 6 are not:
+
+| | series | cancellations summing to $1 | violations |
+|---|---|---|---|
+| **partition** series (ATP/WTA/ITF, MLB game & F5, LoL, Valorant, set winners, weather, soccer) | 19 | **361** | **0** |
+| **non-partition** series (KXMLBHIT, KXMLBHR, KXMLBKS, KXMLBSPREAD, KXPGATOP5/10/20) | 6 | 0 | 96 |
+
+**The invariant holds exactly where it structurally should and is correctly
+absent where it should not.** A partition's fair prices must sum to $1 or Kalshi
+would be minting or destroying value; a set of independent player props on one
+event has no such constraint, and duly does not satisfy it. That the split falls
+precisely along the partition boundary — with zero exceptions in either
+direction — is far better evidence than a clean count in a hand-picked sample.
+
+**And the gate currently blocks nothing**: 0 of the 19 partition series have any
+violation, so the check costs no coverage today while guarding a real failure
+mode. That is the ideal state for a safety check, and it is measured rather than
+hoped for.
+
 **The generalisable lesson is about the question, not the answer.** A decision
 was framed as a binary between two plausible outcomes, and reality was a third
 thing that made the whole concern evaporate. It took one API call to a field

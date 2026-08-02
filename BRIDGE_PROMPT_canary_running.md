@@ -30,22 +30,41 @@ That is a functioning market, and it reproduces Session 29's hand check (closest
 a Sunday afternoon is not weeks, and real arbitrage is sporadic by nature.
 301/301 tests pass. Nothing was deployed to the VPS.
 
-Three things worth internalising before starting. First, **the design decision
+**It is deployed and running.** `karbot-canary.service` is installed, enabled at
+boot and active on the VPS, sweeping every 5 minutes at `Nice=10`. Its measured
+effect on the trading process is small but real: `book_reset_rest_failed` went
+from 0 across 38,752 REST snapshots in the 84 minutes before, to 4 across 2,390
+in the 13 minutes after — about 0.17%, an order of magnitude below Session 23's
+5.5%, absorbed by the existing retry path. Worth re-checking over a longer
+window.
+
+Four things worth internalising before starting. First, **the design decision
 that carries the correctness is "structure proposes, history disposes."** Strike
 arithmetic only *generates* candidate relations; a relation is usable only if
 the series' real settled record has never violated it. That came from a live
 counterexample, not caution: `KXMLBSPREAD` puts two different metrics (each
 team's winning margin) in one event at overlapping strikes, so interval logic
 "proves" that Tampa Bay winning by 4+ implies Chicago winning by 3+ — 2,267
-measured violations. Second, **all three of Session 32's real finds came from
+measured violations. Second, **all of Session 32's real finds came from
 counting, not from tests**, with a fully green suite sitting next to each: a
 sweep that evaluated zero events and errored on nothing, a reconciliation that
 was off by 23, and a settlement outcome that is neither YES nor NO. Third, and
 most uncomfortable: **Session 32 reproduced Session 31's exact failure mode in
-brand-new code** — it filed Kalshi's voided-event settlements under "unsettled"
-and dropped them, so the profile reported `exhaustive: confirmed` while the
-basket's guaranteed dollar quietly failed on 4.1% of real ATP events. Knowing
-the lesson did not prevent committing it; only counting did.
+brand-new code** — it filed Kalshi's cancelled-event settlements under
+"unsettled" and dropped them, so the profile reported `exhaustive: confirmed`
+while nothing had checked whether the basket's guaranteed dollar survived.
+Knowing the lesson did not prevent committing it; only counting did.
+
+Fourth, and the most useful one: **the void-settlement question was escalated to
+the operator as a binary and both options were wrong.** Does Kalshi refund a
+voided position at cost, or not? Neither — its own `rules_secondary` says a
+cancelled market "will resolve to a **fair price** in accordance with the
+rules", so the deciding question was a third one nobody had asked: *do those
+fair prices sum to $1?* They do, 243/243 in the first sample and then 361/361
+across every partition series on the deployed box. It took one field
+(`settlement_value_dollars`) that was already being fetched. **Before escalating
+anything as "open and decisive", check whether the data already in hand answers
+it.**
 
 All the numbers and reasoning are in the docs above; don't take this
 paragraph's word for any of it.
@@ -93,44 +112,56 @@ Confirm against `git log` rather than trusting this list, but do not re-derive:
 - **Session 29's coverage gap is closed.** Genuine winner-take-all events (MLB,
   ATP/WTA/ITF tennis, CS2, LoL, Dota, soccer) do qualify as
   `exclusive + exhaustive confirmed`, and still show nothing.
+- **Cancelled events do not break the basket guarantee.** 361 cancellations
+  across all 19 partition series on the deployed box sum to exactly $1.00, zero
+  violations; the 96 violations are all in non-partition series (player props,
+  PGA top-N, spreads) that were never basket candidates. Checked per series in
+  `qualify.scalar_sum_to_one`, and the gate currently blocks 0 qualifying
+  series.
+- **Deploying found two things nothing else would have**: `requests` was an
+  undeclared dependency since Session 31 (present locally by coincidence), and
+  **the dev machine and the VPS disagree on floating-point arithmetic** — local
+  Python 3.14 vs VPS 3.10, and CPython 3.12 gave `sum()` compensated summation,
+  so ten one-cent fees add to 0.1 on one and 0.09999999999999999 on the other.
+  A test passed locally and failed there. **"All tests pass locally" is not
+  evidence about production.** (3.10 also lacks PEP 701, so nested same-type
+  quotes in f-strings are a syntax error there — worth remembering when writing
+  a throwaway diagnostic to run on the box.)
 - **Still open in Phase 0**: paper resolution against real outcomes (blocks
   nothing today; blocks everything the moment a variance-bearing strategy
-  reaches paper). `--mode` is still parsed and never applied.
+  reaches paper). `--mode` is still parsed and never applied. Also 11
+  pre-existing VPS test failures (10 in `test_regulatory_intelligence.py`, 1 in
+  `test_config_resolved_log.py`) — environment differences, uninvestigated.
 
 ## The actual job this session
 
-Two small, specific jobs, then a genuinely open direction question. **Do not
-open a large build without putting the direction question to the operator
-first.**
+**Both of Session 32's follow-ups were completed in Session 32** — the canary is
+deployed and the void question is answered. So this session opens on a genuinely
+open direction question, plus one cheap piece of housekeeping.
 
-1. **Deploy the canary, if the operator agrees.**
-   `scripts/karbot-canary.service` is written and documented but not installed.
-   Frequency-over-weeks is the canary's entire purpose and it currently only
-   runs when someone runs it. This is a new systemd unit on the VPS, so it needs
-   the operator's call — ask, don't assume. Note the recorded gap: a separate
-   unit does not inherit `karbot_runner.py`'s supervision or Telegram alerting,
-   so it can die quietly; `Restart=always` covers a crash, not a hang, and the
-   per-sweep heartbeat line in the JSONL is the check to actually run.
-2. **Answer the void-settlement question from a primary source.** Kalshi
-   finalizes a postponed game or unplayed match as `result: "scalar"`,
-   `status: "finalized"` on every leg — measured at 0.7% of KXMLBGAME events and
-   **4.1% of KXATPMATCH events**. On one of those, no basket pays its guaranteed
-   amount. **Whether Kalshi refunds those positions at cost** (loss = the fees)
-   **or not** (loss = the principal) decides whether any basket is ever
-   tradeable, and the API cannot answer it. It needs Kalshi's own rules.
-   Remember the standing lesson: agreement among secondary sources is not
-   confirmation. Check `supporting docs/` and `documentation/` first — Kalshi's
-   fee schedule is already there and the rules may be too.
-3. **Then read the log.** The measurement that matters over weeks is not just
-   the candidate count but the **`confirmed` vs `vanished_on_recheck` ratio** —
-   that is what separates "real resting arbitrage" from "our view of the book is
-   noisy", the exact question Session 29 could not answer from one snapshot. A
-   high vanish rate would also be a data-quality signal about the snapshot
-   endpoint, which is independently useful.
+**First, cheap and worth doing before anything else — read the log.** The canary
+has been running since 2026-08-02 22:34 UTC. The measurement that matters is not
+just the candidate count but the **`confirmed` vs `vanished_on_recheck` ratio**:
+that is what separates "real resting arbitrage" from "our view of the book is
+noisy", the exact question Session 29 could not answer from one snapshot. A high
+vanish rate is also independently useful as a data-quality signal about the
+snapshot endpoint.
 
-The larger direction question remains open, and the other candidates stay
-explicitly on the table (operator, Session 31: *"let's continue to have the
-other options be considered where appropriate and justified later"*):
+```
+ssh -i ~/kalshi-keys/oracle-vps.key ubuntu@147.224.209.18
+tail -1 ~/karbotrage_v1/logs/basket_candidates.jsonl | python3 -m json.tool   # heartbeat
+grep -c '"record": "candidate"' ~/karbotrage_v1/logs/basket_candidates.jsonl
+```
+
+Also re-check the canary's effect on the trading process over a longer window
+than the 13 minutes measured so far — count `book_reset_rest_failed`, **never
+`grep 429`**, which matches sequence numbers containing those digits and
+produced a false alarm that had to be retracted.
+
+**Then: the direction question, which is the operator's call.** Do not open a
+large build without putting it to them. The candidates stay explicitly on the
+table (operator, Session 31: *"let's continue to have the other options be
+considered where appropriate and justified later"*):
 
 - **Market-making (S8)** — the strongest remaining statistical candidate,
   untouched by the S6 result, with a measured surface: 489 markets at ≥2¢ spread
@@ -236,6 +267,14 @@ as new items are learned; never thin it out.**
   of a 20-minute run this way.)
 - **`hash()` is salted per interpreter run** — never use it to name a cache
   file. Session 31 shipped that bug and caught it in review; use `hashlib`.
+- **The dev machine and the VPS run different Python versions and therefore
+  different arithmetic** — local 3.14, VPS 3.10. CPython 3.12 gave `sum()`
+  compensated (Neumaier) summation for floats, so a sum of ten `0.01`s is
+  exactly `0.1` locally and `0.09999999999999999` there; 3.10 also predates
+  PEP 701, so nested same-type quotes inside an f-string are a syntax error.
+  **A green local test suite is not evidence about production.** Run the suite
+  on the box after any deploy, and never assert exact float equality on an
+  accumulated sum.
 
 ### Behavioural disciplines — restate these every time, they are what actually works
 - **Verify one level deeper than feels necessary, especially on a negative.**
@@ -261,6 +300,18 @@ as new items are learned; never thin it out.**
   evaluated 0, errored on nothing, and looked exactly like a working scanner
   finding no arbitrage. Always check that the work you think happened actually
   happened, in units of work — not in absence of errors.
+- **Before escalating a question as "open and decisive", check whether the data
+  already in hand answers it.** Session 32 put the void-settlement question to
+  the operator as a binary and *both options were wrong*; the real answer was in
+  `rules_secondary` (which ships on every market) and `settlement_value_dollars`
+  (a field already being fetched). A question framed as a binary between two
+  plausible outcomes is a warning sign that the third possibility has not been
+  looked for.
+- **`grep` is not a measurement.** Session 32 reported a 429 rate by counting
+  `grep -i "429"`, which matched sequence numbers containing those digits
+  (`expected=27854299`), and had to retract it. Grep for the *emitting
+  identifier* (`book_reset_rest_failed`), not for a value that could appear
+  anywhere.
 - **A diagnostic that deliberately bypasses a gate will print fake
   opportunities.** Label such output unmistakably at the point of printing, and
   never quote it in a doc or a message without the caveat attached — a "+$4.36
@@ -394,26 +445,29 @@ round-trip and trains them to skim the options:
 
 ## Recommended model / effort for this session
 
-**Opus, medium effort** — lower than Session 32, and for a specific reason.
+**It depends entirely on what the operator picks, so ask first and scope after.**
 
-The two named jobs are a systemd deploy and a primary-source documentation
-question. Neither involves new modelling, new statistics, or new
-profitability-deciding arithmetic. What they *do* involve is judgment that
-Sonnet reliably gets wrong on this project: reading Kalshi's settlement rules
-closely enough to distinguish "refunded at cost" from "settled at zero" (the
-whole answer turns on that distinction), and touching production. Sonnet is a
-reasonable choice here for the mechanical parts — doc sweeps, the unit file, log
-parsing — and the wrong economy for the rules question.
-
-**Escalate to Opus high if the operator picks market-making.** That is the
-largest new subsystem in the project's history, it cannot be falsified offline
-at all, and every trap in it is the class this project has already paid for
-four times: pricing the wrong side of the book, mistaking a structural
-impossibility for an opportunity, mis-reading a strike-field convention, and
-mistaking a stale snapshot for a resting order.
+- **If the session is just reading the log and deciding direction: Opus, medium
+  effort.** Reading the canary's output is mostly interpretation — is a
+  `vanished_on_recheck` ratio telling you the market is efficient or that the
+  snapshot endpoint is noisy? — and the direction conversation needs the full
+  project history in view. Cheap, short, no build.
+- **If the operator picks market-making: Opus, high effort, and open it
+  deliberately.** It is the largest new subsystem in the project's history, it
+  **cannot be falsified offline at all**, and every trap in it is a class this
+  project has already paid for four times: pricing the wrong side of the book
+  (Session 26), mistaking a structural impossibility for an opportunity
+  (Session 28), mis-reading a strike-field convention (Session 31), and
+  mistaking a stale snapshot for a resting order (Session 32).
+- **If it is infrastructure consolidation: Sonnet is reasonable** for the
+  mechanical items (the fee-variance cross-check, the `--mode` flag, doc
+  sweeps), Opus for anything touching the order-book reset loop or the Health
+  Monitor, since those decide whether an agent silently stops managing real
+  inventory.
 
 **Do not use max effort** unless a genuinely open statistical question reappears.
-None is open right now.
+None is open right now — Session 31's calibration work is done and Session 32's
+questions all resolved to measurements.
 
 ## Before ending this session
 

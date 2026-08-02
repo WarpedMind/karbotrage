@@ -239,6 +239,17 @@ answered from the primary source plus a measurement:
   (`qualify.scalar_sum_to_one`). A violation, or an unverifiable cancellation,
   disqualifies that series' baskets — both fail together, since both payouts
   are functions of `Σ settlement`.
+- **Confirmed on the deployed VPS across all 60 live profiles**, which is
+  stronger than the original sample: the **19 partition series** (tennis, MLB
+  game/F5, LoL, Valorant, set winners, weather, soccer) show **361
+  cancellations, 0 violations**; the **6 non-partition series** (KXMLBHIT,
+  KXMLBHR, KXMLBKS, KXMLBSPREAD, KXPGATOP5/10/20) show **96 violations, 0
+  clean**. The invariant holds exactly where it structurally must — a partition's
+  fair prices have to sum to $1 or Kalshi would mint value — and is correctly
+  absent for independent player props, which have no such constraint. The split
+  falls on the partition boundary with zero exceptions either way.
+- **The gate blocks nothing today**: 0 of the 19 partition series has a
+  violation, so it costs no coverage while guarding a real failure mode.
 
 **The processes are isolated but SHARE KALSHI'S RATE LIMIT** — noted Session 32
 before deploying, because "separate process" was overstating the independence.
