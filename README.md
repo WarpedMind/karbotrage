@@ -458,6 +458,32 @@ provider on one market family failed, for a legible reason. Full record:
 trades, no live exposure. That was the whole argument for sequencing divergence
 first, and it held.
 
+## Canary log read for the first time, Health Monitor built, reset-loop root cause found, 2026-09-27 (Session 34)
+
+Nobody had read the canary's own log since Session 32 deployed it 56 days
+earlier. **The "zero candidates" claim below was wrong the whole time it sat
+in this file** — 15,167 sweeps, 1 transient 429, and **493 distinct candidate
+baskets found**, 95.2% confirmed on recheck. One hand-checked against the
+live Kalshi API (the single largest, 38% edge) turned out to be a genuine
+false positive — a new trap, not previously documented: Kalshi added a third
+player's market to the event mid-window, breaking a partition that had
+legitimately qualified against 31 clean settled events. See
+`canary/README.md` and CLAUDE.md's KNOWN DEBT for the full writeup. Lesson:
+95% of candidates holding up is real signal, but the one candidate actually
+verified was false and was also the biggest — check before trusting size.
+
+Also this session: **built the Health Monitor agent**
+(`agents/monitoring/health_monitor.py`), closing one of the two named
+market-making prerequisites — not yet deployed to the VPS. And **found the
+root cause of the standing order-book reset loop**: Kalshi's `seq` field is
+scoped per subscription batch (up to 50 tickers), not per individual market,
+confirmed directly against Kalshi's AsyncAPI spec and a live VPS journal
+capture (one market recovering 615x in 2 hours). Not a correctness bug today
+— every "gap" still successfully re-fetches via REST — but it's the exact
+log-volume pattern that caused the Session 26 disk-full outage. Fix is
+scoped, deliberately not implemented this session (a live-system change, not
+rushed). 326/326 tests passing.
+
 ## VPS spot-check, fee variance closed, Telegram /mute /unmute, 2026-08-29 (Session 33)
 
 Housekeeping session: no strategy code touched. Three standing items from the
@@ -495,10 +521,11 @@ no errors. **Live-confirmed same session** — the operator sent `/mute` and
 
 - ~~**What replaces S6?**~~ **Answered and built.** The S5a/S5b passive arb
   canary shipped in Session 32 as `canary/` — a standalone detect-and-log
-  process, live-verified, **zero candidates so far**. Market-making, a different
-  `FairValueProvider`, and infrastructure consolidation all remain on the table
-  to revisit; this was sequencing, not elimination. The larger direction
-  question is still open.
+  process, live-verified, and (per Session 34's first real read of its log)
+  **493 candidates found, 95.2% confirmed on recheck** — not zero, as this
+  file said until now. Market-making, a different `FairValueProvider`, and
+  infrastructure consolidation all remain on the table to revisit; this was
+  sequencing, not elimination. The larger direction question is still open.
 - ~~**Does Kalshi refund a voided position at cost?**~~ **Answered — and the
   question was framed wrong.** Kalshi's own `rules_secondary` says a cancelled
   match *"will resolve to a fair price in accordance with the rules"* — neither
@@ -520,15 +547,16 @@ no errors. **Live-confirmed same session** — the operator sent `/mute` and
   17% of 49G, and `telegram.enabled: true` was confirmed by reading
   `config.yaml` on disk directly (not inferred). This is a spot check, not
   the full line-by-line audit the item calls for — still standing.
-- **S5a/S5b viability** — still not disproven and still not confirmed. What
-  changed in Session 32 is that it is now measured continuously rather than by
-  hand: `canary/` sweeps the whole open universe every few minutes. 12
-  consecutive sweeps and 13,094 event-evaluations found nothing, with every near
-  miss exactly one spread wide (ATP $1.01, CS2 $1.02, MLB $1.07, weather ladder
-  $1.09, each for a guaranteed $1.00). Twenty-five minutes is not weeks. The
-  number to watch over weeks is the **`confirmed` vs `vanished_on_recheck`
-  ratio** — that is what separates real resting arbitrage from a noisy view of
-  the book.
+- ~~**S5a/S5b viability**~~ — **Answered, Session 34: real, but verify before
+  sizing.** 15,167 sweeps since deployment, 493 distinct candidates, 3,618
+  confirmed / 182 vanished on recheck (95.2%) — exactly the ratio Session 32
+  said would separate real resting arbitrage from a noisy view of the book,
+  and it came back positive. But the one candidate actually hand-verified
+  against the live API (also the largest, 38% edge) was a genuine false
+  positive from a new failure mode — an event's leg count changing mid-window.
+  Net: the canary works and is finding real, mostly-small, short-lived edges;
+  do not act on any single candidate, especially a large one, without an
+  independent live check first.
 - **Which unconventional data sources actually predict anything** — see
   [`SIGNAL_REGISTER.md`](SIGNAL_REGISTER.md), a standing register of
   candidate signals (official weather-modification filings, ADS-B,

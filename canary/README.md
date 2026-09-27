@@ -88,6 +88,25 @@ a violation, or a cancellation whose values can't be read, disqualifies that
 series' baskets — both payouts are functions of `Σ settlement`, so both fail
 together.
 
+**A qualified event's leg set is not guaranteed stable — Kalshi can add a
+market mid-window.** Found live, Session 34 (2026-09-27):
+`KXNFLMOSTRSHYDS-26SEP27CINPIT` qualified as a 2-leg exhaustive partition
+(`CINCBROWN30` + `CINSPERINE34`, 31 settled events, zero violations) and
+stayed a candidate for ~2.5 hours. A third market
+(`KXNFLMOSTRSHYDS-26SEP27CINPIT-PITJWARREN30`) was then added by Kalshi —
+the actual winner. The 2-leg basket was genuinely exhaustive while it was
+the only two legs in the event; the moment a third leg exists, "one of these
+two must win" is no longer true, and a trade placed during the earlier
+window would have lost the full stake. The canary correctly stopped
+flagging the pair within one sweep of the third leg appearing — this is not
+a `qualify.py` logic bug, it's a live risk `qualify.py` doesn't (and
+currently can't) see: settled history proves a relation *held*, not that the
+event's structure can't change under a resting position. Treat any
+categorical "most/best X among players/teams" event (props with an evolving
+roster) as higher-risk for this specific failure than a fixed 2-outcome
+event (two teams, two named players in a match) where the leg count cannot
+change after the event is created.
+
 ## Structure proposes, history disposes
 
 Interval arithmetic only *generates* candidate relations. A relation is usable

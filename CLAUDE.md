@@ -201,7 +201,55 @@ async def run(self): ...
 
 ## KNOWN DEBT
 
-### S5a/S5b CANARY — BUILT AND LIVE-VERIFIED, Session 32 (2026-08-02). Zero candidates so far; the instrument is the deliverable, not a result.
+### S5a/S5b CANARY — 493 REAL CANDIDATES FOUND, Session 34 (2026-09-27). The "zero candidates" result below is SUPERSEDED — read this first.
+Nobody had read the canary's own log since Session 32 deployed it. 56 days
+later (Session 34), the accumulated `logs/basket_candidates.jsonl` tells a
+completely different story than the entry below, which is kept only for its
+still-accurate mechanism description:
+
+- **15,167 sweeps since deployment, 1 transient 429, zero reconcile
+  failures.** The instrument itself has been rock-solid.
+- **493 distinct candidate baskets found, not one.** On recheck (the
+  re-price-from-`/orderbook` step this file's own README calls the real
+  measurement): **3,618 confirmed / 182 vanished — 95.2% hold up.** That
+  ratio is exactly what Session 32 said would separate "real resting
+  arbitrage" from "our view of the book is noisy," and it came back
+  strongly in favor of real.
+- Most are small (cents to low dollars, capped by thin depth) and short-
+  lived (minutes to hours), consistent with a real, thin, quickly-arbed
+  edge rather than a structural giveaway.
+- **One candidate (`KXNFLMOSTRSHYDS-26SEP27CINPIT`, 2026-09-27) was hand-
+  checked against the live Kalshi API and found to be a genuine false
+  positive** — not one of this file's previously-documented trap classes.
+  The event's true leg count changed *while the basket was resting*: a
+  third player's market (`PITJWARREN30`) was added by Kalshi mid-window,
+  after the canary had already qualified a 2-leg exhaustive partition
+  (`CINCBROWN30` + `CINSPERINE34`) against 31 settled events with zero
+  violations. The 2-leg basket was genuinely exhaustive for the ~2.5 hours
+  it existed; a real trade during that window would have lost the full
+  stake, since the actual winner (Warren) wasn't one of the two legs
+  bought. The canary itself stopped flagging it within one sweep of the
+  third market appearing — the failure mode is a real-time roster change
+  invalidating a previously-true partition, not a logic bug in `qualify.py`.
+  **New trap, not previously documented**: `canary/README.md`'s traps list
+  should gain this as "the leg set of a categorical event is not guaranteed
+  stable — a late-added market can retroactively break an already-qualified
+  partition." Not yet added to that file this session (time-boxed) — do
+  before trusting any high-edge two-or-three-leg candidate at face value.
+- **Practical read**: the 95.2% hold-up rate is real signal, but the one
+  candidate actually checked by hand was the exception, not the rule, and
+  it was also the single highest-edge one seen (38%, `KXNFLMOSTRSHYDS`).
+  That is not enough data to say high-edge candidates are systematically
+  more likely to be false positives than small ones — it is enough to say
+  **do not act on any candidate, especially a large one, without checking
+  it against a live API pull first**, exactly the discipline this project
+  has needed since the S1 sign-flip bug.
+
+Heartbeat command from `canary/README.md` still works and is the fastest way
+to check current state: `tail -1 logs/basket_candidates.jsonl | python3 -m
+json.tool` on the VPS.
+
+### S5a/S5b CANARY — BUILT AND LIVE-VERIFIED, Session 32 (2026-08-02). Zero candidates so far; the instrument is the deliverable, not a result. SUPERSEDED by the Session 34 entry above — kept for its mechanism description only.
 **Read this before the Session 29 "S5a/S5b checked against real live data" entry
 below, which it supersedes on method — Session 29 checked one snapshot by hand,
 this runs continuously.** Authoritative record: **DECISIONS.md Session 32**.
@@ -811,6 +859,56 @@ commit `5348533` (depth plumbing only, predates bugs #2's cap wiring and
   fill); it does not explain *why* these specific books never complete
   recovery. Needs its own investigation.
 
+### Order-book reset loop — ROOT CAUSE FOUND, Session 34 (2026-09-27). Confirmed against Kalshi's own AsyncAPI spec, not a fix yet — deliberately not rushed into live code.
+**`seq` is scoped per subscription (`sid`), not per market.** Kalshi's
+`orderbook_delta` channel accepts `market_tickers` (an array) on one
+subscribe call, which returns one `sid`; every ticker in that batch shares
+one `seq` counter (confirmed from `https://docs.kalshi.com/asyncapi.yaml` —
+`sid`: "Server-generated subscription identifier... used to identify the
+channel"; `seq`: "Sequential number... Used for snapshot/delta consistency",
+scoped to that same `sid`). `price_watcher.py` subscribes in batches of 50
+tickers per message (per this file's own architecture notes) — so up to 50
+markets can share one `seq` stream. `OrderBook.apply_delta`'s gap check
+(`agents/floor/price_watcher.py`, `if seq != self.sequence + 1`) compares
+each incoming `seq` against a counter stored **per market** (`self.sequence`
+on that market's own `OrderBook`). Any time a *different* market in the same
+batch updates between two deltas for *this* market — which for a market that
+isn't the single busiest ticker in its batch is close to certain — the
+per-market comparison sees a "gap" that never happened on the wire.
+
+**Live-confirmed, same session, VPS journal, 2h window**: 29 distinct
+markets triggered a REST recovery at all; the busiest (`KXRAIN-26SEP27-AUS`)
+recovered 615 times — roughly every 10–20s, i.e. on very close to *every*
+delta it received, each one logged as a fresh `sequence_gap_detected`
+immediately after the prior recovery. Thin markets sharing a batch with
+busier neighbors (weather rain contracts, one live soccer/cricket match)
+dominate the list; a market that gets ≤1 delta in the whole window never
+exercises the check at all (its first-ever delta always passes trivially),
+which is why most subscribed markets never appear in this list — not
+because they're healthy by a different mechanism, just quiet enough not to
+trip it.
+
+**This is not currently a correctness bug** — every detected "gap" still
+triggers a real REST snapshot fetch that succeeds and fully replaces the
+book, so affected markets stay accurate, just refreshed via REST-on-every-
+delta instead of WS deltas as designed. The cost is efficiency and log
+volume (the exact shape of the Session 26 disk-fill outage) and unnecessary
+load against Kalshi's rate limit, not stale or wrong prices.
+
+**Not fixed this session, deliberately** — the correct fix (track sequence
+continuity per `sid`/subscription batch, not per individual `OrderBook`) is
+a real restructuring of `_books`/`apply_delta`'s gap logic, not a one-line
+patch, and this system is live. Rushing it risked exactly the kind of
+regression this project has been burned by before (Session 22's
+under-verified REST-auth "fix" that crashed PriceWatcher 3x in 8 minutes).
+Scoped for a dedicated session: capture the `sid` value from each
+`subscribed`/`orderbook_snapshot` message per batch, key gap-tracking by
+`sid` instead of `market_id`, and decide whether a genuine gap on a shared
+`sid` should refresh every market in that batch (safe but heavier) or only
+the specific market whose price actually changed unexpectedly (lighter,
+needs more care). Verify with a live capture showing zero false gaps for a
+market that is the sole member of its batch, before calling it fixed.
+
 ### VPS deployment gap — "CONFIRMED LIVE" claims were not verified against actual VPS state
 - Found Session 26: the VPS was 4 git commits behind `main`
   (`origin/main` was at `7057d8d`; missing `8a7e6ce`, `185dc6c`, `7d022b9`
@@ -1276,10 +1374,26 @@ The candidates, with their state:
 9. ~~Confirm Kalshi's maker fee from the primary source~~ — **DONE,
    Session 30**: primary fee schedule obtained; maker M defaults to 0, so
    maker fees are $0 outside ~76 enumerated series. See KNOWN DEBT above.
-10. **Build the Health Monitor agent / investigate dead-lettered
-   `AgentHeartbeat` events** firing every ~30s. Deferred for many sessions
-   as cosmetic; it stops being cosmetic once positions carry real variance
-   and a silently-stopped agent means unmanaged inventory.
+10. ~~Build the Health Monitor agent~~ — **DONE, Session 34 (2026-09-27).**
+   `agents/monitoring/health_monitor.py` — `HealthMonitorAgentImpl` +
+   `HealthMonitor` runner stub, conforms to the standard BaseAgent interface.
+   Subscribes to `AgentHeartbeat`, learns each agent's cadence dynamically
+   from real traffic (never alerts on the 5 agents — position_tracker,
+   paper_executor, compliance, regulatory_intelligence, telegram_agent —
+   that don't currently publish one), and alerts via the existing generic
+   `TelegramNotificationEvent(tier=1, ...)` path (the same mechanism
+   karbot_runner.py already uses for AUTO-RECOVERY EXHAUSTED — no new event
+   type) on a heartbeat→silence transition, with a distinct recovery alert
+   when it resumes, mirroring the Session 20 FeedHealthEvent pattern so one
+   continuous outage produces one alert, not a repeat per check tick.
+   Two new `SystemConfig` fields (`health_monitor_check_interval_seconds`=30,
+   `health_monitor_silence_threshold_seconds`=180, both YAML-tunable via
+   `system:`). Wired into both `karbot_runner.py` agent lists (mock and
+   live). 5 new tests (`tests/test_health_monitor.py`), 326/326 total
+   passing, runner smoke test exits cleanly. **Not yet confirmed live** —
+   deploy and observe at least one real heartbeat cycle before treating the
+   silence-alert path as proven, the same standing discipline every other
+   "built" feature in this file has had to clear.
 11. **Fix or explicitly disable the S3 pipeline** (Session 28, DECISIONS.md
    entry 2): wire `update_markets()` from PriceWatcher's market fetch (or
    delete the loop), switch pricing to asks, guard zero/empty-book
@@ -1291,14 +1405,19 @@ The candidates, with their state:
    log names (see KNOWN DEBT above); the real rate is 2,174 successful
    recoveries per 10 minutes against 16 failures (0.7%). Log renamed to
    `book_snapshot_applied_rest`. No action needed.
-12. **Investigate the stuck order-book reset loop** (Session 26) — specific
-   markets (e.g. `KXWORLDNEWSMENTION-26JUL10-WILD`) get stuck logging
-   `book_needs_reset`/`book_reset_throttled` on every delta indefinitely,
-   never actually completing recovery via the Session 22/23 REST mechanism.
-   169 million such log lines accumulated over ~9 days and were the proximate
-   cause of the Session 26 disk-full outage. The Session 26 fix
-   (`structlog.configure` filtering) stops this from filling the disk again,
-   but does not fix why the loop happens.
+12. ~~Investigate the stuck order-book reset loop~~ — **ROOT CAUSE FOUND,
+   Session 34 (2026-09-27), NOT YET FIXED.** `seq` is scoped per Kalshi
+   subscription (`sid`), which can cover up to 50 tickers at once (this
+   project's own batch size) — not per individual market, as
+   `OrderBook.apply_delta`'s gap check assumes. Confirmed against Kalshi's
+   own AsyncAPI spec and live VPS journal (29 markets recovering up to 615x
+   in 2 hours, almost one REST fetch per delta). Not a correctness bug today
+   — every "gap" still triggers a real, successful REST snapshot, so books
+   stay accurate — but it is real inefficiency and the exact log-volume
+   shape that caused the Session 26 disk-full outage. Fix requires tracking
+   sequence continuity per-`sid` instead of per-market — scoped, not
+   implemented, deliberately not rushed into a live system. Full writeup
+   and fix approach: KNOWN DEBT above.
 13. ~~**Investigate paper-trade fee variance**~~ — **DONE, Session 33
    (2026-08-29).** Confirmed against all 757 `compliance.db` rows: the
    flat-$70-and-varied-large-fee population is entirely pre-Session-26

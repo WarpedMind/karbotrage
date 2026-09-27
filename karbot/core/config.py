@@ -49,6 +49,10 @@ class SystemConfig:
     agent_restart_max_count: int = 3               # max restarts allowed within the rolling window
     agent_restart_window_minutes: int = 60         # rolling window for the restart budget
 
+    # Health Monitor (agents/monitoring/health_monitor.py) — watches AgentHeartbeat traffic
+    health_monitor_check_interval_seconds: int = 30    # how often to scan for silence
+    health_monitor_silence_threshold_seconds: int = 180  # 3x the standard 60s heartbeat interval
+
 
 @dataclass
 class DataFeedsConfig:
@@ -336,6 +340,14 @@ class KarbotConfig:
             ),
             agent_restart_window_minutes=sys_raw.get(
                 "agent_restart_window_minutes", default_system.agent_restart_window_minutes
+            ),
+            health_monitor_check_interval_seconds=sys_raw.get(
+                "health_monitor_check_interval_seconds",
+                default_system.health_monitor_check_interval_seconds,
+            ),
+            health_monitor_silence_threshold_seconds=sys_raw.get(
+                "health_monitor_silence_threshold_seconds",
+                default_system.health_monitor_silence_threshold_seconds,
             ),
         )
 

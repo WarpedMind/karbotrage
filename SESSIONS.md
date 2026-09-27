@@ -1,6 +1,104 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-09-27 (Session 34 — read the canary log for the first time since deployment, built the Health Monitor agent, found the order-book reset loop's root cause)
+
+### Mandate
+Operator wanted (1) the canary's accumulated data actually read — nobody had
+looked at it since Session 32 deployed it, 56 days prior — (2) real,
+already-scoped infrastructure work rather than filler, explicitly citing past
+false-positive "opportunities" as a reason to verify carefully rather than
+rabbit-hole, and (3) legitimate VPS/git activity as a side effect, not the
+goal itself.
+
+### What was done
+1. **Read the canary log — the "zero candidates" result was stale.**
+   15,167 sweeps since Session 32, 1 transient 429, zero reconcile failures.
+   **493 distinct candidate baskets found**, not zero; on recheck, 3,618
+   confirmed / 182 vanished (95.2% hold up) — the exact measurement Session
+   32 said would separate real resting arbitrage from book noise, and it
+   came back strongly positive. Full numbers and the corrected framing:
+   CLAUDE.md KNOWN DEBT, "S5a/S5b CANARY — 493 REAL CANDIDATES FOUND."
+2. **Hand-verified the single largest candidate found (`KXNFLMOSTRSHYDS-
+   26SEP27CINPIT`, 38% edge) against the live Kalshi API — confirmed a real,
+   new false-positive class**: Kalshi added a third player's market to the
+   event mid-window, after the canary had already qualified a 2-leg
+   exhaustive partition against 31 clean settled events. The partition was
+   genuinely true for the ~2.5 hours it held; a trade during that window
+   would have lost the full stake once the third leg (the actual winner)
+   existed. Documented as a new trap in `canary/README.md` — the leg count
+   of a categorical "most X among players" event isn't guaranteed stable,
+   unlike a fixed two-outcome match. This is exactly why the mandate's
+   "verify before trusting a big number" instinct was right — the highest-
+   edge candidate found was also the one candidate actually checked and
+   found to be false, out of 493.
+3. **Built the Health Monitor agent** — closes the standing infrastructure
+   item (market-making prerequisite #1). `agents/monitoring/health_monitor.py`,
+   subscribes to `AgentHeartbeat`, alerts on a silence→heartbeat-resumed
+   transition via the existing generic `TelegramNotificationEvent(tier=1)`
+   path (no new event type). Learns agent cadence dynamically rather than
+   hardcoding a roster, so it never false-alarms on the 5 agents that don't
+   currently publish a heartbeat. Wired into `karbot_runner.py`. 5 new
+   tests, 326/326 total passing, runner smoke test clean. Not yet deployed
+   to the VPS or confirmed against a real silence event.
+4. **Found the order-book reset loop's root cause** — closes the standing
+   infrastructure item (market-making prerequisite #2), though the fix
+   itself is deliberately not implemented yet. `seq` on Kalshi's
+   `orderbook_delta` channel is scoped per subscription (`sid`), which can
+   cover up to 50 tickers (this project's own batch size) sharing one
+   counter — confirmed directly against Kalshi's AsyncAPI spec
+   (`docs.kalshi.com/asyncapi.yaml`), not inferred. `OrderBook.apply_delta`
+   compares `seq` against a counter stored per individual market, which is
+   the wrong model whenever any other market in the same batch updates in
+   between. Live-confirmed on the VPS journal: 29 markets recovering up to
+   615 times in 2 hours, essentially one REST fetch per delta for markets
+   that share a batch with busier neighbors. Not a correctness bug today —
+   every "gap" still triggers a real, successful REST snapshot — but it's
+   the exact log-volume shape that caused the Session 26 disk-full outage,
+   plus unnecessary rate-limit load. Fix (track continuity per-`sid`, not
+   per-market) is scoped in CLAUDE.md's KNOWN DEBT, not implemented — a real
+   restructuring on a live system, deliberately not rushed in one session.
+5. **VPS confirmed healthy** — 56 days uptime, `karbot`/`karbot-canary` both
+   active, repo one commit behind `main` (today's doc commit only — no code
+   drift).
+6. **Oracle Cloud inactivity risk** — checked instance load average (0.05,
+   low) but did not pull Oracle's actual reclaim-threshold metrics from the
+   console; operator opted to rely on this session's real SSH/git/deploy
+   activity rather than a separate keep-alive mechanism.
+
+### What was decided
+- Do not fix the reset-loop bug in this session. The correct fix changes
+  gap-tracking from per-market to per-subscription, which touches a live,
+  currently-healthy system, and this project has been burned before
+  (Session 22) by an under-verified live-code change shipped under time
+  pressure. Root-cause it, document it precisely, fix it deliberately later.
+- Do not treat the canary's 493 candidates as validated arbitrage. The
+  95.2% recheck-confirmation rate is real signal, but the one candidate
+  actually hand-checked was false, and it was also the biggest one — that's
+  a warning, not a green light, especially for anything sized like a real
+  trade.
+- Health Monitor and the reset-loop fix are both explicitly required before
+  market-making per the Session 32 direction decision — this session moved
+  one of the two from "not started" to "built, not yet deployed," and the
+  other from "not investigated" to "root cause confirmed, fix scoped."
+
+### What to do first next session
+- Deploy the Health Monitor to the VPS (`git pull` + restart) and confirm at
+  least one real heartbeat is tracked; ideally provoke a real silence (e.g.
+  restart one watched agent's process manually) to see the alert fire once,
+  end to end.
+- Implement the reset-loop fix now that it's scoped: capture `sid` per
+  batch subscribe, key gap-tracking by `sid` instead of `market_id`, decide
+  whether a genuine gap should refresh every market in that `sid` or just
+  the one whose price is suspect, and verify live with a market that is the
+  sole member of its batch (should show zero false gaps).
+- Add the new leg-set-instability trap check to `canary/qualify.py` if
+  practical — at minimum, re-verify any candidate basket's leg count against
+  a fresh `/markets?event_ticker=` call immediately before ever considering
+  it actionable, not just at discovery time.
+- Send the Kalshi market-maker enquiry (`documentation/kalshi-mm-enquiry-
+  draft.md`, still drafted, still not sent — operator's own next action).
+
 ## 2026-08-29 (Session 33 — housekeeping: VPS spot-check, closed the paper-trade fee-variance and P&L-inflation KNOWN DEBT items with a direct compliance.db query, shipped Telegram /mute /unmute)
 
 ### Mandate

@@ -48,6 +48,11 @@ from agents.research.regulatory_intelligence import RegulatoryIntelligenceAgent
 from agents.management.reflection import ReflectionAgent
 from agents.management.compliance import ComplianceOfficer
 
+# Monitoring — watches AgentHeartbeat traffic; must be running before other
+# agents' first heartbeat so it doesn't miss the earliest ones (harmless if
+# it does — it only learns an agent's cadence from what it actually sees).
+from agents.monitoring.health_monitor import HealthMonitor
+
 # Notification layer — last in roster; all other agents must be running first
 from agents.notifications.telegram_agent import TelegramAgent
 
@@ -231,6 +236,8 @@ async def run(args: argparse.Namespace = None):
             # Management (always-on)
             ReflectionAgent(bus=bus, config=config),
             ComplianceOfficer(bus=bus, config=config),
+            # Monitoring
+            HealthMonitor(bus=bus, config=config),
             # TelegramAgent last: notification layer, all other agents subscribe first
             TelegramAgent(bus=bus, config=config),
         ]
@@ -251,6 +258,8 @@ async def run(args: argparse.Namespace = None):
             # Management (always-on)
             ReflectionAgent(bus=bus, config=config),
             ComplianceOfficer(bus=bus, config=config),   # always-on, cannot be disabled
+            # Monitoring
+            HealthMonitor(bus=bus, config=config),
             # TelegramAgent last: notification layer, all other agents subscribe first
             TelegramAgent(bus=bus, config=config),
         ]
