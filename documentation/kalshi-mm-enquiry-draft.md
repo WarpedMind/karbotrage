@@ -1,7 +1,32 @@
 # Draft enquiry to Kalshi — market-maker programme
 
-**Status: DRAFT, not sent.** Written Session 32 (2026-08-02) so the
-market-making decision can be made with real information instead of inference.
+**Status: DRAFT, ready to send — final email text and recipient appended
+Session 34 (2026-09-27), still not actually sent.** Written Session 32
+(2026-08-02) so the market-making decision can be made with real information
+instead of inference.
+
+## Update, Session 34: a designated Market Maker Program already exists
+
+Checked Kalshi's own Help Center (`help.kalshi.com`, article "How to Become a
+Market Maker on Kalshi," dated 2026-04-28 — **before** this project's Session
+30 measurement) while finalizing this draft. Kalshi already runs a formal,
+named Market Maker Program: designated MMs agree to quote both sides at
+defined size/uptime (published as "98% of each 1h increment" per covered
+series) in exchange for reduced fees and adjusted position limits, subject to
+review of "financial resources, trading experience, and business reputation."
+
+**This matters for the 489-market opportunity estimate**: the covered-products
+list already includes several series this project's Session 30 measurement
+was counting as opportunity surface — `KXATPMATCH`, `KXWTAMATCH`, `KXMLB`,
+`KXNBA`/`KXNBAGAME`, `KXNFLGAME`, `KXPGATOUR`, and others. If a designated MM
+is already actively quoting 98%+ of the time on a series, that series'
+measured spread/depth numbers from Session 30 may already reflect that MM's
+presence rather than an open gap this project could fill — the 489-market
+figure has not been re-cut against this list and should be before treating it
+as the size of the opportunity. No public "how to apply" link or dedicated
+program email was found on that page or elsewhere on Kalshi's site; the
+question below asks Kalshi to route the enquiry, since there's no confirmed
+better address than general support.
 
 ## Why ask before building
 
@@ -81,3 +106,65 @@ The measured basis for the interest, from this project's own live data
 | Open, with quoting obligations | Obligations become hard requirements on the order layer's design — uptime and cancel-on-disconnect stop being nice-to-haves. |
 | Rebates on top of $0 maker fees | Materially improves the case, and would justify the order-layer build on its own. |
 | Order rate limits are tight | Constrains quoting frequency, which constrains inventory management, which is the whole risk model. Needs to be known **before** the design, not after. |
+
+---
+
+## Final email — ready to send, Session 34 (2026-09-27)
+
+**To:** `support@kalshi.com`
+*(Confirmed from Kalshi's own published AsyncAPI spec —
+`https://docs.kalshi.com/asyncapi.yaml`, `info.contact.email` — as of this
+session, the only Kalshi-published contact address found anywhere in their
+docs, help center, or site. No dedicated market-maker program email or
+application link exists publicly; the email below asks to be routed if a
+different team owns this.)*
+
+**Subject:** Market Maker Program — eligibility and terms enquiry
+
+**Body:**
+
+> Hi,
+>
+> I'm an individual trader running my own automated system on Kalshi
+> (Phase 1, Kalshi-only, currently paper trading) and I'm evaluating whether
+> to build toward market-making. Before investing in that build, I'd like to
+> understand the actual Market Maker Program terms — I found the overview at
+> help.kalshi.com ("How to Become a Market Maker on Kalshi") but it doesn't
+> cover the specifics below. If this isn't the right inbox for these
+> questions, I'd appreciate being pointed to the right team.
+>
+> 1. Is there a formal application process for the Market Maker Program, and
+>    is it open to individual traders/small accounts, or does it require an
+>    institutional entity or a minimum capital commitment? The help article
+>    mentions review of "financial resources, trading experience, and
+>    business reputation" — what does that review actually involve in
+>    practice for a small applicant?
+> 2. For a designated market maker, what are the specific quoting
+>    obligations (minimum size, maximum spread, uptime/quoting-time
+>    percentage) and what fee reductions or position-limit adjustments come
+>    with meeting them?
+> 3. What are the API rate limits for order placement, cancellation, and
+>    amendment for a market maker specifically — are they different from a
+>    standard participant's limits? Passive quoting means a high
+>    cancel/replace rate, so this matters a lot to the design.
+> 4. Is there a documented cancel-on-disconnect protection, or something
+>    equivalent, for resting orders if a market maker's connection drops
+>    unexpectedly?
+> 5. Are there specific series where Kalshi is looking for more
+>    market-making coverage right now, as opposed to series that already
+>    have an active designated market maker?
+>
+> Thanks very much for your time — happy to provide any account details you
+> need to route this properly.
+>
+> [Your name]
+
+**Before sending:**
+- Fill in a sign-off name/account identifier if Kalshi's team would need one
+  to look up the account — do not include API keys, private key material, or
+  any credential in the email itself (per the Notes section above).
+- Consider sending from the email address tied to the Kalshi trading account,
+  since a support inbox is likely to want to match the sender to an account
+  on file.
+- File Kalshi's reply in `documentation/` and summarize it in DECISIONS.md as
+  primary source, per the existing convention in this file.
