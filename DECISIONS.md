@@ -48,6 +48,24 @@ public documentation, not as the exchange's position.
    fee PDF; thin, wide, uncovered markets may be uncovered *because* flow is
    informed (adverse selection cannot be measured offline). Script was a
    scratchpad one-off, not committed.
+5. **Canary economics sized, Session 35 (VPS log, 2026-08-02 → 2026-09-28,
+   685 distinct "confirmed" baskets).** Taken at face value the log sums to
+   $325k — **that number is wrong and must not be quoted.** 99% of it is five
+   soccer correct-score YES-baskets (`KXLALIGA1HSCORE`, `KXSERIEASCORE`,
+   `KXEPLSCORE`, `KXMLSSCORE`; two legs at 1¢ each, thousands of contracts) and
+   one `KXNFLWINS` implication whose quoted prices are impossible
+   (P(≥5 wins)=0.59 vs P(≥7)=0.92). The score baskets are the Session 34
+   roster-change trap again: the canary saw an event with only two legs and
+   called it exhaustive; a correct-score market has many more outcomes. These
+   need a live-API hand-check, but they are nearly certainly false positives.
+   **Robust view** (net edge <30% of cost and <$200 per basket): 428 baskets,
+   **$2,643 over 56 days ≈ $47/day theoretical**, median basket $0.16, median
+   capital $30 per fill, only 37 baskets ≥$5. That is the ceiling before losing
+   races to faster bots, fill risk on the second leg, and the trap class above.
+   Read: arbitrage alone is very unlikely to justify a live executor.
+   Follow-up worth doing: make the canary reject events whose leg set looks
+   incomplete (e.g. correct-score legs, or a partition whose ask prices sum far
+   below 1 on ≥1,000 contracts) so this failure stops polluting the log.
 4. The infrastructure prerequisites (Health Monitor deploy-confirm; order-book
    reset loop, `sid`-scoped sequence tracking) proceed as already sequenced —
    they are required before anything carries variance regardless.
