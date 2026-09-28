@@ -458,6 +458,27 @@ provider on one market family failed, for a legible reason. Full record:
 trades, no live exposure. That was the whole argument for sequencing divergence
 first, and it held.
 
+## New-strategy screen: the favorite–longshot bias is real on the tape and not collectable, 2026-09-28 (Session 36)
+
+Fourteen new candidates were screened against one question: *is there a reason
+the market does not already know this?* They were then ranked by what it costs
+to kill each one. The cheapest was tested properly the same session, from
+Kalshi's public trade tape and hourly quotes, with six hypotheses
+pre-registered. Across all categories, takers (people crossing the spread) lose
+about 3% after fees. In eight non-sports categories, takers who bought
+favourites at 70–85¢ earned **+6.8% net**, a result that holds up **out of
+sample** and in three separate periods. But a rule that simply buys whatever is
+*quoted* at 70–85¢ on the same markets **loses 15%**. The trades that printed
+were made by people choosing their moment, some of whom already knew the
+answer. The public tape shows what they earned, not a price anyone else can
+get. Allowing only tight books (spread of 3¢ or less) still loses 4%: when
+the book is tight, the quoted price is about right, and the buyer just pays
+the spread and fee. Buying favourites as a strategy is dead. The same tape gives market-making
+its first offline evidence: makers who bought favourites were paid, makers who
+bought longshots were not. Cross-venue pricing against Polymarket on NFL games
+is dead too, with a 0.5¢ median gap. Nothing touches the live path. Code:
+`backtest/tape/`. Record: DECISIONS.md Session 36.
+
 ## Canary leg-set guard, capital sizing, 2026-09-28 (Session 35)
 
 The canary now refuses a YES-basket whose live event has fewer active legs than
@@ -691,18 +712,31 @@ hours of logs instead of waiting days for an actual trade.
     candidate count — that separates real resting arbitrage from a noisy view of
     the book. Heartbeat check:
     `tail -1 logs/basket_candidates.jsonl | python3 -m json.tool`.
-7e. **Send the Kalshi market-maker enquiry** —
-    `documentation/kalshi-mm-enquiry-draft.md`, drafted but not sent. Four
-    questions whose answers materially change the market-making decision,
-    chiefly whether the programme is open to individual participants at all.
-    Asking costs minutes; building the order layer costs sessions, and
-    market-making **cannot be falsified offline at all**.
+7e. ✅ **Kalshi market-maker enquiry sent; reply received (Session 35)**. It
+    was written by Kalshi's support AI and did not answer whether individuals are
+    eligible. Market-making stays undecided. *Correction, Session 36*:
+    "market-making cannot be falsified offline at all" was too strong. The
+    public tape labels which side took, so what makers earned in aggregate is
+    measurable, adverse selection included. See Phase 4.
 7f. **Then the two infrastructure prerequisites** — the Health Monitor
     (dead-lettered `AgentHeartbeat`) and the stuck order-book reset loop. These
     are on market-making's critical path rather than alternatives to it: a
     quoting system whose agent silently dies holds inventory nobody is managing,
     and a maker with a stale book quotes a price someone will take. Full
     reasoning, with the honest counter-argument, in DECISIONS.md Session 32.
+
+**Phase 4 — new-strategy screen** ✅ *done Session 36, no edge claimed*
+
+7g. ✅ Fourteen candidates ranked by cost-to-falsify (DECISIONS.md Session 36).
+    The cheapest, the favourite–longshot bias, was tested the same session. It is
+    real on the tape and replicates out of sample, but buying the quoted price
+    loses. It loses 15% out of sample, and still 4% with only tight books
+    allowed. Polymarket-as-fair-value on major sports is dead by live snapshot.
+7h. **Weather post-peak nowcast (C10)**, then **cross-series consistency (C9)**.
+    One session each, $0.
+7i. **Forward re-run around 2026-10-28** of the maker-side favourite split,
+    frozen as recorded. $0, no code. This feeds the market-making decision; it
+    is not a strategy.
 
 **Standing**
 

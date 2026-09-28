@@ -185,6 +185,49 @@ FOIA/MuckRock releases, ADS-B corporate-jet movements, Google Trends,
 Wikipedia edit velocity and page traffic, Metaculus/Manifold cross-market
 divergence, options-implied probability, COT reports, ACLED conflict data.
 
+Screened Session 36 (full table: DECISIONS.md Session 36, candidates C4–C8):
+- **Polymarket as a fair value (C4)** — major sports **dead** by live snapshot
+  (median 0.5¢ mid gap, never crossed). Thin/non-sports markets untested; data
+  free (gamma + CLOB `prices-history`), cost is matching labour.
+- **Sharp sportsbook closing line (C5)** — historical odds are paid and need an
+  operator account; C4's result says sports prices are already tied across
+  venues, so the prior is low.
+- **Mention-market transcript base rates (C6)** — Mentions are 1.9% of volume;
+  on the Session 36 tape, takers there broke even (+0.48%) while makers lost
+  slightly — a sign the informed side is the one watching live. Free
+  transcripts; parsing labour.
+- **Rotten Tomatoes score drift (C7)** — KXRT is 1.07% of volume; Wayback CDX is
+  free; scraping labour.
+- **Options-implied probability (C8)** — **fails the screening question** for
+  KXBTC*/KXINX*: they are on Kalshi's designated-MM list, and options are how
+  incumbents price them. Deribit live data is free; history is paid.
+
+## Tier F — Kalshi's own microstructure (added Session 36)
+
+Signals derived from Kalshi's public tape and quotes rather than an outside
+source. Cheapest of all to test (`backtest/tape/`), and they face a specific
+trap recorded below.
+
+- **Favorite–longshot bias (C1/C2)** — see "Tested" below. Taker version dead
+  on quotes; maker-side favourite split is the one live lead.
+- **Weather post-peak stale quotes (C10)** — exploratory tape return +5.8%
+  [+0.4, +10.8] concentrated 6–12h before cutoff (after the daily high is
+  usually observed). Test: cached candles + IEM ASOS real-time obs →
+  P(outcome | max so far) vs the ask. One session, $0. A nowcast, so it clears
+  the screening question only if participants are inattentive — the tape says
+  some are and some are not.
+- **Cross-series consistency (C9)** — game/spread/total ladders on one event
+  imply one distribution; test from candles. One session, $0.
+- **Time-of-day illiquidity (C13)** — parked: each hour bucket spends
+  multiple-comparisons budget for a weak prior.
+
+**The Tier F trap, learned Session 36: the tape is not an opportunity set.** A
+trade prints because someone chose that moment, and the takers include people
+who already know the answer. A tape-derived edge (H4: +6.8% out of sample)
+became a −15% loss when the same markets were traded by a rule buying the
+quoted ask (H5). **Any edge found on the trade tape must be re-tested on quotes
+before it consumes further budget.**
+
 ---
 
 ## Tested — no edge found
@@ -229,11 +272,42 @@ cheap, general test of which side is the informed one.
 strategy shape, or any other source on this register. One provider on one market
 family failed, for a legible reason.
 
+### Favorite–longshot bias as a TAKER rule → Kalshi — FAILED on quotes, Session 36 (2026-09-28)
+
+**Do not re-propose "buy favourites" from trade-tape evidence alone.** Full
+detail: DECISIONS.md Session 36; code: `backtest/tape/`.
+
+| Gate | Result |
+|---|---|
+| 1. Multiple-comparisons correction | 6 pre-registered tests, α = 0.0083; ~60 exploratory slices counted and not claimed. |
+| 2. ≥20 independent resolutions | 61 dates in-sample (2026-07-30→09-27), 90 dates out of sample (2026-05-01→07-29). |
+| 3. Replication across periods | The tape pattern (H4) replicates 3/3 periods out of sample; the quote rule (H5) **loses** 3/3. |
+| 4. ≥2h lead | Enforced: trades/candles after `min(settlement, expected expiration, close) − 2h` dropped. |
+| 5. Out-of-sample | H4 frozen before the historical tier was fetched. |
+| 6. **Baseline is the market price** | On the tape, takers who bought 70–85¢ in 8 non-sports categories earned **+6.83%** net (equal-weight, OOS, p < 0.0003). A rule buying the **quoted ask** in the same band on the same markets earned **−15.15%** [−17.8, −12.4]. **Fails where it counts.** |
+
+Pre-registered H1–H3 (taker 85–99¢, taker 70–85¢, all makers) all failed
+in-sample. H6 (quote rule + spread ≤ 3¢, pre-registered after H5 failed and
+tested on unseen in-sample candles) **also lost: −4.09% [−5.95, −2.20]**. On a
+tight book, a 77¢ ask wins about 75% — a fair price, minus half-spread and fee.
+
+**Why it fails, measured:** the ask-in-band condition selects wide books —
+especially seeded quotes at a market's open, the worst-calibrated prices in the
+data — and quotes that sit untaken are the ones the informed side declined.
+
+### Polymarket as a fair value, major sports → Kalshi — DEAD by live snapshot, Session 36
+
+11 NFL moneylines: median |mid gap| 0.5¢, max 1.5¢, never crossed. Not a
+backtest — a snapshot is enough to kill "the venues disagree" for these markets.
+Thin and non-sports markets are **not** covered by this and remain open (C4).
+
 ## Tested — edge confirmed
 
-*(Empty. Nothing has passed the gate above, because nothing has been tested
-yet. Do not add anything here without the out-of-sample number, sample size,
-and replication periods attached.)*
+*(Empty. Session 36's H4 passed all six gates **on the trade tape** and is
+deliberately NOT listed: the same rule on quotes lost (H5), so it is not an
+edge anyone can collect. Do not add anything here without the out-of-sample
+number, sample size, replication periods, **and a quote-based (not
+tape-based) test** attached.)*
 
 ---
 

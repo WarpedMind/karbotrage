@@ -1,5 +1,9 @@
 # `backtest/` — offline calibration harness
 
+> **See also `backtest/tape/`** (Session 36): trade-tape and quote-snapshot
+> return tests across all Kalshi categories — the favorite–longshot screen and
+> the "tape is not an opportunity set" lesson. Separate README.
+
 **Nothing in this package may be imported by the live trading path.** It exists
 to answer one question before any strategy code is written:
 

@@ -109,6 +109,25 @@ async def run(self): ...
   **No `DivergenceScannerAgent` and no `FairValueEngineAgent` were built**,
   and no live-path code was touched. Market-making (S8) and the S5a/S5b
   canary are untouched by this result — see "Next session priorities".
+- **Strategy screen — Session 36 (2026-09-28): 14 new candidates (C1–C14)
+  ranked by cost-to-falsify; the cheapest tested to a result the same
+  session. No edge claimed, no live-path code.** The favorite–longshot bias is
+  real on Kalshi's **trade tape** and replicates out of sample (H4: takers
+  buying 70–85¢ in 8 non-sports categories earned +6.83% net, p < 0.0003, 3/3
+  periods), but **a rule buying the quoted ask in the same band on the same
+  markets LOSES −15.15%** (H5; −26.4% in-sample), and with a 3¢ spread cap
+  still loses −4.09% (H6). The tape measures informed takers' timing, not a
+  price on offer; on a tight book the ask is fair. Cross-venue (Polymarket) on major sports is dead by live
+  snapshot (0.5¢ median gap). One lead points somewhere: **makers who bought
+  favourites were paid in both periods** (85–99¢: +1.94% / +2.45%) while makers
+  who bought longshots lost — the first offline evidence on S8's economics,
+  side-specific, not a claim. Authoritative record: **DECISIONS.md Session 36**.
+- `backtest/tape/`: **NEW (Session 36)** — offline trade-tape and quote-snapshot
+  return tests (stdlib + `requests`, public REST, data in gitignored
+  `backtest/cache/tape/`). Never imported by the live path. See
+  `backtest/tape/README.md` for run order, definitions and the traps list
+  (tape ≠ opportunity set; historical vs live candle schema; historical tier
+  ignores `min_close_ts`).
 - `canary/`: **NEW, COMPLETE (Session 32)** — the S5a/S5b passive arbitrage
   canary. A **standalone process**, not an agent: it polls Kalshi's public REST
   API, prices multi-leg positions whose payout is guaranteed regardless of
@@ -141,7 +160,7 @@ async def run(self): ...
   for weather and later strategies, with a hard statistical methodology gate
   (Bonferroni, n≥20, 3-period replication, market-price baseline) that any
   candidate must clear before it can influence a position.
-- Full test suite: **335/335 passing as of Session 35** (9 new canary leg-set tests; earlier count follows) — was **321/321** (was documented as 301 through Session
+- Full test suite: **342/342 passing as of Session 36** (7 new `backtest/tape` rule tests, `tests/test_backtest_tape_rules.py`) — was **335/335 as of Session 35** (9 new canary leg-set tests; earlier count follows) — was **321/321** (was documented as 301 through Session
   32; re-counted directly Session 33 and actually collected 305 pre-existing —
   a small, unexplained pre-existing discrepancy in this doc, not investigated
   further — plus 16 new Session 33 Telegram `/mute`/`/unmute` tests). Runner
@@ -200,6 +219,32 @@ async def run(self): ...
   confirming each independently.
 
 ## KNOWN DEBT
+
+### NEW-STRATEGY SCREEN — Session 36 (2026-09-28): read this before proposing any new strategy.
+**Authoritative record: DECISIONS.md Session 36** (candidate table, ranking,
+all six pre-registered tests). What a future session most needs to know:
+- **The trade tape is not an opportunity set.** `/markets/trades` labels the
+  taker side, which makes it tempting to read "what takers earned" as "what a
+  rule would earn". It is not: H4 (+6.83% on the tape, out of sample) and H5
+  (−15.15% buying the quoted ask in the same band on the same markets) are both
+  correct. Re-test any tape-derived edge on quotes (hourly candles carry bid
+  and ask) before it consumes more budget.
+- **Conditioning on the ask selects wide books**, especially a market's seeded
+  opening quotes — the worst-calibrated prices in the data.
+- **Dead or parked**: C1 favourite-buying as a taker (H5 −15%/−26%; H6 with
+  a 3¢ spread cap −4.1% — on a tight book the ask is a fair price minus
+  costs), C4 Polymarket-as-fair-value on major sports, C8 options-implied
+  (fails the screening question), C11/C12/C14 speed contests.
+- **Cheapest next, in order**: (1) C10 weather post-peak nowcast, one session,
+  $0 (candles cached); (2) C9 cross-series consistency, one session, $0;
+  (3) the forward re-run of the C2 maker split on markets settled
+  2026-09-28 → 2026-10-28, rule frozen in DECISIONS.md Session 36 ($0, no code).
+- **Takers as a class lose ~3.2% after fees** on this sample. Anything that
+  crosses the spread starts in that hole.
+- **Data traps** (all in `backtest/tape/README.md`): the historical tier
+  (settled before `GET /historical/cutoff`, 2026-07-30 at writing) ignores
+  `min_close_ts`/`max_close_ts`; historical candles use `close`, live candles
+  `close_dollars`; the live candle route 429s above ~8 req/s from one IP.
 
 ### S5a/S5b CANARY — Session 35 (2026-09-28): leg-set guard shipped; the "493 candidates" framing below is SUPERSEDED on size — read this first.
 **Authoritative record: DECISIONS.md Session 35 item 5.** Findings:
@@ -1249,7 +1294,28 @@ market that is the sole member of its batch, before calling it fixed.
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-**READ FIRST: two directions have now been executed.** S6 weather divergence was
+**READ FIRST (Session 36, 2026-09-28): the new-strategy screen is done — see
+KNOWN DEBT's top entry and DECISIONS.md Session 36.** Status of the whole
+direction question after it: S1, S6, S5a/S5b-as-a-business and now C1
+(favourite-buying as a taker) are measured dead; market-making is still
+undecided, with its first offline evidence (side-specific, mildly positive). The
+three cheapest next moves, all $0 and none touching the live path:
+1. **C10 weather post-peak nowcast** — one session: cached candles + IEM ASOS
+   real-time observations, P(outcome | observed max so far) vs the ask.
+2. **C9 cross-series consistency** — one session from candles.
+3. **Forward re-run, ~2026-10-28**: re-run `backtest/tape/` on markets settled
+   2026-09-28 → 2026-10-28 for the C2 maker split, **frozen exactly as written
+   in DECISIONS.md Session 36**. No code needed. An input to the market-making
+   decision, not a strategy.
+**Stopping rule (operator, end of Session 36):** if C10 and C9 both die, the
+search for new signals stops. The project doesn't: sessions go to the two
+market-making prerequisites (Health Monitor deploy-confirm; `sid`-scoped
+sequence fix) until the ~2026-10-28 re-run, and then market-making is decided
+yes or no. See DECISIONS.md Session 36, decision 6. The market-making
+sequencing below (infrastructure prerequisites, information trigger) is
+unchanged.
+
+**Earlier READ FIRST (Session 32): two directions have now been executed.** S6 weather divergence was
 built, measured and FAILED gate G2 (Session 31). The S5a/S5b canary that the
 operator chose in its place was **built and live-verified in Session 32** — see
 DECISIONS.md Session 32 (authoritative) and the KNOWN DEBT entry above. It has
@@ -1301,9 +1367,13 @@ The candidates, with their state:
   result and on better footing than that entry first concluded once the maker
   fee was read correctly: **489 markets with ≥2¢ spread and ≥100 contracts both
   sides, paying no maker fee at all.** Cost: it needs the live
-  order-management layer that does not exist, built entirely up front, with no
-  offline test possible. This is the largest new subsystem in the project's
-  history.
+  order-management layer that does not exist, built entirely up front. This is
+  the largest new subsystem in the project's history. **Session 36 correction:
+  "no offline test possible" was too strong** — the public tape labels the taker
+  side, so aggregate maker P&L (adverse selection included) is measurable. Result:
+  all makers +1.11% (p = 0.032, fails α); makers buying favourites positive in
+  both periods, makers buying longshots negative. Individual fill quality is
+  still only observable by quoting.
 - ~~**S5a/S5b passive arb canary**~~ — **BUILT, Session 32.** See KNOWN DEBT
   above. Still never disproven: zero candidates in the first sweeps is one more
   snapshot's worth of evidence, not a verdict. Now it accumulates automatically

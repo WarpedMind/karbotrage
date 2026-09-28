@@ -1,6 +1,54 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-09-28 (Session 36 — new-strategy screen: 14 candidates ranked by cost-to-falsify; favorite–longshot tested to a result; no live-path code)
+
+### Mandate
+Brainstorm and screen new Kalshi strategy candidates after S1, S6 and S5a/S5b.
+For each one: mechanism, why the market wouldn't already price it, a cheap
+offline kill test, data and cost, and infrastructure. Rank them by
+cost-to-falsify. Measure with live public data before giving an opinion, claim
+nothing without SIGNAL_REGISTER's gate, and write no live-path code.
+
+### What was done
+1. **Live universe snapshot**: 105,056 open markets, Sports 78.1% of 24h
+   volume. Enumerated all 564,009 settled markets (≥1,000 contracts) since
+   the historical cutoff.
+2. **Read the primary literature** (Bürgi, Deng & Whelan, the Kalshi
+   makers/takers paper) in full, from the PDF.
+3. **Screened 14 candidates (C1–C14)**. The table and the ranking are in
+   DECISIONS.md Session 36.
+4. **Tested C1, the favorite–longshot bias**, with six pre-registered
+   hypotheses (α = 0.0083):
+   - H1–H3 (in-sample, 11,322 markets) failed.
+   - H4 was frozen from in-sample exploration and then **passed out of sample**
+     on the historical tier (+6.83% equal-weight, p < 0.0003, 3/3 periods).
+   - H5 applied the same band to **quotes** on the same markets and **lost
+     15%**.
+   - H6 (H5 plus a 3¢ spread cap), pre-registered after H5 failed and tested
+     on in-sample candles that hadn't been fetched yet, **also lost 4.09%**. On
+     a tight book the ask is fair, so the buyer pays half the spread plus the
+     fee. H5 on the in-sample candles lost 26.4%.
+   - I checked for a bug before accepting H5. Mid calibration at a fixed
+     snapshot is sane, so the loss is real. The cause is ask-conditioning
+     selecting wide books and seeded opening quotes.
+5. **Killed cross-venue pricing on major sports** by live snapshot: Kalshi
+   versus Polymarket on 11 NFL moneylines, 0.5¢ median gap, never crossed.
+6. **Shipped `backtest/tape/`**: offline scripts, a README with the traps
+   list, and 7 rule tests in `tests/test_backtest_tape_rules.py`.
+
+### What was decided
+No strategy adopted. C1 as a taker rule is dead. Standing lesson: **the trade
+tape is not an opportunity set**, so re-test any tape edge on quotes. One lead
+points somewhere: makers who bought favourites were paid in both periods. That
+is the first offline evidence on market-making, and it is side-specific. S8
+stays undecided.
+
+### What to do first next session
+In order: (1) the C10 weather nowcast (candles are cached); (2) C9
+cross-series consistency; (3) around 2026-10-28, the frozen forward re-run of
+the C2 maker split. All are $0 and none touches the live path. The market-making infrastructure sequencing is unchanged.
+
 ## 2026-09-28 (Session 35, part 2 — canary leg-set guard built and deployed; capital sized; KXNFLWINS hand-checked)
 
 Code (canary/ only; nothing on the live path touched): `SeriesProfile` gained

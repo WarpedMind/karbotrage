@@ -1,6 +1,209 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-09-28 — Session 36: new-strategy screen — fourteen candidates ranked by cost-to-falsify, and the cheapest one tested to destruction the same session. The favorite–longshot bias is real in Kalshi's trade tape and replicates out of sample, but a mechanical rule buying the quoted price LOSES. No edge is claimed; no live-path code written.
+
+### Status of each claim, labeled up front
+- **MEASURED LIVE this session** (public Kalshi REST, no auth, 2026-09-28): the
+  universe snapshot; 564,009 settled markets enumerated; trade tapes for 14,882
+  sampled markets across two disjoint periods; hourly bid/ask candles for the
+  markets in the H4–H6 universe; a live Kalshi-vs-Polymarket NFL snapshot.
+- **PRE-REGISTERED HYPOTHESES** (six, all written into the session record before
+  the data they were tested on was examined): H1–H6 below. Bonferroni family of
+  6 → **α = 0.0083 per test**. Only H4 clears it, and H4 turns out *not* to be an
+  executable edge (H5) — see "the finding that matters".
+- **EXPLORATORY** (~60 slices: category × band × weighting × period). Reported
+  only as leads. **None is claimed**, per SIGNAL_REGISTER's gate.
+- **PRIMARY LITERATURE**: Bürgi, Deng & Whelan, *Makers and Takers: The
+  Economics of the Kalshi Prediction Market* (UCD WP2025_19 / CEPR DP20631) —
+  Kalshi transaction data 2021→April 2025. Read in full, not from a summary.
+- Reproducible: `backtest/tape/` (offline only, stdlib + `requests`, never
+  imported by the live path; data in gitignored `backtest/cache/tape/`).
+
+### Live universe, 2026-09-28 ~07:00 UTC (re-measure; these are snapshots)
+105,056 open markets (MVE excluded), 46.3M contracts of 24h volume. **Sports
+78.1%**, Elections 6.0%, Crypto 4.5%, Entertainment 2.8%, Politics 2.0%,
+Mentions 1.9%, Climate & Weather 1.2%, Financials 1.1%, Economics 0.9%,
+Commodities 0.7%, Science & Tech 0.7%. Top series: KXSB 8.6%, KXATPMATCH 7.7%,
+KXNFLSPREAD 7.2%, KXNFLGAME 7.2%, KXNFLTOTAL 6.8%, KXMLB 3.6%, KXNFLWINS 3.4%,
+KXBTCD 2.5%. Non-sports leaders worth naming: KXRT (Rotten Tomatoes) 1.07%,
+KXTRUMPSAY 0.92%, KXFEDDECISION 0.42%, KXRAIN 0.35%, KXYTVIEWSW 0.30%.
+Settled with ≥1,000 contracts, 2026-07-30 → 2026-09-27: **564,009 markets
+(~9,400/day)**.
+
+### The screen — every candidate against the screening question
+The screening question (SIGNAL_REGISTER, Session 31): **"is there a reason the
+market does not already know this?"** Candidates are labelled C1–C14 to keep
+them distinct from the S-numbered strategies that have been built.
+
+| # | Candidate | Mechanism | Why the market might NOT already price it | Cheapest kill test | Data / cost | Infrastructure if it survived |
+|---|---|---|---|---|---|---|
+| C1 | **Favorite–longshot, as taker** (buy favorites / fade longshots) | Retail overpays for lottery-like longshots; favorites are underpriced | Behavioural and persistent (documented on Kalshi 2021–25); correcting it locks capital at 70–99¢ for low single-digit %, which few want | Trade-tape returns net of fee, then the same rule on quotes | Kalshi public trades + candles, **$0** | Taker-only executor (IOC), real-outcome paper settlement (Phase 0 item 4) |
+| C2 | **Maker-side favorite bias** (rest bids on favorites, never on longshots) | Same bias, harvested passively; makers pay no fee on most series | Requires resting orders and inventory tolerance; retail cannot | Maker returns by band on the tape | same, **$0** | Full order layer — a narrowed S8 |
+| C3 | **Market-making, aggregate** (S8 via the tape) | Spread capture net of adverse selection | — (Session 32: "cannot be falsified offline at all") | Aggregate maker P&L held to settlement, from taker-side-labelled trades | same, **$0** | Full order layer |
+| C4 | **Cross-venue divergence** (Polymarket as fair value; read-only, Phase 1 safe) | Segmented participants across a regulated and an offshore venue | Access barriers could keep prices apart | Live side-by-side snapshot; then historical matching + Brier | Polymarket gamma/CLOB public APIs, **$0** (matching labour) | FairValueProvider + taker executor |
+| C5 | **Sharp sportsbook line as fair value** | Pinnacle-type closes are the sharpest public sports forecast | Kalshi sports flow is retail-heavy | Kalshi price at T−1h vs devigged close, Brier | Historical odds are **paid** + an operator account | Provider + taker executor |
+| C6 | **Mention markets: transcript base rates** (KXTRUMPSAY etc., 1.9% of volume) | Word-frequency base rates from past transcripts | Salience bias; building the base-rate corpus is work | Settled mention markets vs base rate from prior transcripts, Brier vs market | Kalshi + public transcripts, **$0**, parsing labour | Provider + taker executor |
+| C7 | **Rotten Tomatoes score drift** (KXRT, 1.07%) | Scores may drift predictably as review count grows | Niche, thin, anchored on today's score | Settled KXRT vs early score trajectory | Wayback CDX (free), **scraping labour** | Provider + taker executor |
+| C8 | **Options-implied fair value** (KXBTCD, KXINX ranges) | Risk-neutral density from option chains | **Fails the screen**: these series are on Kalshi's designated-MM list; options are exactly how incumbents price them | Deribit chain vs Kalshi ladder | Deribit public (live only); history **paid** | Provider + taker executor |
+| C9 | **Cross-series consistency inside Kalshi** (game vs spread vs total ladders) | Separately-traded series imply inconsistent distributions | Different participants per series; thin rungs | Fit one distribution per game from candles, Brier vs each market | Kalshi candles, **$0**, one session | Taker executor |
+| C10 | **Weather nowcast / post-peak stale quotes** (NEW, found in this session's data) | After the daily high is observed, some quotes lag | Inattention in the evening; settlement is the next-day CLI | Candles (cached) + real-time ASOS obs: P(outcome \| max-so-far) vs ask | IEM ASOS archive, **$0**, one session | Obs poller + taker executor |
+| C11 | Post-determination settlement lag (game over, price not yet 99¢) | Latency | Only speed | Needs an external event-end timestamp | ESPN public feed, $0 | Speed infrastructure — **not this project's game** |
+| C12 | New-listing seed ladders | Wide seeded quotes on a new market | Only speed | **Already measured** by the canary: one window in 56 days (`KXNFLWINS`, swept in ~11 min) | — | — |
+| C13 | Time-of-day / overnight illiquidity mispricing | Thin books off-hours | Plausible | Tape returns by hour | $0 — but each hour-bucket spends multiple-comparisons budget | Taker executor |
+| C14 | Scheduled econ-release reaction | Latency after CPI/jobs prints | Only speed; econ is 0.9% of volume | — | — | Not this project's game |
+
+(Existing SIGNAL_REGISTER Tier A — NOAA weather-modification filings — is
+unchanged: still a phone call about filing visibility.)
+
+### Ranked by cost-to-falsify
+1. **$0, done this session**: C1 (killed as a taker rule — H5 and H6), C3
+   (H3 fails), C4 on major sports (killed by snapshot), C12 (already measured).
+2. **$0, data already cached, ≤ 1 session**: **C10** weather nowcast; the
+   **forward re-run** of the C2 maker split on markets settling after
+   2026-09-28 (zero effort — re-run `backtest/tape/` in ~30 days).
+3. **$0, one session**: C9 cross-series consistency.
+4. **$0 data, heavier labour**: C4 on thin/non-sports markets, C6 mentions,
+   C7 Rotten Tomatoes.
+5. **Money, an account, or a phone call**: C5, C8 history, the Tier A
+   weather-modification registry.
+6. **Parked** — pure speed contests or budget sinks: C11, C13, C14.
+
+### The test that was run: C1, the favorite–longshot bias
+**Prior.** Bürgi, Deng & Whelan: on Kalshi 2021→Apr 2025 (313,972 contract
+prices, last traded price per day, ≥$1,000 volume), contracts at ≤10¢ lose
+**over 60%** after fees; contracts above 70¢ earn small, statistically
+significant positive post-fee returns; Makers average −9.64%, Takers −31.46%.
+Their sample is dominated by the pre-sports era (sports began Jan 2025; the
+sample ends Apr 2025, the month maker fees began) — so the question was whether
+the favourite side is still collectable on today's sports-heavy venue.
+
+**Design.** Trade tape (`/markets/trades`, which labels the taker side) for a
+stratified sample — ≤300 events per category, ≤12 events per series, ≤6
+markets per event — of markets settled 2026-07-30 → 2026-09-27: **3,197
+events, 11,322 markets, 217M contracts**. Every trade after
+`min(settlement_ts, expected_expiration_time, close_time) − 2h` is dropped
+(gate 4). Taker return `(payout − p − 0.07·p(1−p)) / (p + fee)`; maker return
+the mirror, with the 0.0175 maker fee only on the listed maker-fee series.
+Bootstrap resamples whole settlement dates (61); event-clustering agrees.
+
+**Results — every pre-registered test:**
+
+| test | sample | result | one-sided p | verdict (α = 0.0083) |
+|---|---|---|---|---|
+| H1 taker buys at 85–99¢, dollar-wt | in-sample, 61 dates | +0.51% [−3.10, +3.15] | 0.385 | **FAIL** |
+| H2 taker buys at 70–85¢, dollar-wt | in-sample | +3.83% [−5.65, +10.37] | 0.193 | **FAIL** |
+| H3 all makers, dollar-wt (S8 proxy) | in-sample | +1.11% [−0.08, +2.37] | 0.032 | **FAIL**; no period significant |
+| H4 taker buys at 70–85¢, **equal-wt per market**, 8 non-sports categories — rule frozen from in-sample exploration | **out of sample**: historical tier, settled 2026-05-01 → 07-29, 90 dates, 2,481 markets | **+6.83% [+5.23, +8.48]** | **< 0.0003** | **PASS** — and all three 30-day periods pass (+5.7%, +8.7%, +6.4%); ex-weather +5.6% [+3.5, +7.7]; dollar-wt +4.0% (p = 0.051) |
+| H5 **mechanical rule on quotes**: first hourly candle ≥2h pre-cutoff with a two-sided book where one side's **ask** is in [70, 85¢); buy it; one entry per market | same OOS markets, 2,350 entries | **−15.15% [−17.84, −12.35]** | 1.000 | **FAIL, wrong sign**, every period negative; win rate 67.1% at mean price 77.9¢; all-qualifying-hours variant −7.67% |
+| H6 H5 + spread ≤ 3¢ at entry (frozen after H5 failed, before any in-sample candle was fetched) | **primary: in-sample candles**, 61 dates, 3,264 entries | **−4.09% [−5.95, −2.20]** | 1.000 | **FAIL, wrong sign**; periods −2.7%, −4.0%, −6.4%; win rate 75.2% at mean price 77.1¢. Secondary OOS (contaminated): −5.25% [−7.95, −2.46] |
+
+H5 also replicates in-sample, worse: **−26.44% [−30.05, −22.86]**, 5,172
+entries, every period negative. All 12,109 candle series were fetched; none
+failed.
+
+**What H6 says, and why it closes C1:** with the book tight, a 77¢ ask wins
+~75% — the quoted price is roughly *right*, and the buyer pays the half-spread
+plus fee for nothing. The favourite underpricing visible at the mid of a
+24h-ahead snapshot (0.849 → 0.900) does not survive crossing to the ask on
+these markets. There is no spread filter left to try that is not a fit to this
+sample.
+
+### The finding that matters: the tape is not an opportunity set
+H4 and H5 are both correct, and they are not in conflict. **H4 measures what
+people who actually traded at 70–85¢ earned. H5 measures what a rule earns by
+buying whatever is quoted at 70–85¢.** A trade prints because someone chose
+that moment — and the takers who bought favourites include people who had just
+seen the answer (weather's tape return sits almost entirely 6–12h before the
+cutoff, i.e. after the day's high is usually observed: +5.8% [+0.4, +10.8],
+against ≈0 at 12–24h and >24h). A quote that sits on offer at 78¢ and is *not*
+taken is disproportionately one the informed side did not want.
+
+The data was checked for a bug before accepting H5, because a 78¢ favourite
+winning 67% is a large miss. **No bug**: at a fixed snapshot (last candle
+≥24h before cutoff), candle mids are close to calibrated with a mild
+favourite underpricing at the mid (mid 0.849 → wins 0.900; 0.747 → 0.785).
+What sinks H5 is that **conditioning on the ASK selects wide books**, above all
+the seeded quotes at a market's open, which are the worst-calibrated prices in
+the data (first two-sided candle at 80–90¢ mid wins 77.5%; at 40–50¢ wins 38.8%).
+
+Two more exploratory numbers, reported and not claimed:
+- **Takers as a class lose −3.19% [−5.06, −1.28]** after fees (all bands,
+  in-sample). The venue's fee plus spread is a real tax on anyone who crosses.
+- **The C2 maker split is the one lead that points somewhere.** Makers who
+  bought favourites were paid, net of adverse selection, in both periods:
+  85–99¢ **+1.94%** in-sample (p = 0.083) and **+2.45%** out of sample
+  (p < 0.002); 70–85¢ +4.96% (p = 0.050) and +8.93% (p = 0.006). Makers who
+  bought longshots lost (10–30¢: −24.9% and −19.5%). Caveats: the OOS universe
+  is the 8 non-sports categories, not identical to in-sample; the tape reports
+  what the *maker population* earned — including makers who cancel stale
+  quotes well — not what a new quoting bot would earn; and H3 on all makers
+  failed. It narrows S8 to "rest on the favourite side, never the longshot",
+  and it **partially retires Session 32's claim that market-making cannot be
+  falsified offline at all**: aggregate maker economics, adverse selection
+  included, are on the public tape. Individual fill quality still is not.
+
+### Other screens run live this session
+- **C4 cross-venue, major sports — DEAD.** 11 live NFL moneylines (games of
+  2026-10-04), Kalshi vs Polymarket: median |mid difference| **0.5¢**, max
+  1.5¢, and no venue's bid ever exceeded the other's ask. The venues are
+  already tied together. Thin and non-sports markets remain untested.
+- **C11 post-determination lag — not measurable from public fields.** A look
+  at taker buys in the last 30 minutes before settlement cannot separate
+  "outcome known" from "still in play" (no determination timestamp exists),
+  and sampling only YES-resolved markets makes it selection on the outcome.
+  Discarded; parked with the speed contests.
+- **Economics' in-sample favourite "edge" is one event**: 67% of its 85–99¢
+  dollars were three `KXFEDDECISION` markets from a single meeting. Dismissed.
+
+### Decisions
+1. **No new strategy is adopted and no live-path code is written.** The
+   cheapest candidate was tested to a clear result the same session.
+2. **C1 as a taker rule is dead** — on the tape it is someone else's timing
+   (H4 vs H5), and on tight quotes it is a fair price minus costs (H6). Do not
+   re-propose "buy favourites" without a new reason the quoted ask would be
+   wrong.
+3. **Standing lesson, added to `backtest/tape/README.md` and
+   SIGNAL_REGISTER**: *any edge found on the trade tape must be re-tested on
+   quotes before it means anything.* This is the S1 lesson in a new form —
+   "a price that printed" is not "a price on offer to us".
+4. **Next cheapest, in order**: (a) **C10 weather post-peak nowcast**, one
+   session, $0 — candles are cached; (b) **C9 cross-series consistency**, one
+   session, $0; (c) the **forward re-run of the C2 maker split** on markets
+   settled 2026-09-28 → 2026-10-28, $0, no code. Frozen now, before that data
+   exists: *maker buys at 70–99¢ (bands 70–85¢ and 85–99¢ combined),
+   dollar-weighted, all categories, same sampling design and cutoff as this
+   session, bootstrap by settlement date, one-sided test that the net return is
+   > 0 at α = 0.05; report the 01–30¢ maker bands alongside.* It is an input to
+   the market-making decision, not a strategy test — the tape reports the maker
+   population's P&L, not a new quoter's.
+5. **Market-making (S8) stays undecided**, but the tape has now given it the
+   first offline evidence it has ever had, and it is mixed-to-mildly-positive
+   and **side-specific**: favourites yes, longshots no. That is an input to the
+   pending decision, not a trigger.
+6. **Stopping rule for signal search — adopted by the operator, end of Session
+   36.** Next: C10, then C9 only if C10 closes early. If both die, **the search
+   for new signals stops — the project does not.** Sessions until the
+   ~2026-10-28 forward re-run go to the two market-making prerequisites already
+   on the critical path: deploy-confirm the Health Monitor, and the `sid`-scoped
+   sequence fix for the order-book reset loop. Both are required before anything
+   carries variance, whatever is decided. Then market-making is decided yes/no
+   with the re-run and the canary data in hand. If it is no, the project is
+   parked with its falsification infrastructure intact, rather than left
+   generating candidates for their own sake. Written down because an unbounded
+   search on a small sample is how the multiple-comparisons budget gets spent
+   on noise.
+
+### Methodology gate accounting (SIGNAL_REGISTER)
+| gate | status |
+|---|---|
+| 1 Bonferroni | 6 pre-registered tests, α = 0.0083. H4 p < 0.0003 would survive even a family of ~150. Exploratory slices counted and not claimed. |
+| 2 ≥20 independent resolutions | 61 dates in-sample, 90 dates out of sample; 2,000+ events each side. |
+| 3 Replication across 3 periods | H4 passes in all three OOS periods; its in-sample precursor (H2 equal-weight, all categories) was positive in 3/3 in-sample periods. H5 loses in all three periods of both samples; H6 loses in all three in-sample periods (period 1 not individually significant). |
+| 4 ≥2h lead | Enforced by the cutoff; no public determination timestamp, so this is a proxy. |
+| 5 Out of sample | H4 frozen before the historical tier was fetched. |
+| 6 Baseline is the market price | Returns are measured against the price actually paid, net of Kalshi's fee. H4 beats that baseline **on the tape**; H5 shows a rule does not. **Nothing is added to "Tested — edge confirmed".** |
+
 ## 2026-09-28 — Session 35: Kalshi's answer to the market-maker enquiry arrived and answers none of the three questions that could end the discussion; the market-making decision is NOT triggered as "no", but the trigger has not fired either
 
 Reply text kept verbatim in `documentation/kalshi-market-maker-inquiry-reply.md`.
