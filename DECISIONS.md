@@ -35,6 +35,19 @@ public documentation, not as the exchange's position.
 3. **Cheap next measurement instead**: re-cut the 489-market figure excluding
    series on Kalshi's covered-products list. If little survives, market-making
    is decided *no* on evidence, without ever needing the eligibility answer.
+   **DONE same session (live REST, 80,000 open markets, 2026-09-28).** Markets
+   with ≥2¢ spread and ≥100 contracts each side: 11,407 (mostly dead markets with
+   stale wide quotes — not the real figure). Excluding series known to be covered
+   by designated MMs (partial list: KXINX/NASDAQ100/BTC/ETH/NBA/NHL/ATP/WTA/MLB/
+   NFL*/PGATOUR/NCAA*): 7,556. **Restricting to markets that actually trade
+   (24h vol ≥100): 545 uncovered markets carrying ~778k of ~1.63M contracts.**
+   So the surface shrinks but does not vanish; the largest uncovered families are
+   event/econ/entertainment markets (KXALBUMEQUIV, KXDJI, KXWTI, UEFA Nations
+   League, EPL, ITF/Challenger tennis, LoL). Caveats not yet addressed: the
+   covered list is partial ("and others"); maker-fee series unchecked against the
+   fee PDF; thin, wide, uncovered markets may be uncovered *because* flow is
+   informed (adverse selection cannot be measured offline). Script was a
+   scratchpad one-off, not committed.
 4. The infrastructure prerequisites (Health Monitor deploy-confirm; order-book
    reset loop, `sid`-scoped sequence tracking) proceed as already sequenced —
    they are required before anything carries variance regardless.
