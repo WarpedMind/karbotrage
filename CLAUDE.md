@@ -1307,13 +1307,18 @@ three cheapest next moves, all $0 and none touching the live path:
    2026-09-28 → 2026-10-28 for the C2 maker split, **frozen exactly as written
    in DECISIONS.md Session 36**. No code needed. An input to the market-making
    decision, not a strategy.
-**Stopping rule (operator, end of Session 36):** if C10 and C9 both die, the
-search for new signals stops. The project doesn't: sessions go to the two
-market-making prerequisites (Health Monitor deploy-confirm; `sid`-scoped
-sequence fix) until the ~2026-10-28 re-run, and then market-making is decided
-yes or no. See DECISIONS.md Session 36, decision 6. The market-making
-sequencing below (infrastructure prerequisites, information trigger) is
-unchanged.
+**Stopping rule and roadmap (operator-approved, end of Session 36; DECISIONS.md
+Session 36 decision 6 as amended):** if C10 and C9 both die, the search for new
+Kalshi signals stops. The project doesn't:
+(a) one **offline venue screen** (US-legal venues ranked by access, free data
+for a kill test, fees and competition; no accounts, no money, no live code);
+(b) market-making prerequisites: Health Monitor deploy-confirm, then the
+Kalshi-specific `sid`-scoped sequence fix;
+(c) the ~2026-10-28 C2 re-run, then market-making yes or no;
+(d) **checkpoint ~2026-11-30**: if nothing has passed the gate on real quotes
+and market-making is no, park the project deliberately.
+This supersedes Session 30's "other venues wait for a Kalshi edge". The
+market-making sequencing below otherwise stands.
 
 **Earlier READ FIRST (Session 32): two directions have now been executed.** S6 weather divergence was
 built, measured and FAILED gate G2 (Session 31). The S5a/S5b canary that the

@@ -194,6 +194,36 @@ Two more exploratory numbers, reported and not claimed:
    search on a small sample is how the multiple-comparisons budget gets spent
    on noise.
 
+   **Amended, end of Session 36 (operator-approved): an offline venue screen
+   comes before the Kalshi-specific infrastructure, and there is a dated
+   checkpoint.** Roadmap if C10 and C9 both die:
+   (a) **one offline venue-screen session**. Rank the venues a US individual
+   can legally use by legal access, free historical data for an offline kill
+   test, fees, and competition density. Candidates: other CFTC-regulated
+   event-contract venues; thin and non-sports Polymarket markets as a
+   *read-only* fair value (trading there stays Phase 2); crypto perpetual
+   funding-rate carry, including Kalshi's own perps. No accounts, no money, no
+   live code. Equities and retail forex rank last: they are the most efficient
+   markets, with pattern-day-trader, wash-sale and tax complexity at this
+   account size.
+   (b) Market-making prerequisites: Health Monitor deploy-confirm (a generic
+   need) and the `sid`-scoped sequence fix. That fix is Kalshi-specific, which
+   is why it now waits for (a).
+   (c) The ~2026-10-28 C2 re-run, then market-making yes or no.
+   (d) **Checkpoint, ~2026-11-30**: if nothing has passed the gate on real
+   quotes and market-making is no, the project is parked deliberately rather
+   than left drifting.
+
+   *Why this supersedes Session 30's "other venues are gated on the Kalshi work
+   producing measured edge":* that rule assumed Kalshi would eventually produce
+   something, and that a second venue before any learning on the first would
+   double the work for nothing. Both were right in Session 30. After Session
+   36, the premise is in doubt. Spending Kalshi-specific infrastructure sessions
+   before one cheap session that might redirect all later effort would be the
+   wrong order. Venue-hopping does not change the base rate: much of the
+   difficulty is being a small, slow participant. So the screen must ask *where
+   that hurts least*, not which market is biggest.
+
 ### Methodology gate accounting (SIGNAL_REGISTER)
 | gate | status |
 |---|---|
