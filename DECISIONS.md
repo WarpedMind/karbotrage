@@ -49,23 +49,78 @@ public documentation, not as the exchange's position.
    informed (adverse selection cannot be measured offline). Script was a
    scratchpad one-off, not committed.
 5. **Canary economics sized, Session 35 (VPS log, 2026-08-02 → 2026-09-28,
-   685 distinct "confirmed" baskets).** Taken at face value the log sums to
-   $325k — **that number is wrong and must not be quoted.** 99% of it is five
-   soccer correct-score YES-baskets (`KXLALIGA1HSCORE`, `KXSERIEASCORE`,
-   `KXEPLSCORE`, `KXMLSSCORE`; two legs at 1¢ each, thousands of contracts) and
-   one `KXNFLWINS` implication whose quoted prices are impossible
-   (P(≥5 wins)=0.59 vs P(≥7)=0.92). The score baskets are the Session 34
-   roster-change trap again: the canary saw an event with only two legs and
-   called it exhaustive; a correct-score market has many more outcomes. These
-   need a live-API hand-check, but they are nearly certainly false positives.
-   **Robust view** (net edge <30% of cost and <$200 per basket): 428 baskets,
-   **$2,643 over 56 days ≈ $47/day theoretical**, median basket $0.16, median
-   capital $30 per fill, only 37 baskets ≥$5. That is the ceiling before losing
-   races to faster bots, fill risk on the second leg, and the trap class above.
-   Read: arbitrage alone is very unlikely to justify a live executor.
-   Follow-up worth doing: make the canary reject events whose leg set looks
-   incomplete (e.g. correct-score legs, or a partition whose ask prices sum far
-   below 1 on ≥1,000 contracts) so this failure stops polluting the log.
+   685 distinct "confirmed" baskets) — and then re-cut after the leg-set fix.**
+   Summed at face value the log gives a six-figure "opportunity" that is
+   **meaningless and must not be quoted as a result**: 99% of it was six
+   baskets — soccer correct-score YES-baskets (`KXLALIGA1HSCORE`,
+   `KXSERIEASCORE`, `KXEPLSCORE`, `KXMLSSCORE`; two legs at 1¢ each) plus one
+   impossible-looking NFL win-total ladder. The score baskets are the Session 34
+   roster-change trap: the canary saw a live event with two legs and called it
+   exhaustive; a correct-score market has many more outcomes.
+   **Fixed same session (canary only): a YES-basket is now evaluated only when
+   the live active leg count ≥ the modal leg count of the settled events that
+   qualified the series** (`SeriesProfile.modal_legs`, profile `schema=2`; see
+   the addendum below).
+
+   **Robust view** (confirmed, distinct by event+kind+legs, net <30% of cost and
+   <$200; first-confirmed economics; recomputed from the VPS log): 445 baskets,
+   **$2,549 net over 56 days**. That headline is itself dominated by one thing:
+   **`KXNFLWINS` is 91 baskets and $2,193 of it (86%)** — all from one
+   ~11-minute window on 2026-09-28 00:19–00:30 UTC (see hand-check below), a
+   newly listed 2027-season market whose seeded ladder was swept by a fast
+   trader. Excluding season-long NFL markets, the remaining **346 baskets held to
+   settlement in ≤14 days net $355 ≈ $6/day**.
+
+   **Capital actually required** (hold every basket to settlement; capital =
+   cost + fees at max size; intervals from first-confirmed time to the event's
+   latest market expiry, fetched from the live API):
+   - Peak concurrent capital, all 445: **≈ $209,000**, for $2,549 net — almost
+     entirely `KXNFLWINS`, which ties up ~$192k of cost for up to 155 days to
+     earn ~1%. Sum of capital with no recycling: $239k → **ROI 1.06%** total.
+   - The ≤14-day subset (346 baskets): **peak ≈ $16.6k for $355 net** (~2% over
+     a few days per basket), median capital per basket **$26.81**, max $14.8k.
+   - Simple annualisation on the all-445 peak is ~8%/yr — that is capital tied up
+     for ~1% edge in long-dated NFL ladders, i.e. a poor use of a bankroll even
+     if every fill were real. A few baskets carry the capital; the median basket
+     is small.
+   Read: the arbitrage ceiling is **single-digit dollars per day on short-dated
+   baskets, before losing races, second-leg fill risk, and the trap class
+   above.** It does not justify a live executor. (Session 35's earlier "$47/day,
+   428 baskets, $2,643" used a slightly different cutoff and included the
+   `KXNFLWINS` window; superseded by these numbers. Neither figure includes
+   fill risk.)
+
+   **Hand-check, `KXNFLWINS-27DEN` (strikes 5 and 7, 10,000 contracts,
+   YES(≥5)@0.59 + NO(≥7)@0.08) — verdict: real quotes, not a canary bug, not a
+   stale snapshot, and not a tradeable edge.** The event has 17 ≥-N strikes, all
+   present (no partial roster; S5b implication logic was sound: ≥7 ⇒ ≥5, so
+   YES(≥5)+NO(≥7) pays ≥$1 for $0.67 if those asks exist). The logged quotes were
+   re-confirmed from `/orderbook` on three consecutive sweeps (00:19, 00:24,
+   00:30 UTC) so they were not a bulk-snapshot artifact. Kalshi hourly
+   candlesticks agree: market `-5` traded a YES-ask low of **0.59 in the
+   00:00–01:00 UTC hour with 17,188 contracts of volume**, then closed the hour
+   at 0.98. Live now (06:45 UTC): `-5` has **no** YES offer at all (ask 1.00),
+   `-7` YES ask 0.94. So the mispricing was real and was taken within about 11
+   minutes by someone faster — a brand-new market repricing from a wide seeded
+   ladder to a sane one. Lesson: 10,000-deep "confirmed" quotes on a newly
+   listed market are the fingerprint of a seed ladder, not resting alpha; and
+   even a genuine candidate lives for minutes, so 5-minute polling sees the tail
+   of it at best.
+
+   **Addendum — the leg-set guard (implemented Session 35, canary/ only).**
+   `SeriesProfile` gained `legs_per_event_dist`, `modal_legs`, `schema` (=2);
+   `ProfileStore._is_fresh` returns False for `schema < 2` so every cached
+   profile rebuilds. `evaluate_event` evaluates a YES-basket only when
+   `modal_legs is not None and active_legs >= modal_legs`, else counts
+   `evaluation_notes["yes_basket_fewer_legs_than_settled_norm"]`. NO-basket and
+   S5b are unchanged on purpose: a hidden extra leg only adds NO payout (NO
+   basket) and cannot affect a pairwise implication/disjointness. Known limit:
+   the guard catches a live event *smaller* than history; it cannot catch a
+   series whose settled events were *all* incomplete-looking in the same way, nor
+   a roster that grows to the modal size and then changes composition. Coverage
+   dips after deploy: profiles rebuild at ≤60 per 5-minute sweep (highest-volume
+   first) and share Kalshi's rate limit with `karbot.service` (KNOWN DEBT), so
+   expect several hours before events are evaluated at pre-deploy coverage.
 4. The infrastructure prerequisites (Health Monitor deploy-confirm; order-book
    reset loop, `sid`-scoped sequence tracking) proceed as already sequenced —
    they are required before anything carries variance regardless.

@@ -107,6 +107,36 @@ roster) as higher-risk for this specific failure than a fixed 2-outcome
 event (two teams, two named players in a match) where the leg count cannot
 change after the event is created.
 
+### Trap: a settled event's leg count is a fact about that event, not about the live one (Sessions 34 and 35)
+
+Restated because it happened twice more after the roster-change entry above.
+Session 35 found six YES-baskets that made up ~99% of the log's face-value
+"opportunity": two-leg soccer correct-score baskets (`KXLALIGA1HSCORE`,
+`KXSERIEASCORE`, `KXEPLSCORE`, `KXMLSSCORE`) at 1¢ per leg, thousands of
+contracts. The series had qualified as exhaustive + exclusive from settled
+events with many more legs; the live event was showing only two of them.
+"Exactly one YES in every settled event" proves exhaustiveness for an event
+*of that size*. **Fixed (Session 35):** `SeriesProfile` records
+`legs_per_event_dist` and `modal_legs` (profile `schema=2`; older cached
+profiles rebuild), and `evaluate_event` prices a YES-basket only when the live
+active leg count is `>= modal_legs`, counting
+`yes_basket_fewer_legs_than_settled_norm` otherwise. NO-basket and S5b are
+deliberately unguarded — a hidden extra leg only adds NO payout and cannot break
+a pairwise relation. **What it does not catch:** a roster that reaches the modal
+size and then changes composition, or a series whose every settled event looked
+equally incomplete. A large YES-basket is still a hand-check, not a trade.
+
+### Trap: 10,000-deep "confirmed" quotes on a newly listed market
+
+`KXNFLWINS-27DEN` (2027 season, freshly listed) logged 91 baskets worth $2,193
+of the $2,549 robust total, all inside one ~11-minute window, all sized at
+exactly 10,000 contracts, all re-confirmed from `/orderbook` on three sweeps.
+The quotes were real (hourly candlesticks show a YES-ask low of 0.59 with
+17,188 contracts of volume) and the event's 17-strike ladder was complete — this
+was **not** a leg-set bug. It was a seeded ladder being repriced and swept by a
+faster participant. "Confirmed on recheck" means the quote existed a few minutes
+later, not that it would still be there when an order arrives.
+
 ## Structure proposes, history disposes
 
 Interval arithmetic only *generates* candidate relations. A relation is usable
@@ -133,6 +163,13 @@ bottom rung is almost always YES, so 40 clean events look identical to a
 structural guarantee right up until a 0-0 game settles every leg NO.
 
 ## First live results (2026-08-02)
+
+> **Superseded.** The "zero candidates" reading below was true of the first 25
+> minutes and false of the following 56 days (Session 34 found 493 distinct
+> candidates in the log; Session 35 showed most of the face value was false
+> positives or one 11-minute seed-ladder window). Kept for method only. Current
+> economics: DECISIONS.md Session 35 item 5 — short-dated robust candidates are
+> on the order of **$6/day**, not a strategy by themselves.
 
 8,598 open events, 76,483 markets, 3,086 distinct series. Sweep takes ~45s
 (the universe is streamed twice: once to rank series by volume, once to

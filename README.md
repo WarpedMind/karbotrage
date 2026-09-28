@@ -458,6 +458,19 @@ provider on one market family failed, for a legible reason. Full record:
 trades, no live exposure. That was the whole argument for sequencing divergence
 first, and it held.
 
+## Canary leg-set guard, capital sizing, 2026-09-28 (Session 35)
+
+The canary now refuses a YES-basket whose live event has fewer active legs than
+the modal size of the settled events that qualified the series
+(`SeriesProfile.modal_legs`, profile `schema=2`). This closes the incomplete-roster
+false positives (two-leg soccer correct-score baskets at 1¢ each) that made up
+~99% of the log's face-value sum. Re-cut from the VPS log: 445 robust baskets,
+$2,549 net over 56 days — 86% of it one 11-minute window on a newly listed
+`KXNFLWINS` market that a faster trader swept (quotes were real, not a bug).
+Short-dated baskets: ~$6/day, peak capital ≈ $16.6k. The arbitrage ceiling does
+not justify a live executor. Profiles rebuild after deploy, so canary coverage
+dips for several hours. See DECISIONS.md Session 35 item 5.
+
 ## Canary log read for the first time, Health Monitor built, reset-loop root cause found, 2026-09-27 (Session 34)
 
 Nobody had read the canary's own log since Session 32 deployed it 56 days
@@ -547,8 +560,10 @@ no errors. **Live-confirmed same session** — the operator sent `/mute` and
   17% of 49G, and `telegram.enabled: true` was confirmed by reading
   `config.yaml` on disk directly (not inferred). This is a spot check, not
   the full line-by-line audit the item calls for — still standing.
-- ~~**S5a/S5b viability**~~ — **Answered, Session 34: real, but verify before
-  sizing.** 15,167 sweeps since deployment, 493 distinct candidates, 3,618
+- ~~**S5a/S5b viability**~~ — **Answered, Session 34; largely superseded by
+  Session 35 (most face value was false positives or one seed-ladder window;
+  robust short-dated edge ≈ $6/day).** Session 34 reading: real, but verify before
+  sizing. 15,167 sweeps since deployment, 493 distinct candidates, 3,618
   confirmed / 182 vanished on recheck (95.2%) — exactly the ratio Session 32
   said would separate real resting arbitrage from a noisy view of the book,
   and it came back positive. But the one candidate actually hand-verified

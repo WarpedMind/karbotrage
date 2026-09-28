@@ -141,7 +141,7 @@ async def run(self): ...
   for weather and later strategies, with a hard statistical methodology gate
   (Bonferroni, n≥20, 3-period replication, market-price baseline) that any
   candidate must clear before it can influence a position.
-- Full test suite: **321/321 passing** (was documented as 301 through Session
+- Full test suite: **335/335 passing as of Session 35** (9 new canary leg-set tests; earlier count follows) — was **321/321** (was documented as 301 through Session
   32; re-counted directly Session 33 and actually collected 305 pre-existing —
   a small, unexplained pre-existing discrepancy in this doc, not investigated
   further — plus 16 new Session 33 Telegram `/mute`/`/unmute` tests). Runner
@@ -201,7 +201,37 @@ async def run(self): ...
 
 ## KNOWN DEBT
 
-### S5a/S5b CANARY — 493 REAL CANDIDATES FOUND, Session 34 (2026-09-27). The "zero candidates" result below is SUPERSEDED — read this first.
+### S5a/S5b CANARY — Session 35 (2026-09-28): leg-set guard shipped; the "493 candidates" framing below is SUPERSEDED on size — read this first.
+**Authoritative record: DECISIONS.md Session 35 item 5.** Findings:
+- **YES-basket leg-set guard (canary/ only, deployed, commit `afb5a75`).**
+  Session 34 and 35 each found YES-baskets whose live event had fewer legs
+  than the settled events that qualified the series (six two-leg soccer
+  correct-score baskets at 1¢/leg, thousands of contracts, made up ~99% of the
+  log's face-value sum). `SeriesProfile` now carries `legs_per_event_dist`,
+  `modal_legs`, `schema=2`; `ProfileStore._is_fresh` rejects `schema < 2` so
+  profiles rebuild; `evaluate_event` prices a YES-basket only when live active
+  legs ≥ `modal_legs`, else counts
+  `evaluation_notes["yes_basket_fewer_legs_than_settled_norm"]`. NO-basket and
+  S5b unchanged (hidden extra leg can't break them). **Coverage dips for
+  several hours after deploy** (rebuild ≤60 profiles/sweep, shared rate limit
+  with `karbot.service`). Does not catch a roster that reaches the modal size
+  then changes composition.
+- **`KXNFLWINS-27DEN` hand-check: real quotes, not a canary bug.** 17-strike
+  ladder complete; YES(≥5)@0.59 + NO(≥7)@0.08 was re-confirmed from
+  `/orderbook` on three sweeps (00:19–00:30 UTC 2026-09-28) and Kalshi candlesticks
+  show 17,188 contracts traded in that hour, ask low 0.59. A seeded ladder on a
+  newly listed market, swept by a faster participant within ~11 minutes; gone now.
+- **Economics (robust, distinct confirmed baskets, net <30% of cost and <$200):**
+  445 baskets, $2,549 net over 56 days, **86% of it that one `KXNFLWINS`
+  window**; ≤14-day baskets: 346, $355 net (~$6/day), peak capital ≈ $16.6k;
+  hold-everything-to-settlement peak ≈ $209k for ~1% (long-dated NFL). Arbitrage
+  ceiling does not justify a live executor. The face-value sum of the log is
+  meaningless and must not be quoted.
+- **Trap now recorded in `canary/README.md`**: the leg set of a categorical
+  event is not stable, and a settled event's leg count is not a fact about the
+  live one (this is the Session 34 item below, finally written down).
+
+### S5a/S5b CANARY — Session 34 (2026-09-27) reading, kept for history: "493 real candidates". SUPERSEDED on size by the Session 35 entry above; the mechanism notes still hold.
 Nobody had read the canary's own log since Session 32 deployed it. 56 days
 later (Session 34), the accumulated `logs/basket_candidates.jsonl` tells a
 completely different story than the entry below, which is kept only for its
@@ -209,7 +239,7 @@ still-accurate mechanism description:
 
 - **15,167 sweeps since deployment, 1 transient 429, zero reconcile
   failures.** The instrument itself has been rock-solid.
-- **493 distinct candidate baskets found, not one.** On recheck (the
+- **493 distinct candidate baskets found, not one** (Session 35: most face value was false positives or one seed-ladder window). On recheck (the
   re-price-from-`/orderbook` step this file's own README calls the real
   measurement): **3,618 confirmed / 182 vanished — 95.2% hold up.** That
   ratio is exactly what Session 32 said would separate "real resting
@@ -234,8 +264,8 @@ still-accurate mechanism description:
   **New trap, not previously documented**: `canary/README.md`'s traps list
   should gain this as "the leg set of a categorical event is not guaranteed
   stable — a late-added market can retroactively break an already-qualified
-  partition." Not yet added to that file this session (time-boxed) — do
-  before trusting any high-edge two-or-three-leg candidate at face value.
+  partition." **Added to that file in Session 35**, together with the
+  leg-count guard that addresses it for YES-baskets.
 - **Practical read**: the 95.2% hold-up rate is real signal, but the one
   candidate actually checked by hand was the exception, not the rule, and
   it was also the single highest-edge one seen (38%, `KXNFLMOSTRSHYDS`).

@@ -1,6 +1,30 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-09-28 (Session 35, part 2 — canary leg-set guard built and deployed; capital sized; KXNFLWINS hand-checked)
+
+Code (canary/ only; nothing on the live path touched): `SeriesProfile` gained
+`legs_per_event_dist`/`modal_legs`/`schema=2`, `ProfileStore._is_fresh` rejects
+`schema < 2`, `evaluate_event` prices a YES-basket only if live active legs ≥
+`modal_legs` (else counts `yes_basket_fewer_legs_than_settled_norm`). NO-basket
+and S5b unchanged. 9 new tests incl. the 2-leg-vs-3-leg partition; suite
+335/335; local `--once` sweep clean (11,404 events, 786 evaluated, 0 errors).
+Deployed to the VPS (commit `afb5a75`, `karbot-canary` restarted, `karbot` still
+active). **Coverage dips after deploy**: every cached profile rebuilds at ≤60 per
+sweep, highest-volume first, sharing Kalshi's rate limit with `karbot.service`,
+so full pre-deploy coverage takes hours.
+
+Findings: (1) `KXNFLWINS-27DEN` was real quotes, not a bug — a seeded ladder on a
+new market swept within ~11 minutes (17k contracts traded in the hour); (2)
+capital sizing: 445 robust baskets, $2,549 net, of which 86% is that one NFL
+window; short-dated (≤14d) subset is 346 baskets, $355 net (~$6/day), peak
+capital ≈ $16.6k; holding everything to settlement peaks near $209k for ~1%;
+(3) Session 35's "$47/day" is superseded. Full numbers: DECISIONS.md Session 35
+item 5.
+
+Do not: treat the canary log as a strategy, quote its face-value sum, or trust a
+10,000-deep confirmed quote on a newly listed market.
+
 ## 2026-09-28 (Session 35 — Kalshi market-maker enquiry reply received and triaged; docs only, no code)
 
 Enquiry was sent; reply (Kalshi Support AI) saved to
@@ -24,7 +48,7 @@ goal itself.
 ### What was done
 1. **Read the canary log — the "zero candidates" result was stale.**
    15,167 sweeps since Session 32, 1 transient 429, zero reconcile failures.
-   **493 distinct candidate baskets found**, not zero; on recheck, 3,618
+   **493 distinct candidate baskets found** (later shown, Session 35, to be mostly false-positive face value — see above), not zero; on recheck, 3,618
    confirmed / 182 vanished (95.2% hold up) — the exact measurement Session
    32 said would separate real resting arbitrage from book noise, and it
    came back strongly positive. Full numbers and the corrected framing:
