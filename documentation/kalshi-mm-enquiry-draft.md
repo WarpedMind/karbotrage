@@ -1,7 +1,9 @@
 # Draft enquiry to Kalshi — market-maker programme
 
-**Status: DRAFT, ready to send — final email text and recipient appended
-Session 34 (2026-09-27), still not actually sent.** Written Session 32
+**Status: SENT and ANSWERED (Session 35, 2026-09-28) — see
+`kalshi-market-maker-inquiry-reply.md` and DECISIONS.md Session 35. The answer
+was AI-composed and silent on eligibility, rate limits and cancel-on-disconnect.**
+(Previously: final email text and recipient appended Session 34.) Written Session 32
 (2026-08-02) so the market-making decision can be made with real information
 instead of inference.
 

@@ -1,6 +1,44 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-09-28 — Session 35: Kalshi's answer to the market-maker enquiry arrived and answers none of the three questions that could end the discussion; the market-making decision is NOT triggered as "no", but the trigger has not fired either
+
+Reply text kept verbatim in `documentation/kalshi-market-maker-inquiry-reply.md`.
+**It was composed by Kalshi Support AI, not a person** — treat it as a summary of
+public documentation, not as the exchange's position.
+
+### What it established
+- A formal Market Maker Program is live. Status is granted after review of
+  "financial resources, trading experience, and business reputation."
+- Obligations: consistent two-sided liquidity. Benefits: reduced fees and
+  adjusted position limits, conditional on keeping it up.
+- Incumbent coverage is broad (KXINX, KXNASDAQ100, KXBTC, KXETH, KXNBA, KXNHL
+  and more) at ~98% of each 1-hour increment, and the list changes over time.
+
+### What it did NOT establish — and these were the decisive questions
+- **Eligibility for individuals / small accounts: "not specified."** DECISIONS
+  Session 32 said institution-only ⇒ decide *no* immediately. The reply does not
+  say institution-only; it says it doesn't know. So neither branch fires.
+- Minimum capital, quoting metrics, MM-specific rate limits, cancel-on-disconnect:
+  all "not documented."
+
+### Decision
+1. **Market-making stays undecided, and no build work starts on it.** The reply
+   adds one real negative (incumbents already cover many series ~98% of the
+   time, so Session 30's 489-market surface is likely overstated) and zero
+   positives.
+2. **Do not re-ask the AI support channel.** It has told us the documentation
+   is silent; asking again yields the same. Open items resolve only from
+   (a) Kalshi's public API docs (rate limits are tier-based and published —
+   read them directly), or (b) a human at Kalshi, which is a judgment call for
+   the operator, not a default.
+3. **Cheap next measurement instead**: re-cut the 489-market figure excluding
+   series on Kalshi's covered-products list. If little survives, market-making
+   is decided *no* on evidence, without ever needing the eligibility answer.
+4. The infrastructure prerequisites (Health Monitor deploy-confirm; order-book
+   reset loop, `sid`-scoped sequence tracking) proceed as already sequenced —
+   they are required before anything carries variance regardless.
+
 ## 2026-08-29 — Session 33: the fee-variance "mystery" was two eras of trades in one table, not a formula bug, and it corroborates Session 29's independent finding rather than adding a new open question
 
 Two KNOWN DEBT items had been sitting open since Session 25 — flagged fee

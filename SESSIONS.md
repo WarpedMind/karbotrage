@@ -1,6 +1,16 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-09-28 (Session 35 — Kalshi market-maker enquiry reply received and triaged; docs only, no code)
+
+Enquiry was sent; reply (Kalshi Support AI) saved to
+`documentation/kalshi-market-maker-inquiry-reply.md`. It confirms a formal Market
+Maker Program with ~98% incumbent coverage on many series, and answers
+"not documented" on eligibility, minimums, MM rate limits and cancel-on-disconnect.
+Neither Session 32 trigger (institution-only ⇒ no) fired. Market-making stays
+undecided; no build. Next cheap measurement: re-cut the 489-market surface
+excluding Kalshi's covered series. Full reasoning: DECISIONS.md Session 35.
+
 ## 2026-09-27 (Session 34 — read the canary log for the first time since deployment, built the Health Monitor agent, found the order-book reset loop's root cause)
 
 ### Mandate
