@@ -121,6 +121,8 @@ public documentation, not as the exchange's position.
    dips after deploy: profiles rebuild at ≤60 per 5-minute sweep (highest-volume
    first) and share Kalshi's rate limit with `karbot.service` (KNOWN DEBT), so
    expect several hours before events are evaluated at pre-deploy coverage.
+   Observed at deploy (10:50 UTC): the first post-restart sweep completed and
+   reconciled, built 60 profiles, and evaluated 783 events versus ~2,123 just before.
 4. The infrastructure prerequisites (Health Monitor deploy-confirm; order-book
    reset loop, `sid`-scoped sequence tracking) proceed as already sequenced —
    they are required before anything carries variance regardless.
