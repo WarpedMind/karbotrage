@@ -224,7 +224,16 @@ def evaluate_event(
     # A basket needs every leg. A missing or one-sided leg does not make the
     # basket cheaper, it makes the payout guarantee false -- so an incomplete
     # basket is skipped, never partially priced.
-    if profile.allows_yes_basket:
+    # A YES-basket's exhaustiveness was proven on settled events of modal_legs
+    # size. A live event with fewer active legs may be a partial roster (Session
+    # 34 KXNFLMOSTRSHYDS; Session 35 two-leg soccer correct-score baskets at 1c
+    # each), so it is not evaluated. NO-basket and S5b are unaffected: a hidden
+    # extra leg can only make those payouts larger, never break them.
+    yes_ok = profile.allows_yes_basket
+    if yes_ok and (profile.modal_legs is None or len(markets) < profile.modal_legs):
+        reasons["yes_basket_fewer_legs_than_settled_norm"] += 1
+        yes_ok = False
+    if yes_ok:
         legs = [yes_leg_from_snapshot(m) for m in markets]
         if all(legs):
             econ = evaluate_basket(legs, payout_per_set=1.0)

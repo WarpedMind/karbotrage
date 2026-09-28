@@ -57,6 +57,9 @@ def profile(**overrides) -> SeriesProfile:
         implication=INSUFFICIENT,
         disjointness=INSUFFICIENT,
         failure_bound_95=0.075,
+        # Smallest event size any test here uses; leg-set tests override it.
+        modal_legs=2,
+        schema=2,
     )
     base.update(overrides)
     return SeriesProfile(**base)
@@ -145,6 +148,44 @@ class TestBasketDetection:
         found, reasons, _skipped = evaluate_event(ev, profile(exhaustive=CONFIRMED, exclusive=CONFIRMED))
         assert found == []
         assert reasons["yes_basket_incomplete_book"] == 1
+
+    def test_two_live_legs_against_a_three_leg_settled_norm_is_not_a_yes_basket(self):
+        """The Session 34/35 trap: a series proven exhaustive on 3-leg events,
+        seen live with only 2 legs listed (a late-added roster). Two 1c legs
+        'cost' $0.02 for a $1 payout, and the guarantee is false."""
+        ev = event("KXTEST", "E1", [market("A", 0.01, 0.99), market("B", 0.01, 0.99)])
+        prof = profile(exhaustive=CONFIRMED, exclusive=CONFIRMED, modal_legs=3)
+        found, reasons, skipped = evaluate_event(ev, prof)
+        assert found == [] and skipped is None
+        assert reasons["yes_basket_fewer_legs_than_settled_norm"] == 1
+
+    def test_full_leg_set_still_qualifies_at_the_modal_size(self):
+        ev = event("KXTEST", "E1", [market(t, 0.30, 0.72) for t in "ABC"])
+        prof = profile(exhaustive=CONFIRMED, exclusive=CONFIRMED, modal_legs=3)
+        found, reasons, _ = evaluate_event(ev, prof)
+        assert [c.kind for c in found] == [KIND_YES_BASKET]
+        assert "yes_basket_fewer_legs_than_settled_norm" not in reasons
+
+    def test_more_live_legs_than_the_norm_is_allowed(self):
+        ev = event("KXTEST", "E1", [market(t, 0.20, 0.82) for t in "ABCD"])
+        prof = profile(exhaustive=CONFIRMED, exclusive=CONFIRMED, modal_legs=3)
+        found, _, _ = evaluate_event(ev, prof)
+        assert [c.kind for c in found] == [KIND_YES_BASKET]
+
+    def test_unknown_modal_legs_blocks_the_yes_basket(self):
+        ev = event("KXTEST", "E1", [market(t, 0.30, 0.72) for t in "ABC"])
+        prof = profile(exhaustive=CONFIRMED, exclusive=CONFIRMED, modal_legs=None)
+        found, reasons, _ = evaluate_event(ev, prof)
+        assert found == []
+        assert reasons["yes_basket_fewer_legs_than_settled_norm"] == 1
+
+    def test_the_no_basket_is_unaffected_by_a_short_leg_set(self):
+        """A hidden extra leg can only add NO payout, never remove it."""
+        ev = event("KXTEST", "E1", [market(t, 0.35, 0.40) for t in "AB"])
+        prof = profile(exclusive=CONFIRMED, exhaustive=CONFIRMED, modal_legs=3)
+        found, reasons, _ = evaluate_event(ev, prof)
+        assert KIND_NO_BASKET in [c.kind for c in found]
+        assert reasons["yes_basket_fewer_legs_than_settled_norm"] == 1
 
     def test_an_efficiently_priced_event_yields_nothing(self):
         """Both baskets must be checked: three legs at yes_ask 0.40 cost $1.20

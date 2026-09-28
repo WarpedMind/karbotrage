@@ -323,3 +323,47 @@ class TestEvidenceThresholds:
         assert p.settled_events_used + sum(
             p.skips.get(k, 0) for k in event_level
         ) == p.settled_events_seen
+
+
+class TestLegSetProfile:
+    def test_profile_records_leg_distribution_modal_legs_and_schema(self, patched):
+        patched(weather_events(40))
+        prof = build_profile("KXHIGHTEST")
+        assert sum(prof.legs_per_event_dist.values()) == prof.settled_events_used
+        assert prof.modal_legs == int(max(prof.legs_per_event_dist,
+                                          key=prof.legs_per_event_dist.get))
+        assert prof.schema == qualify.SCHEMA_VERSION == 2
+
+    def test_a_two_leg_vs_three_leg_partition_reports_the_modal_size(self, patched):
+        """Home/draw/away events (3 legs) with a few 2-leg ones: both are valid
+        partitions in history, so the series qualifies -- and modal_legs=3 is
+        what lets the scan refuse a 2-leg live event."""
+        events = {}
+        for i in range(40):
+            legs = 3 if i % 10 else 2  # 4 of 40 have two legs
+            ev = f"KXSOC-E{i}"
+            winner = i % legs
+            events[ev] = [
+                _market(f"{ev}-L{k}", ev, "custom", "yes" if k == winner else "no")
+                for k in range(legs)
+            ]
+        patched(events)
+        prof = build_profile("KXSOC")
+        assert prof.legs_per_event_dist == {"2": 4, "3": 36}
+        assert prof.modal_legs == 3
+        assert prof.exhaustive == CONFIRMED and prof.exclusive == CONFIRMED
+
+    def test_old_schema_profiles_are_not_fresh(self, tmp_path):
+        import datetime as dt
+        store = qualify.ProfileStore(path=str(tmp_path / "p.json"))
+        now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+        old = qualify.SeriesProfile(series="X", built_at=now, settled_events_seen=1,
+                                    settled_events_used=1, markets_used=2)
+        assert old.schema == 1 and not store._is_fresh(old)
+        old.schema = 2
+        assert store._is_fresh(old)
+
+    def test_a_legacy_json_profile_loads_with_schema_1(self):
+        raw = {"series": "X", "built_at": "2026-08-01T00:00:00+00:00",
+               "settled_events_seen": 1, "settled_events_used": 1, "markets_used": 2}
+        assert qualify.SeriesProfile.from_dict(raw).schema == 1

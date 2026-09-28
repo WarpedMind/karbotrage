@@ -66,6 +66,10 @@ PROFILE_PATH = os.path.join(CACHE_DIR, "series_profiles.json")
 MIN_SETTLED_EVENTS = 30
 MIN_PAIR_TESTS = 30
 
+# Bumped when SeriesProfile gains fields a scan depends on; older cached
+# profiles are rebuilt instead of trusted. 2 = leg-count distribution.
+SCHEMA_VERSION = 2
+
 CONFIRMED = "confirmed"
 REFUTED = "refuted"
 INSUFFICIENT = "insufficient_evidence"
@@ -106,6 +110,15 @@ class SeriesProfile:
     # disqualifies the series' baskets.
     scalar_sum_to_one_ok: int = 0
     scalar_sum_to_one_violations: int = 0
+    # Leg-count distribution of the settled events that qualified the series
+    # ({"3": 40, "2": 1}). A YES-basket's exhaustiveness proof is a statement
+    # about events of THIS size; a live event with fewer legs is a different
+    # object (a roster that hasn't finished being listed). ``modal_legs`` is the
+    # most common count. ``schema`` < 2 means the profile predates these fields
+    # and is rebuilt rather than trusted.
+    legs_per_event_dist: Dict[str, int] = field(default_factory=dict)
+    modal_legs: Optional[int] = None
+    schema: int = 1
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -245,6 +258,7 @@ def build_profile(
 
     skips: Counter = Counter()
     yes_counts: Counter = Counter()
+    leg_counts: Counter = Counter()
     events_used = 0
     markets_used = 0
     imp_tested = imp_bad = 0
@@ -280,6 +294,7 @@ def build_profile(
 
         events_used += 1
         markets_used += len(markets)
+        leg_counts[len(markets)] += 1
         yes_counts[sum(1 for r in results if r == "yes")] += 1
 
         intervals: List[Optional[Interval]] = []
@@ -328,6 +343,15 @@ def build_profile(
         ),
         scalar_sum_to_one_ok=scalar_ok,
         scalar_sum_to_one_violations=scalar_bad,
+        legs_per_event_dist={str(k): v for k, v in sorted(leg_counts.items())},
+        # most_common breaks ties by first-seen; on a tie prefer the larger
+        # count, the conservative side for a "fewer legs" guard.
+        modal_legs=(
+            max(leg_counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+            if leg_counts
+            else None
+        ),
+        schema=SCHEMA_VERSION,
     )
 
     enough_events = events_used >= MIN_SETTLED_EVENTS
@@ -396,6 +420,8 @@ class ProfileStore:
         os.replace(tmp, self.path)
 
     def _is_fresh(self, profile: SeriesProfile) -> bool:
+        if profile.schema < SCHEMA_VERSION:
+            return False
         try:
             built = dt.datetime.fromisoformat(profile.built_at)
         except ValueError:
