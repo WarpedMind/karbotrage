@@ -1,0 +1,23 @@
+accounting: {'spread rung unmatched to a team (dropped)': 82}; failed candle fetches: 0
+
+== H9 — UNCOVERED (soccer), the test ==
+events evaluated with a usable fit: 2790 of 2902; entries 2550
+pooled  -15.099%  95%CI[-21.302, -9.011]  one-sided p=1.0000  entries=2550  dates=59
+period1 2026-08-19..2026-09-07  -12.710%  95%CI[-21.582, -5.939]  one-sided p=1.0000  entries=1093  dates=20
+period2 2026-09-08..2026-09-27  -11.141%  95%CI[-23.347, +1.455]  one-sided p=0.9585  entries=808  dates=20
+period3 2026-09-28..2026-10-17  -24.050%  95%CI[-34.498, -11.181]  one-sided p=0.9995  entries=649  dates=19
+win rate 0.233; mean ask 0.253; mean implied 0.473; mean gap after fee+3c 0.177
+descriptive Brier at first fitted candle, team A: game mid 0.2041 vs ladder-implied 0.2438 (n=2790)
+verdict (alpha=0.0167, all periods > 0): FAIL
+
+== covered control (NFL/NCAAF/MLB), not claimed ==
+events evaluated with a usable fit: 406 of 412; entries 202
+pooled  +6.489%  95%CI[-15.345, +26.526]  one-sided p=0.2744  entries=202  dates=42
+period1 2026-08-19..2026-09-07  -2.305%  95%CI[-32.361, +22.411]  one-sided p=0.5636  entries=46  dates=15
+period2 2026-09-08..2026-09-26  -4.650%  95%CI[-37.589, +34.163]  one-sided p=0.5849  entries=87  dates=16
+period3 2026-09-27..2026-10-17  +26.397%  95%CI[-8.356, +52.048]  one-sided p=0.0609  entries=69  dates=11
+win rate 0.332; mean ask 0.280; mean implied 0.435; mean gap after fee+3c 0.112
+descriptive Brier at first fitted candle, team A: game mid 0.2206 vs ladder-implied 0.2337 (n=406)
+  KXNFL: entries 39, mean +34.49%
+  KXNCAAF: entries 127, mean +1.19%
+  KXMLB: entries 36, mean -5.13%

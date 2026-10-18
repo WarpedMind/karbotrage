@@ -458,6 +458,32 @@ provider on one market family failed, for a legible reason. Full record:
 trades, no live exposure. That was the whole argument for sequencing divergence
 first, and it held.
 
+## Two more candidates tested and dead; the signal search stops, 2026-10-18 (Session 37)
+
+**Weather "post-peak" quotes (C10).** The idea: once the airport's observed
+temperature has already passed a ladder rung, that rung's outcome is known
+before the official report, so maybe the price lags. It doesn't, at least not
+at any speed this project can manage. On 45,741 of 45,751 hours where a rung was
+already decided, nobody was offering the decided side below $1 by the end of
+the hour. The decided side does get taken, typically about one minute after the
+observation is published, by participants faster than an hourly poller. Across
+18 cities that race is worth roughly $62 a day in total. The only time a
+"decided" rung stayed on offer, the observation was a sensor glitch (New York,
+80 °F in heavy rain, official high 77 °F) and the market had it right.
+
+**Spread ladder vs game winner (C9).** The idea: a match's point-spread markets
+imply a win probability, and the game-winner market might disagree. It does,
+but the game-winner market is the better price. Buying where the ladder said
+the winner was cheap lost 15% across 2,550 soccer matches, in every period.
+
+Both tests were pre-registered with kill criteria written down before any
+result was computed. With both dead, the project's stopping rule applies: no
+more Kalshi signal hunting. Next comes one offline screen of other legal
+venues, then the two market-making prerequisites, then a yes/no on
+market-making after the late-October re-run, with a park-or-continue checkpoint
+around 2026-11-30. Nothing touches the live path. Code: `backtest/nowcast/`,
+`backtest/consistency/`. Record: DECISIONS.md Session 37.
+
 ## New-strategy screen: the favorite–longshot bias is real on the tape and not collectable, 2026-09-28 (Session 36)
 
 Fourteen new candidates were screened against one question: *is there a reason
@@ -732,8 +758,9 @@ hours of logs instead of waiting days for an actual trade.
     real on the tape and replicates out of sample, but buying the quoted price
     loses. It loses 15% out of sample, and still 4% with only tight books
     allowed. Polymarket-as-fair-value on major sports is dead by live snapshot.
-7h. **Weather post-peak nowcast (C10)**, then **cross-series consistency (C9)**.
-    One session each, $0.
+7h. ✅ **Weather post-peak nowcast (C10)** and **cross-series consistency (C9)**.
+    Both dead (Session 37); the stopping rule fired.
+7j. **Offline venue screen**: next session. No accounts, no money, no live code.
 7i. **Forward re-run around 2026-10-28** of the maker-side favourite split,
     frozen as recorded. $0, no code. This feeds the market-making decision; it
     is not a strategy.

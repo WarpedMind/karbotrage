@@ -1,6 +1,246 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-10-18 — Session 37: C10 (weather post-peak nowcast) and C9 (cross-series consistency) both tested to a result and both DEAD. The stopping rule fires: no further Kalshi signal search; the next session is the offline venue screen. No live-path code written.
+
+### Pre-registration — written 2026-10-18 ~18:45 UTC, BEFORE any H7/H8 outcome was examined
+What had been seen when this was written, stated so the claim can be judged:
+the Session 31 candle/settlement caches (May 22 → Aug 1, used then for a
+different hypothesis); the Session 36 KXHIGH* tape timing split that motivated
+C10; one plumbing probe of IEM ASOS for KAUS on 2026-08-01 (hourly METAR max
+95 °F, CLI 96 °F); the market field `close_time` (23:59 local *standard* time).
+No H7 or H8 return, win rate or entry count had been computed for any market.
+
+**Universe.** Every settled market in the 18 KXHIGH* series that have an
+empirically resolved station in `backtest/resolved_stations.json`, event days
+2026-05-22 → the last fully settled day at fetch time. Markets that settled
+neither yes nor no, or have no candles, are excluded and counted. Any other
+KXHIGH* series found is excluded and named (stations are never guessed).
+
+**Observations.** IEM ASOS archive, routine and special METARs
+(`report_type=3,4`), the products disseminated in real time. Temperature per
+report = the METAR remark `T` group in tenths °C converted to °F **unrounded**
+(IEM's `tmpf` column is rounded to whole °F and is not used). If a report has
+no `T` group, its body temperature in whole °C **minus 0.5 °C** is used, a
+lower bound. Six-hour max groups are not used. Corrected reports are used as
+issued.
+
+**Climate day.** Local **standard** time midnight to midnight (NWS CLI
+definition; matches each market's `close_time` of 23:59 LST). Running max at a
+candle = max of reports with valid time in [day start LST, candle end − 10 min].
+
+**Strike conventions** (Session 31, verified 100% against settlements):
+`greater` with `floor_strike` f → YES iff high ≥ f+1; `less` with `cap_strike`
+c → YES iff high ≤ c−1; `between` f..c → YES iff f ≤ high ≤ c.
+
+**H7 (primary).** At each hourly candle with `end_period_ts` ≤ `close_time`,
+using the candle's closing `yes_bid` / `yes_ask`, with running max M:
+- `greater`: decided YES when M ≥ f+1 → buy YES at `yes_ask`;
+- `between`: decided NO when M ≥ c+1 → buy NO at `1 − yes_bid`;
+- `less`: decided NO when M ≥ c → buy NO at `1 − yes_bid`;
+- only when the book is two-sided: 0 < yes_bid < yes_ask < 1.
+One entry per market, at the first qualifying candle. Return
+`(payout − p − fee)/(p + fee)`, `fee = 0.07·p·(1−p)`, payout from the settled
+`result`. Equal weight per market. Bootstrap whole **dates** (event day), 10,000
+resamples, one-sided P(mean ≤ 0).
+
+**H8 (secondary, the only one).** Post-peak "won't reach": at candles whose end
+is ≥ 19:00 LST, a `greater` or `between` rung whose YES region's lower bound L
+(f+1 or f) satisfies L ≥ M + 3.0 °F → buy NO at `1 − yes_bid`; same book
+filter, entry rule, scoring and bootstrap. Not near-deterministic: it bets
+that the temperature does not rise 3 °F after 19:00 LST.
+
+**Bonferroni.** Family of 3 declared now: H7, H8 and H9 (reserved for C9, run
+only if C10 closes early). **α = 0.05/3 = 0.0167**, whether or not H9 is run.
+
+**Periods.** P1 2026-05-22 → 07-29 (before the discovery window); P2 07-30 →
+09-27 (Session 36's tape window that suggested C10, so contaminated for
+discovery); P3 09-28 → end (unseen). Reported separately; P1+P3 pooled is
+reported as the out-of-sample number.
+
+**Also reported (not tests):** (a) CLI-vs-ASOS: the share of H7 entries whose
+decided side lost, and day-level, the share of city-days where the final
+METAR running max exceeds the settled `expiration_value` (the dangerous
+direction); (b) capacity proxy: for each H7 entry, notional of trades after the
+signal candle and before `close_time` in which the **taker bought the decided
+side at a decided-side price ≤ the entry price**, summed per date over all
+cities (mean and median $/day, zero days included); (c) median hold, signal
+candle end → `settlement_ts`. Sensitivity only: fee rounded up to the cent on a
+100-contract order.
+
+**Kill criteria — C10 is dead if ANY holds:**
+1. H7's pooled net return ≤ 0, or one-sided p ≥ 0.0167, or any period's point
+   estimate ≤ 0 (gate 3);
+2. decided-side losses cost more than decided-side wins earn (net ≤ 0 already
+   covers this; it is also reported on its own);
+3. the capacity proxy's mean is below $20/day summed across all cities.
+
+**Gate 4 deviation, declared now.** C10 is a nowcast of an outcome already
+partly determined, not a forecast; the ≥2h lead gate is violated by design.
+Reverse causation is impossible when the observation is timestamped before the
+quote. Flagged for operator acceptance; all other gates apply in full.
+
+If H7 survives, it is reported in dollars per day and capital tied up, with a
+frozen forward test on unseen dates. Nothing live is recommended either way.
+
+### Pre-registration of H9 (C9) — written after C10 closed, BEFORE any C9 data was fetched
+Seen when this was written: one structural sample of settled markets per series
+(strikes, ticker shapes, which team each rung names, whether the game market has
+a TIE leg). No price or outcome was examined.
+
+**Universe.** Live tier only (settled 2026-08-19 → 2026-10-17; the historical
+tier route is throttled to 2 req/s). Event pairs `<P>GAME-<suffix>` /
+`<P>SPREAD-<suffix>`, matched on the suffix.
+- **Uncovered (the test):** soccer, meaning every catalogued pair whose game
+  event carries a `TIE` leg, excluding cup and knockout competitions by name
+  (CUP, POKAL, COPA, COUPE, COPPA, TACA, SUPERCUP, FINALISSIMA, UCL, UEL, UECL,
+  CLUBWC, CONMEBOL, CONCACAF, AFC, WC, FIFA, ASEAN), because extra time can split
+  the game and spread settlement definitions. At most 40 events per series,
+  seeded sample (seed 3737).
+- **Covered (control, reported, not claimed):** KXNFL, KXNCAAF, KXMLB pairs, at
+  most 150 events each, same seed. Kalshi lists these families as covered by
+  designated market makers.
+
+**Candle and window.** Hourly closing quotes. Eligible candles end ≤
+min(`close_time`, `expected_expiration_time`, `settlement_ts`,
+`occurrence_datetime`) − 2h, over every market in the pair. There is no game-start
+field, so in-play candles cannot be excluded for long games. Because both
+markets are read at the same candle, the comparison is still simultaneous.
+
+**Ladder-implied probability.** For team A, each two-sided rung "A wins by over
+k" with mid in [0.02, 0.98] gives the point (x = k, P = mid); each two-sided
+rung "B wins by over k" gives (x = −k, P = 1 − mid). OLS of probit(P) on x,
+needing at least 3 points and a negative slope, gives `P(A margin > x) =
+Φ(a + b·x)`. Implied P(A wins) is evaluated at **x = 0.5 for soccer**, i.e.
+margin ≥ 1, which is the continuity-corrected normal on whole-goal margins, and
+at **x = 0** for the covered sports. Implied P(B wins) = 1 − Φ(a − b·0.5) for
+soccer and 1 − Φ(a) otherwise.
+
+**H9 rule.** At the first eligible candle where some team's game market is
+two-sided (0 < bid < ask < 1) and `ask + 0.07·ask·(1−ask) + 0.03 < implied
+P(team wins)`, buy that team's YES at the ask (the larger gap if both teams
+qualify). The TIE leg is never traded. One entry per event, equal weight, return
+`(payout − p − fee)/(p + fee)`, bootstrap whole settlement dates (10,000), and
+three periods: equal thirds of the window by date.
+
+**Test.** H9 = the uncovered group, one-sided, α = 0.0167 (the family declared
+above), plus all three period point estimates > 0. The covered group and a
+descriptive Brier comparison (game mid vs ladder-implied, first eligible candle,
+all evaluated events) are reported, not claimed.
+
+**Kill.** C9 is dead if H9's net return ≤ 0, p ≥ 0.0167, or any period ≤ 0.
+
+### Results — C10 (H7, H8). Raw output: `backtest/reports/nowcast_h7_h8.txt`
+**Sample.** 16,092 settled markets in 18 series, 2,682 city-days, 149 event
+dates (2026-05-22 → 2026-10-17); 74,970 METARs, of which 656 had no `T` group
+(lower bound used). No candle fetch failed. Every market closes at 23:59 or
+00:00 LST, which confirms the climate-day mapping for all 18 stations.
+32 newer KXHIGH* series without a resolved station were excluded by name.
+Before freezing, the historical tier was found to reach back to March 2026.
+Those markets were not used.
+
+| test | entries / dates | net return | one-sided p | verdict (α = 0.0167) |
+|---|---|---|---|---|
+| **H7** decided rung, buy decided side at ask | **2 / 2** | −49.5% (1 win at 99¢, 1 loss at 27¢) | 0.75 | **FAIL**; P1 and P3 have no entries |
+| **H8** post-19:00 LST, YES ≥ max + 3 °F, buy NO | 29 / 21 | **−11.5%** [−25.0, −0.3] | 0.98 | **FAIL**; P1 −4.8%, P2 −17.9%, P3 −15.4% |
+
+**Why H7 has two entries:** across 45,751 candle-hours on which the running max
+had already decided a rung, the book was one-sided on **45,741**. For a decided
+NO the YES bid was already exactly 0 (45,408 hours); for a decided YES the ask
+was already $1 (333). Both tiers agree. By the close of the first hour in which
+the deciding METAR is ten minutes old, the market has already moved.
+
+**Kill criteria:** (1) fails on net return, p, and periods. (2) The two entries
+lost $0.28 per contract against $0.01 earned. (3) The capacity proxy is
+**$17.10/day** (mean over all 149 dates; median $0). Nearly all of that is takers
+buying the wrong side of the glitch market below, and they lost $2,066 doing it.
+**All three criteria fail.**
+
+**(a) CLI vs ASOS.** At day level, the final METAR max exceeded the CLI high on
+**1 of 2,682 city-days** (0.04%). Distribution of floor(CLI − METAR max):
+−1: 390, 0: 1,141, +1: 968, +2: 161, ≥3: 22. So the hourly METAR is almost
+always at or below the CLI, as the safety argument assumed. The one exception
+is **KNYC 2026-08-27**: a 19:51Z special read 26.7 °C (80 °F) in heavy rain
+between readings of 21–22 °C. The CLI settled at 77 °F. That glitch "decided"
+the less-than-80 rung NO, and it produced H7's only loss. The market priced
+that rung at 73% YES throughout, and was right. The one time a "decided" rung
+kept a two-sided book, the book was telling the truth.
+
+**(c) Hold.** Median 14.8 h from signal to settlement, which is moot.
+
+**Descriptive, not a test (no α spent): is it a speed contest?** On a seeded
+sample of 400 decided live-tier markets, takers bought the decided side below
+99.5¢ within 3 h of the deciding METAR on **26 (6.5%)**. The first such trade
+came a median **1.1 minutes** after the METAR valid time (p25 0.2 min, p75
+1.3 min). The decided side never lost in the sample. Scaled to the 2,109 decided
+live-tier markets over 68 dates: about **$1,480/day of notional and ~$62/day of
+profit** across all 18 cities, taken in sub-minute races. That is the C11/C14
+class, parked as "not this project's game", and nothing measured here argues
+otherwise. **The Session 36 tape lead was informed takers acting on
+observations within a minute, not a stale quote anyone slow can collect.**
+
+### Results — C9 (H9). Raw output: `backtest/reports/consistency_h9.txt`
+**Sample.** 3,314 paired events (2,902 uncovered soccer events across 77
+league/international series; 412 covered), 27,851 candle series, zero fetch
+failures. 82 spread rungs whose ticker did not map to a team code were dropped.
+
+| test | entries / dates | net return | one-sided p | verdict (α = 0.0167) |
+|---|---|---|---|---|
+| **H9** uncovered soccer: buy game-winner ask when ladder-implied − ask − fee > 3¢ | 2,550 / 59 | **−15.10%** [−21.30, −9.01] | 1.000 | **FAIL, wrong sign**; periods −12.7%, −11.1%, −24.1% |
+| covered control (NFL/NCAAF/MLB), not claimed | 202 / 42 | +6.49% [−15.3, +26.5] | 0.27 | not significant; periods −2.3%, −4.7%, +26.4% |
+
+What failed is the **reference**, not the market. At the first fitted candle,
+the game market's own mid scores Brier **0.2041** against the ladder-implied
+**0.2438** (n = 2,790, soccer). The covered control shows 0.2206 against 0.2337.
+H9's entries bought at a mean ask of 25.3¢ against a mean implied 47.3¢ and won
+23.3%. The ladder overstates underdogs. Its rungs sit in the longshot zone,
+where Session 36 measured prices as worst calibrated, and a normal margin is a
+poor shape for whole-goal football. Demanding a big disagreement selected for
+the ladder being wrong. That is the same inverted signature Session 31 recorded
+for NBM. The covered NFL slice (+34% on 39 entries) is a 39-observation
+subgroup of a control. It is reported only so nobody rediscovers it as a lead.
+
+### Methodology gate accounting
+| gate | C10 | C9 |
+|---|---|---|
+| 1 Bonferroni | family of 3 declared up front (H7, H8, H9), α = 0.0167; the speed check spent no α | same |
+| 2 ≥20 independent resolutions | 149 dates, but H7 found only 2 entries | 59 dates, 2,550 entries |
+| 3 three periods | H7: no entries in P1/P3; H8: negative in all three | negative in all three |
+| 4 ≥2h lead | **violated by design**, declared before the run, needs operator acceptance (moot: the test failed regardless) | enforced against the earliest market timestamp; no game-start field, so some long games were evaluated in play |
+| 5 out of sample | zero-parameter rule; P1 and P3 never used for discovery | zero-parameter rule; the whole window was unseen |
+| 6 market baseline | fails: the decided side is not on offer | fails: the market beats the reference |
+
+### Decisions
+1. **C10 is dead** at any resolution this project can operate at. Recorded in
+   SIGNAL_REGISTER as "Tested — no edge found". The per-minute race is real and
+   small (~$62/day over 18 cities), and it belongs to faster participants.
+2. **C9 is dead** for soccer, the uncovered group. The ladder is a worse price
+   than the game market it was meant to correct. The covered control gives no
+   reason to reopen it.
+3. **The stopping rule fires** (Session 36 decision 6, as amended). C10 and C9
+   both died, so **no further Kalshi signal search.** In order:
+   (a) **next session: the offline venue screen.** Rank the venues a US
+   individual can legally use (other CFTC-regulated event-contract venues; thin
+   and non-sports Polymarket markets as a read-only fair value; crypto perpetual
+   funding-rate carry, including Kalshi's own perps) by legal access, free
+   historical data for an offline kill test, fees, and competition density. No
+   accounts, no money, no live code.
+   (b) The market-making prerequisites: Health Monitor deploy-confirm, then the
+   `sid`-scoped sequence fix.
+   (c) The ~2026-10-28 forward re-run of the C2 maker split, exactly as frozen in
+   Session 36, then market-making yes or no.
+   (d) **Checkpoint ~2026-11-30.**
+4. **Where this leaves the project, plainly.** Every directional and arbitrage
+   idea tested on Kalshi since Session 26 has failed against the quoted price:
+   S1, S6, S5a/S5b as a business, C1 and now C10 and C9. Each failure has a
+   legible mechanism, and the mechanism keeps recurring. The quoted price is
+   good, and what remains is either faster than this project or smaller than
+   its fees. One lead is left, and it is not a signal: the maker-side favourite
+   split (C2), which needs the frozen forward re-run and an order layer that
+   does not exist. That is grounds neither for optimism nor for quitting today.
+   It is grounds for doing exactly the bounded remaining steps above, and
+   parking the project at the checkpoint if they come back empty.
+
 ## 2026-09-28 — Session 36: new-strategy screen — fourteen candidates ranked by cost-to-falsify, and the cheapest one tested to destruction the same session. The favorite–longshot bias is real in Kalshi's trade tape and replicates out of sample, but a mechanical rule buying the quoted price LOSES. No edge is claimed; no live-path code written.
 
 ### Status of each claim, labeled up front

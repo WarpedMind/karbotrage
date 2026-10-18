@@ -109,6 +109,15 @@ async def run(self): ...
   **No `DivergenceScannerAgent` and no `FairValueEngineAgent` were built**,
   and no live-path code was touched. Market-making (S8) and the S5a/S5b
   canary are untouched by this result — see "Next session priorities".
+- **Session 37 (2026-10-18): C10 and C9 both tested to a result and both
+  DEAD; the stopping rule has fired.** C10 (weather post-peak nowcast): once a
+  METAR settles a rung, the book is already one-sided (45,741 of 45,751
+  decided candle-hours), and H7 found 2 entries in 149 dates. The race exists
+  but is sub-minute (~$62/day across 18 cities). C9 (spread ladder vs game
+  winner, uncovered soccer): −15.1%, and the game mid is the better price. No
+  further Kalshi signal search; next is the offline venue screen. Authoritative
+  record: **DECISIONS.md Session 37**. Code: `backtest/nowcast/`,
+  `backtest/consistency/` (offline only).
 - **Strategy screen — Session 36 (2026-09-28): 14 new candidates (C1–C14)
   ranked by cost-to-falsify; the cheapest tested to a result the same
   session. No edge claimed, no live-path code.** The favorite–longshot bias is
@@ -160,7 +169,7 @@ async def run(self): ...
   for weather and later strategies, with a hard statistical methodology gate
   (Bonferroni, n≥20, 3-period replication, market-price baseline) that any
   candidate must clear before it can influence a position.
-- Full test suite: **342/342 passing as of Session 36** (7 new `backtest/tape` rule tests, `tests/test_backtest_tape_rules.py`) — was **335/335 as of Session 35** (9 new canary leg-set tests; earlier count follows) — was **321/321** (was documented as 301 through Session
+- Full test suite: **361/361 passing as of Session 37** (14 new `tests/test_backtest_nowcast_rule.py`, 5 new `tests/test_backtest_consistency_rule.py`) — was **342/342 passing as of Session 36** (7 new `backtest/tape` rule tests, `tests/test_backtest_tape_rules.py`) — was **335/335 as of Session 35** (9 new canary leg-set tests; earlier count follows) — was **321/321** (was documented as 301 through Session
   32; re-counted directly Session 33 and actually collected 305 pre-existing —
   a small, unexplained pre-existing discrepancy in this doc, not investigated
   further — plus 16 new Session 33 Telegram `/mute`/`/unmute` tests). Runner
@@ -219,6 +228,33 @@ async def run(self): ...
   confirming each independently.
 
 ## KNOWN DEBT
+
+### C10 + C9 — Session 37 (2026-10-18): both dead; signal search STOPPED. Read this first.
+**Authoritative record: DECISIONS.md Session 37** (pre-registration, results,
+gate accounting). What a future session most needs:
+- **C10 weather nowcast is dead at any speed this project runs at.** When the
+  station's running max settles a ladder rung, the decided side is already
+  gone by the next hourly close: the YES bid is 0 or the ask is $1 on 45,741
+  of 45,751 decided candle-hours. Pre-registered H7: 2 entries, −49.5%. H8
+  ("won't reach" after 19:00 LST): −11.5%. A descriptive sample shows the
+  decided side taken a median **1.1 min** after the METAR (~$62/day of profit
+  across all 18 cities). That is a speed contest, and the Session 36 tape lead
+  was those takers.
+- **C9 is dead for soccer.** A normal fitted to the spread ladder is a *worse*
+  price than the game market (Brier 0.2438 vs 0.2041). The rule lost −15.1%
+  over 2,550 events, negative in all three periods. The covered NFL/NCAAF/MLB
+  control (+6.5%, n.s.) is not a lead.
+- **Stopping rule fired** (DECISIONS.md Session 36 decision 6, amended).
+  Do NOT start another Kalshi signal. Order: offline venue screen → Health
+  Monitor deploy-confirm and the `sid` fix → ~2026-10-28 C2 re-run →
+  market-making yes or no → checkpoint ~2026-11-30.
+- **Data traps found** (in the module READMEs): IEM's `tmpf` is rounded to
+  whole °F, so parse the METAR `T` group; the climate day is local *standard*
+  time; the historical tier now reaches back to March 2026 and its candle route
+  throttles at ~2 req/s (live ~5 req/s); Session 31's cached candles were
+  truncated before close on 1,221 markets; there is no game-start field on
+  sports markets; a METAR can be a sensor glitch (KNYC 2026-08-27, 80 °F in
+  heavy rain against a CLI of 77 °F).
 
 ### NEW-STRATEGY SCREEN — Session 36 (2026-09-28): read this before proposing any new strategy.
 **Authoritative record: DECISIONS.md Session 36** (candidate table, ranking,
@@ -1294,6 +1330,26 @@ market that is the sole member of its batch, before calling it fixed.
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
+**READ FIRST (Session 37, 2026-10-18): C10 and C9 are both dead, so the
+stopping rule has fired.** No further Kalshi signal search. The sequence,
+operator-approved in Session 36:
+1. **Offline venue screen (next session).** Rank the venues a US individual can
+   legally use by legal access, free historical data for an offline kill test,
+   fees, and competition density: other CFTC-regulated event-contract venues;
+   thin and non-sports Polymarket markets as a read-only fair value; crypto
+   perpetual funding-rate carry, including Kalshi's perps. Equities and retail
+   forex rank last. No accounts, no money, no live code. Ask *where being small
+   and slow hurts least*; C10 just showed again that speed is the binding
+   constraint.
+2. Market-making prerequisites: Health Monitor deploy-confirm, then the
+   `sid`-scoped sequence fix.
+3. **~2026-10-28**: the forward re-run of the C2 maker split, exactly as frozen
+   in DECISIONS.md Session 36. Then market-making yes or no.
+4. **Checkpoint ~2026-11-30**: if nothing has passed the gate on real quotes and
+   market-making is no, park the project deliberately.
+Gate-4 deviation for C10 (nowcast) was declared for operator acceptance. It is
+moot because the test failed regardless.
+
 **READ FIRST (Session 36, 2026-09-28): the new-strategy screen is done — see
 KNOWN DEBT's top entry and DECISIONS.md Session 36.** Status of the whole
 direction question after it: S1, S6, S5a/S5b-as-a-business and now C1

@@ -210,14 +210,10 @@ trap recorded below.
 
 - **Favorite–longshot bias (C1/C2)** — see "Tested" below. Taker version dead
   on quotes; maker-side favourite split is the one live lead.
-- **Weather post-peak stale quotes (C10)** — exploratory tape return +5.8%
-  [+0.4, +10.8] concentrated 6–12h before cutoff (after the daily high is
-  usually observed). Test: cached candles + IEM ASOS real-time obs →
-  P(outcome | max so far) vs the ask. One session, $0. A nowcast, so it clears
-  the screening question only if participants are inattentive — the tape says
-  some are and some are not.
-- **Cross-series consistency (C9)** — game/spread/total ladders on one event
-  imply one distribution; test from candles. One session, $0.
+- **Weather post-peak stale quotes (C10)** — **TESTED, Session 37: no edge at
+  hourly resolution; a sub-minute speed contest.** See "Tested — no edge found".
+- **Cross-series consistency (C9)** — **TESTED, Session 37: no edge; the
+  spread ladder is a worse price than the game market.** See "Tested — no edge found".
 - **Time-of-day illiquidity (C13)** — parked: each hour bucket spends
   multiple-comparisons budget for a weak prior.
 
@@ -294,6 +290,59 @@ tight book, a 77¢ ask wins about 75% — a fair price, minus half-spread and fe
 **Why it fails, measured:** the ask-in-band condition selects wide books —
 especially seeded quotes at a market's open, the worst-calibrated prices in the
 data — and quotes that sit untaken are the ones the informed side declined.
+
+### Weather post-peak stale quotes (C10) → Kalshi daily highs — FAILED, Session 37 (2026-10-18)
+
+**Do not re-propose at hourly or minute resolution.** Full detail: DECISIONS.md
+Session 37; code: `backtest/nowcast/`.
+
+Rule (H7, pre-registered): once the station's METAR running max already settles
+a ladder rung, buy the decided side at the ask if the book is two-sided.
+
+| Gate | Result |
+|---|---|
+| 1. Multiple-comparisons correction | Family of 3 (H7, H8, H9), α = 0.0167. |
+| 2. ≥20 independent resolutions | 149 dates, 16,092 markets, 2,682 city-days — but only **2** qualifying entries. |
+| 3. Replication across periods | No entries at all in two of three periods. |
+| 4. ≥2h lead | **Violated by design** (a nowcast); declared before the run, flagged for the operator. |
+| 5. Out-of-sample | Zero-parameter rule; P1 and P3 were never used for discovery. |
+| 6. **Baseline is the market price** | **Fails.** On 45,751 decided candle-hours the book was one-sided on 45,741: the YES bid was already 0 (or the ask already $1). |
+
+**Why it fails, measured:** the market moves within about a minute of the
+deciding METAR. On a 400-market descriptive sample, takers bought the decided
+side below 99.5¢ on 6.5% of markets, first trade a median **1.1 minutes** after
+the METAR valid time (≈ $62/day of profit across all 18 cities, scaled). That
+is a speed contest, the C11/C14 class. The one time a "decided" rung stayed
+two-sided, the METAR was a sensor glitch (KNYC 2026-08-27, 80 °F amid 70–72 °F
+in heavy rain; CLI 77 °F) and the market priced it correctly. H8 ("won't
+reach" after 19:00 LST) lost −11.5%. **The Session 36 tape timing lead was
+informed takers acting on observations, not a stale quote anyone slow can
+collect.** CLI-vs-ASOS is otherwise a non-issue: a METAR exceeded the CLI on
+1 of 2,682 city-days.
+
+### Cross-series consistency (C9): spread ladder vs game winner, soccer → Kalshi — FAILED, Session 37 (2026-10-18)
+
+Full detail: DECISIONS.md Session 37; code: `backtest/consistency/`.
+
+Rule (H9, pre-registered): fit a normal margin to the spread ladder's mids
+(probit-linear), read off P(win), and buy the game-winner ask when it is more
+than fee + 3¢ below that. Uncovered soccer is the test; NFL/NCAAF/MLB are the
+control.
+
+| Gate | Result |
+|---|---|
+| 1. Multiple-comparisons correction | Family of 3, α = 0.0167. |
+| 2. ≥20 independent resolutions | 59 dates, 2,550 entries across 77 series. |
+| 3. Replication across periods | Negative in all three (−12.7%, −11.1%, −24.1%). |
+| 4. ≥2h lead | Enforced against the earliest market timestamp; there is no game-start field. |
+| 5. Out-of-sample | Zero-parameter rule; the window was unseen. |
+| 6. **Baseline is the market price** | **Fails: −15.10% [−21.3, −9.0].** The game mid scores Brier 0.2041 against the ladder's 0.2438. |
+
+**Why:** the ladder rungs sit in the longshot zone (worst calibrated, Session
+36), and a normal is a poor shape for whole-goal margins. The ladder
+overstates underdogs: entries bought at 25¢ won 23%. Bigger disagreements
+selected for the reference being wrong, the inverted signature Session 31 saw
+with NBM. The covered control was +6.5%, not significant, and is not a lead.
 
 ### Polymarket as a fair value, major sports → Kalshi — DEAD by live snapshot, Session 36
 

@@ -1,6 +1,43 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-10-18 (Session 37 — C10 and C9 tested to a result, both dead; stopping rule fires; no live-path code)
+
+### Mandate
+Test C10 (weather post-peak stale quotes) to a result, then C9 (cross-series
+consistency) only if C10 closed early. Pre-register before looking, quotes not
+trades, offline only.
+
+### What was done
+1. **Pre-registered H7 (primary) and H8 (secondary)** in DECISIONS.md before
+   any outcome was computed. Declared a Bonferroni family of 3 (H7, H8 and an
+   H9 reserved for C9, α = 0.0167), plus kill criteria and the gate-4 deviation.
+2. **Built `backtest/nowcast/`**: settled KXHIGH* markets (both tiers), IEM
+   METARs parsed from the tenths-°C `T` group (IEM's `tmpf` is rounded), the
+   climate day in local standard time, and 16,092 candle series. Session 31's
+   cache was reused where complete; 1,221 truncated files were re-fetched. 14
+   rule tests.
+3. **C10 result: dead.** Decided rungs are one-sided by the next hourly close
+   (45,741 of 45,751). H7 had 2 entries (−49.5%), H8 −11.5%, capacity
+   $17/day. CLI-vs-METAR disagreement occurred on 1 of 2,682 city-days, a
+   sensor glitch that the market priced correctly. A descriptive sample shows a
+   ~1-minute speed race worth ~$62/day across 18 cities.
+4. **Pre-registered H9**, then built `backtest/consistency/`: 3,314 game/spread
+   event pairs and 27,851 candle series. 5 rule tests.
+5. **C9 result: dead.** Uncovered soccer lost −15.1%, negative in all periods.
+   The ladder-implied probability is worse calibrated than the game mid.
+6. Suite 361/361.
+
+### What was decided
+C10 and C9 are dead, so the **stopping rule fires**: no more Kalshi signals.
+Next session is the offline venue screen. After that come the market-making
+prerequisites, the ~2026-10-28 C2 re-run, and the ~2026-11-30 checkpoint.
+
+### What to do first next session
+The offline venue screen, as specified in CLAUDE.md "Next session priorities".
+The operator should also accept or reject the C10 gate-4 deviation for the
+record (moot, since the test failed regardless).
+
 ## 2026-09-28 (Session 36 — new-strategy screen: 14 candidates ranked by cost-to-falsify; favorite–longshot tested to a result; no live-path code)
 
 ### Mandate

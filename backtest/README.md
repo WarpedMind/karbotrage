@@ -3,6 +3,10 @@
 > **See also `backtest/tape/`** (Session 36): trade-tape and quote-snapshot
 > return tests across all Kalshi categories — the favorite–longshot screen and
 > the "tape is not an opportunity set" lesson. Separate README.
+>
+> **And `backtest/nowcast/` and `backtest/consistency/`** (Session 37): C10
+> weather post-peak nowcast and C9 spread-ladder consistency. Both dead; each
+> has its own README and traps list.
 
 **Nothing in this package may be imported by the live trading path.** It exists
 to answer one question before any strategy code is written:
