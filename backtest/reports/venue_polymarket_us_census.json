@@ -1,0 +1,73 @@
+{
+  "fetched_utc": "2026-10-19T00:29:34Z",
+  "total_markets": 151729,
+  "by_category_closed_vs_open": {
+    "sports": {
+      "closed": 2599,
+      "open": 0
+    },
+    "politics": {
+      "closed": 433,
+      "open": 6785
+    },
+    "culture": {
+      "closed": 2271,
+      "open": 1715
+    },
+    "crypto": {
+      "closed": 130314,
+      "open": 1583
+    },
+    "macro": {
+      "closed": 302,
+      "open": 212
+    },
+    "climate": {
+      "closed": 5075,
+      "open": 119
+    },
+    "technology": {
+      "closed": 104,
+      "open": 68
+    },
+    "finance": {
+      "closed": 47,
+      "open": 65
+    },
+    "science": {
+      "closed": 9,
+      "open": 11
+    },
+    "geopolitics": {
+      "closed": 7,
+      "open": 10
+    }
+  },
+  "closed_non_sports_end_date_range": [
+    "2026-03-22",
+    "2028-08-25"
+  ],
+  "closed_non_sports_by_month": {
+    "2026-03": 263,
+    "2026-04": 153,
+    "2026-05": 934,
+    "2026-06": 995,
+    "2026-07": 1206,
+    "2026-08": 1354,
+    "2026-09": 3248,
+    "2026-10": 130355,
+    "2027-07": 1,
+    "2028-08": 53
+  },
+  "quote_history_sample": {
+    "sampled": 60,
+    "with_points": 5,
+    "with_two_sided_point": 5,
+    "median_points": 0,
+    "spread_p25_med_p75": [
+      0.01,
+      0.01,
+      0.02
+    ]
+  }
+}

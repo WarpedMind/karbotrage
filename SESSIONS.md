@@ -1,6 +1,53 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-10-18 (Session 38 — offline venue screen; Polymarket US mirrors Kalshi; Kalshi perps carry is the one candidate; three tests pre-registered, none run; no live-path code)
+
+### Mandate
+Run the offline venue screen from DECISIONS.md Session 36 decision 6 (amended)
+and Session 37. Rank US-legal venues by access, free quote history for a kill
+test, fees and competition density. Verify against primary sources. No
+accounts, no money, no live-path code, no VPS changes.
+
+### What was done
+1. **Read the CFTC's DCM registry** (SIRT) directly: 20 designated DCMs in the
+   listing (older exchanges such as CME are not in that page), including Polymarket US (QCX LLC, 2025-07-09), ForecastEx, Gemini
+   Titan, Aristotle and a 2026 wave (ProphetX, Ludlow, Optex, Water Street,
+   Juice).
+2. **Polymarket US**: read the fee schedule (taker 0.0695·p(1−p); small-maker
+   rebate ends 2026-10-19) and the price-history API. A census found ~151,700
+   markets. Minute-level ask and 1 − bid history exists for settled
+   weather/macro/politics/culture markets and was verified equal to live `/bbo`.
+   Found its six weather cities settle on the same CLI stations as Kalshi's
+   KXHIGH series. A live snapshot of 36 matched rungs showed no crossing,
+   cheapest basket $1.012.
+3. **ForecastEx/IBKR**: public S3 data is trades and daily closes since
+   2024-08, no quotes. IBKR fee $0 + $0.01/contract; coupon 3.38% APY.
+4. **Kalshi perps**: public unauthenticated candles (bid/ask) and funding
+   history for 29 perps since 2026-06-03. BTC funding +8.8%/yr, ETH −1.1%,
+   gold +12.9%, silver +11.6%, US500 +19.1% (short histories). Fee PDF in
+   `documentation/`: taker 12 bps, maker 5 bps at tier 0.
+5. **Coinbase US perps, Gemini, CDNA, PredictIt**: no free quote or funding
+   history found.
+6. **Pre-registered H10, H11, H12** (α = 0.0167) in DECISIONS.md Session 38,
+   with the expected size of a carry stated in advance.
+7. Built `backtest/venues/` (3 probes, README with 9 traps). 5 parsing tests;
+   suite 366/366.
+
+### What was decided
+No venue is adopted. Polymarket as a fair value is closed for weather.
+Kalshi perps carry is the only candidate, framed as a yield trade.
+Sequence: H11 next session, Health Monitor deploy-confirm, C2 re-run ~10-28,
+then the ~11-30 checkpoint reads H10/H12 with C2: market-make, small carry, or
+park.
+
+### What to do first next session
+Run H11 exactly as pre-registered. Confirm the perps funding sign from Kalshi's
+rulebook, then run H10's in-sample half as a contaminated plumbing check. The
+operator should accept or change H10's 2%/yr materiality floor before it is read.
+A browser navigation to Kalshi's fee-schedule PDF opened a save dialog on the
+operator's screen this session; no file was saved by the session.
+
 ## 2026-10-18 (Session 37 — C10 and C9 tested to a result, both dead; stopping rule fires; no live-path code)
 
 ### Mandate

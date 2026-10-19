@@ -458,6 +458,36 @@ provider on one market family failed, for a legible reason. Full record:
 trades, no live exposure. That was the whole argument for sequencing divergence
 first, and it held.
 
+## Other venues screened; one narrow candidate left, 2026-10-18 (Session 38)
+
+With the Kalshi signal search stopped, this session asked a different question:
+is there a legal venue where a small, slow participant is less disadvantaged?
+Every venue was checked against its own published documents and the CFTC's
+registry, with no accounts opened and no money involved.
+
+**Polymarket US**, the CFTC-regulated US exchange, turned out to list the same
+daily-high temperature ladders as Kalshi, settled on the same weather stations,
+at the same prices. On 36 matching rungs it was equal to Kalshi or 1¢ wider,
+and buying opposite sides on the two venues never cost less than the guaranteed
+$1 payout. It does publish the best free price history of any venue checked
+(minute-by-minute bid and ask). ForecastEx (Interactive Brokers' exchange) has
+the cheapest fees, a flat 1¢ a contract, and pays a 3.38% coupon, but publishes
+trades rather than quotes. Gemini, Crypto.com, PredictIt and Coinbase's US perps
+publish no usable history.
+
+The one candidate is **Kalshi's own perpetual futures**. Holders on one side are
+paid a funding rate every 8 hours, and on Bitcoin it has averaged about 8.8% a
+year since June, against 4.1% on Treasury bills. Collecting it takes holding,
+not speed. But it is a payment for tying up capital and taking liquidation risk,
+not an edge. Written down before any test: if it works, it is worth roughly
+1.5–2.5% a year above T-bills, about $150–$250 a year per $10,000.
+
+Three tests are pre-registered and none has been run: H11 (do the two weather
+venues ever cross at hourly marks?) next session; H10 (Bitcoin/Ether carry) and
+H12 (gold, silver, S&P 500 carry, forward only) read at the ~2026-11-30
+checkpoint alongside the market-making re-run. Code: `backtest/venues/`. Record:
+DECISIONS.md Session 38.
+
 ## Two more candidates tested and dead; the signal search stops, 2026-10-18 (Session 37)
 
 **Weather "post-peak" quotes (C10).** The idea: once the airport's observed
@@ -760,7 +790,10 @@ hours of logs instead of waiting days for an actual trade.
     allowed. Polymarket-as-fair-value on major sports is dead by live snapshot.
 7h. ✅ **Weather post-peak nowcast (C10)** and **cross-series consistency (C9)**.
     Both dead (Session 37); the stopping rule fired.
-7j. **Offline venue screen**: next session. No accounts, no money, no live code.
+7j. ✅ **Offline venue screen** (Session 38). No other event venue is a better
+    game; Kalshi perps funding carry is the one candidate, as a yield trade.
+7k. **H11** (Kalshi ↔ Polymarket US weather crossings): next session, $0.
+    **H10/H12** (perps carry): binding read at the ~2026-11-30 checkpoint.
 7i. **Forward re-run around 2026-10-28** of the maker-side favourite split,
     frozen as recorded. $0, no code. This feeds the market-making decision; it
     is not a strategy.

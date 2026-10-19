@@ -109,6 +109,16 @@ async def run(self): ...
   **No `DivergenceScannerAgent` and no `FairValueEngineAgent` were built**,
   and no live-path code was touched. Market-making (S8) and the S5a/S5b
   canary are untouched by this result — see "Next session priorities".
+- **Session 38 (2026-10-18): offline venue screen done; nothing adopted.**
+  Polymarket US (a CFTC DCM) lists Kalshi's daily-high ladders on the same NWS
+  stations at the same prices (36 matched rungs, never crossed, cheapest
+  guaranteed-$1 basket $1.012). The one venue class where slowness does not
+  matter is **Kalshi's own perpetual futures** (funding carry: BTC +8.8%/yr
+  since 2026-06-03 against 4.10% T-bills), a yield premium and not an edge,
+  expected at ~1.5–2.5%/yr excess. Three tests pre-registered (H10 carry, H11
+  cross-venue weather crossings, H12 metals/index carry forward-only;
+  α = 0.0167). Authoritative record: **DECISIONS.md Session 38**. Probes:
+  `backtest/venues/` (offline only).
 - **Session 37 (2026-10-18): C10 and C9 both tested to a result and both
   DEAD; the stopping rule has fired.** C10 (weather post-peak nowcast): once a
   METAR settles a rung, the book is already one-sided (45,741 of 45,751
@@ -169,7 +179,7 @@ async def run(self): ...
   for weather and later strategies, with a hard statistical methodology gate
   (Bonferroni, n≥20, 3-period replication, market-price baseline) that any
   candidate must clear before it can influence a position.
-- Full test suite: **361/361 passing as of Session 37** (14 new `tests/test_backtest_nowcast_rule.py`, 5 new `tests/test_backtest_consistency_rule.py`) — was **342/342 passing as of Session 36** (7 new `backtest/tape` rule tests, `tests/test_backtest_tape_rules.py`) — was **335/335 as of Session 35** (9 new canary leg-set tests; earlier count follows) — was **321/321** (was documented as 301 through Session
+- Full test suite: **366/366 passing as of Session 38** (5 new `tests/test_backtest_venues.py`) — was **361/361 passing as of Session 37** (14 new `tests/test_backtest_nowcast_rule.py`, 5 new `tests/test_backtest_consistency_rule.py`) — was **342/342 passing as of Session 36** (7 new `backtest/tape` rule tests, `tests/test_backtest_tape_rules.py`) — was **335/335 as of Session 35** (9 new canary leg-set tests; earlier count follows) — was **321/321** (was documented as 301 through Session
   32; re-counted directly Session 33 and actually collected 305 pre-existing —
   a small, unexplained pre-existing discrepancy in this doc, not investigated
   further — plus 16 new Session 33 Telegram `/mute`/`/unmute` tests). Runner
@@ -229,7 +239,34 @@ async def run(self): ...
 
 ## KNOWN DEBT
 
-### C10 + C9 — Session 37 (2026-10-18): both dead; signal search STOPPED. Read this first.
+### VENUE SCREEN — Session 38 (2026-10-18): read this first.
+**Authoritative record: DECISIONS.md Session 38** (ranked table, data traps,
+pre-registration of H10/H11/H12). What a future session most needs:
+- **No other event-contract venue is a slower or cheaper game than Kalshi.**
+  Polymarket US has the best free quote history of any of them (minute-level
+  ask and 1 − bid, verified equal to live `/bbo`), but its weather ladders are
+  Kalshi's ladders: same stations, same buckets, same prices, often 1¢ wider.
+  ForecastEx (flat 1¢ fee, 3.38% coupon), Coinbase US perps, Gemini, CDNA and
+  PredictIt are parked for lack of free quote history.
+- **Kalshi perps funding carry is the only candidate.** Public, unauthenticated
+  hourly bid/ask candles and 8-hourly funding history exist since 2026-06-03
+  (`external-api.kalshi.com/trade-api/v2/margin`, a different host from event
+  contracts). It is a yield trade with liquidation risk across two venues, and
+  is stated in advance to be worth ~$150–$250/yr per $10k if it works.
+- **Before running H10:** confirm the funding sign convention from Kalshi's
+  perps rulebook (inferred, not documented in the API), and have the operator
+  accept or change the 2%/yr materiality floor. The perps fee PDF in
+  `documentation/` is dated 2026-07-07; kalshi.com 429s to scripts.
+- **Data traps** (in `backtest/venues/README.md`): Polymarket US weather slugs
+  are off by one degree (parse titles); a 1¢ placeholder stands in for a
+  missing bid; `closed=true` does not filter; most closed non-sports markets
+  are short-dated crypto with no history; the perps funding deadband zeroes
+  about half of all crypto periods.
+- **Flagged, not acted on:** a reported 2026-10-09 CFTC proposal to classify
+  event contracts as swaps (CFTC site unreachable, not read from the primary
+  source).
+
+### C10 + C9 — Session 37 (2026-10-18): both dead; signal search STOPPED.
 **Authoritative record: DECISIONS.md Session 37** (pre-registration, results,
 gate accounting). What a future session most needs:
 - **C10 weather nowcast is dead at any speed this project runs at.** When the
@@ -1330,7 +1367,23 @@ market that is the sole member of its batch, before calling it fixed.
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-**READ FIRST (Session 37, 2026-10-18): C10 and C9 are both dead, so the
+**READ FIRST (Session 38, 2026-10-18): the venue screen is done; see KNOWN
+DEBT's top entry and DECISIONS.md Session 38.** Sequence now:
+1. **Next session: run H11** (Kalshi ↔ Polymarket US same-station weather
+   crossings) to a result, exactly as pre-registered. One session, $0. Kalshi
+   candles for 2026-05-22 → 10-17 are cached from Session 37; 2026-04-22 → 05-21
+   needs the historical tier (~2 req/s). In the same session, confirm the perps
+   funding sign from Kalshi's rulebook and run **H10's in-sample half** as a
+   plumbing check, reported as contaminated.
+2. **Health Monitor deploy-confirm.** A prerequisite for anything carrying
+   variance, carry included.
+3. **~2026-10-28**: the C2 maker-split re-run, unchanged.
+4. **~2026-11-30 checkpoint**: H10's binding combined result plus H12's forward
+   screen, read together with C2. The options are market-make, a small carry, or
+   park. If H11 dies, C2 is negative and H10 misses its floor, park.
+   The `sid`-scoped sequence fix is needed only if market-making is yes.
+
+**Earlier READ FIRST (Session 37, 2026-10-18): C10 and C9 are both dead, so the
 stopping rule has fired.** No further Kalshi signal search. The sequence,
 operator-approved in Session 36:
 1. **Offline venue screen (next session).** Rank the venues a US individual can

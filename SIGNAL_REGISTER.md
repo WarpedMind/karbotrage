@@ -226,6 +226,19 @@ before it consumes further budget.**
 
 ---
 
+## Tier G — other venues (added Session 38)
+
+Ranked in DECISIONS.md Session 38. Only one venue class passed the screen to a
+test: **Kalshi perpetual-futures funding carry** (H10/H12). It is listed here
+for completeness, but it is a yield premium for capital and liquidation risk,
+not an information signal, and the screening question does not apply in its
+usual form. The test asks whether net carry beats T-bills by a pre-stated
+materiality floor (2%/yr), not whether a forecast beats the market.
+ForecastEx, Coinbase US perps, Gemini Titan, CDNA and PredictIt are parked for
+lack of free quote history.
+
+---
+
 ## Tested — no edge found
 
 ### NOAA/NBM temperature forecast → Kalshi daily-high markets — FAILED, Session 31 (2026-08-02)
@@ -349,6 +362,18 @@ with NBM. The covered control was +6.5%, not significant, and is not a lead.
 11 NFL moneylines: median |mid gap| 0.5¢, max 1.5¢, never crossed. Not a
 backtest — a snapshot is enough to kill "the venues disagree" for these markets.
 Thin and non-sports markets are **not** covered by this and remain open (C4).
+
+### Polymarket US as a fair value, daily-high weather ladders → Kalshi — DEAD by live snapshot, Session 38
+
+Polymarket US (a CFTC DCM, not the offshore venue) lists the same daily-high
+ladders on the **same NWS stations** (KNYC, KSFO, KMIA, KMDW, KLAX, KPHL) with
+identical 2 °F buckets. On 36 matched rungs, quotes were equal or Polymarket 1¢
+wider on every one, and no guaranteed-$1 basket crossed (cheapest $1.012 net).
+The same makers appear to set both books, so as a *different population's*
+fair value it adds nothing. Macro, politics and culture were not snapshotted
+and are presumed to share makers, not shown to. The only remaining check is for executable
+crossings over history, which is H11 (DECISIONS.md Session 38), an arbitrage
+test, not a signal.
 
 ## Tested — edge confirmed
 

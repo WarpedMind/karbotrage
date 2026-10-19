@@ -1,6 +1,244 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-10-18 — Session 38: offline venue screen. No new event-contract venue offers a slower or cheaper game than Kalshi, and the weather ladders on Polymarket US are Kalshi's ladders at a 1¢ wider spread. The one venue class where being small and slow plausibly hurts least is Kalshi's own perpetual futures (funding carry), and that is a yield trade, not an edge. Two kill tests pre-registered; nothing run against outcomes; no accounts, no money, no live-path code.
+
+### Status of each claim, labeled up front
+- **PRIMARY SOURCE, read this session**: the CFTC's own DCM registry (SIRT,
+  `sirt.cftc.gov`, read 2026-10-18); Polymarket US docs (`docs.polymarket.us`:
+  fee schedule, trading restrictions, price-history API, weather FAQ); ForecastEx
+  data pages and its public S3 bucket; IBKR's prediction-market commission page;
+  Kalshi's perps API docs and OpenAPI spec (`docs.kalshi.com/perps_openapi.yaml`);
+  Gemini's prediction-markets OpenAPI spec; Kalshi's fee schedule PDF in
+  `documentation/` (effective 2026-07-07, the perps tables included).
+- **MEASURED LIVE this session** (public endpoints, no auth): the Polymarket US
+  universe census; its quote-history coverage by category; Polymarket US `/bbo`
+  against `/price-history` on 12 live markets; a cross-venue weather snapshot
+  (36 matched rungs, run twice); full funding history for all 29 Kalshi perps;
+  Kalshi perp hourly candles; Coinbase's US perp-style product list; FRED DTB3.
+- **SECONDARY ONLY, not confirmed**: Crypto.com/CDNA fees and state coverage;
+  Gemini Titan fees; Bitnomial perps; a reported CFTC proposal (2026-10-09) to
+  treat event contracts as swaps. The CFTC site returned 503 to direct fetches, so
+  this proposal was **not** read; it is flagged for the operator, not relied on.
+- **NOT DONE**: no account opened, no form submitted, no order, no VPS change, no
+  live-path file touched. Probes are in `backtest/venues/`, never imported by the
+  live path (checked by grep), with 5 parsing tests in
+  `tests/test_backtest_venues.py`.
+
+### The screening question, restated for venues
+Session 36 decision 6 (amended) said the screen must ask *where being small and
+slow hurts least*, not which market is biggest. Every Kalshi failure since
+Session 26 resolved to one of two mechanisms: the quote is already fair (S6, C1,
+C9), or the mispricing exists for about a minute and belongs to someone faster
+(C10, C11, C12). So a venue is worth a test only if it plausibly offers (a)
+prices set by a *different* population than Kalshi's market makers, or (b) a
+return that accrues over hours or weeks, so that speed does not matter.
+
+### Ranked table
+Fees are per contract (event venues) or per side of notional (perps). "Quote
+history" means free, historical, executable-side prices (bid **and** ask). A trade
+tape does not count (Session 36: the tape is not an opportunity set).
+
+| # | Venue (CFTC status, SIRT) | US individual access | Free quote history for a kill test | Fees (primary source) | Competition read | Verdict |
+|---|---|---|---|---|---|---|
+| 1 | **Kalshi perpetual futures** (Kalshi DCM; perps launched 2026-06-03) | Yes in principle: same exchange, KYC. Production API "rolling out member by member" per Kalshi's docs; whether *this* operator would be admitted is **unverified**. | **Yes.** Hourly bid/ask OHLC candles since launch (`/margin/markets/{t}/candlesticks`); full 8-hourly funding history (`/margin/funding_rates/historical`); both public, no auth. | Taker 12.0 bps, maker 5.0 bps at tier 0 (fee PDF effective 2026-07-07; the live page 429s to scripts, so currency is **unconfirmed**). Funding every 8h (04/12/20 UTC), cap ±2%, deadband 1 bp (crypto) / 0.2 bp (metals, index). | US-only venue, 14 weeks old. Funding has stayed positive on the large books: BTC **+8.8%/yr** mean since launch (12.0% last 30d), gold +12.9% and silver +11.6% (38 periods), US500 +19.1% (13 periods). The persistence suggests limited arbitrage capital, but a carry is a premium for capital and risk, not mispricing. | **Rank 1: test it.** Only class where slowness does not matter (8h accrual, multi-week holds). Expected size is small (see below). |
+| 2 | **Polymarket US** (QCX LLC d/b/a Polymarket US, DCM 2025-07-09), as a venue and as a read-only fair value | Yes. Direct, fiat, KYC with SSN; "built for US residents". State-by-state coverage **not stated** in the docs read. | **Yes, the best of any event venue.** `/v1/price-history` returns `longPrice` = best ask and `shortPrice` = 1 − best bid, about one point per minute, for settled markets back to listing. **Verified equal to live `/bbo` on 12 of 12 two-sided markets.** Coverage: climate 20/20, macro 18/20, politics 19/20, culture 16/20 sampled settled markets; crypto 0/20 (short-dated, no stored points). | Taker 0.0695·C·p(1−p) (≈ Kalshi's 0.07). Maker rebate −0.0125 until 2026-10-19 13:00 ET, then **none below $10M/month** maker volume. | **Same prices as Kalshi.** The six daily-high ladders (NYC, SFO, MIA, MDW, LAX, PHL) settle on the **same NWS CLI stations** as Kalshi's KXHIGH series and use identical 2 °F buckets. Live snapshot, 36 matched rungs: quotes equal or Polymarket 1¢ wider on every rung; no basket crossed; cheapest guaranteed-$1 basket **$1.012** net (gross best $1.000). This reads as the same market makers quoting both books. | **Rank 2: one cheap kill test (H11).** Low prior. As a "different population" fair value it already fails on the snapshot. |
+| 3 | **ForecastEx** (DCM 2024-06-24; IBKR affiliate) | Yes, through an FCM (IBKR ForecastTrader). | **No quotes.** Free daily OHLC/settlement/VWAP since 2024-08-01 and every matched pair (a trade tape with timestamps) on a public S3 bucket. That supports a tape test, which Session 36 showed misleads. Forward quote capture would need an IBKR account. | **$0.00 commission + $0.01/contract exchange fee, flat**, any price (IBKR pricing page). Incentive coupon **3.38% APY** on position value (IBKR ForecastTrader page). Cheaper than Kalshi near 50¢, equal at the tails. | Thin: 158 products, small daily liquidity-reward pools (e.g. Fed Decision $16/day). Product overlap with Kalshi (Fed, CPI, weather), so likely the same pricing population. | **Rank 3: parked.** No $0 quote-based kill test exists. Revisit only if an IBKR account is opened for another reason. |
+| 4 | **Coinbase Derivatives** US perp-style futures (DCM 2020; BIP/ETP/SLP and others, 5-year "perp-style") | Yes, via Coinbase's FCM. | **No funding history in the public API** (`funding_rate` blank on the US products; the public perp list with rates is Coinbase International, not available to US persons). | Not verified from a primary source this session. | A second US perp venue would allow a **perp-vs-perp funding spread** with Kalshi and no spot leg. That cannot be tested offline for $0; it needs forward collection. | **Rank 4: parked**, noted as the natural pair for rank 1 if rank 1 survives. |
+| 5 | **Gemini Titan** (DCM 2025-12-10) | Yes (Gemini account). | **No.** Settled events return `priceHistory: null`; `/v2/candles` on a `GEMI-` contract returns no data. Live book only. | Not verified (the spec has maker-rebate and taker-reward endpoints; rates are behind auth). | Same market families (crypto 5-minute, weather, sports). | **Rank 5: parked.** |
+| 6 | **Crypto.com / CDNA** | US except NY (secondary sources only). | No public data API found. | Secondary sources conflict ($0.0175–$0.02/contract). Not verified. | Sports-heavy. | **Rank 6: parked.** |
+| 7 | **Aristotle / PredictIt** (DCM 2025-09-05) | Yes. | Current-only `marketdata/all`; no history found. | Fee page did not render to a script; not verified. | Politics; historically capped and retail. | **Rank 7: parked.** |
+| 8 | **CME event contracts** (via IBKR, FanDuel) | Yes. | Historical data is paid (DataMine). | IBKR: $0.01 + $0.01 exchange fee per contract. | Futures-linked, professionally priced. | **Rank 8.** |
+| 9 | Other DCMs designated 2025–26 (Railbird, ProphetX, Juice, Optex, Ludlow, Water Street Labs, Xchange Alpha, Electron, Quanta, AIX) | Mostly partner-app or sports venues. | Not screened individually; nothing found. | — | — | **Parked**, unscreened, named so nobody assumes they were ruled out. |
+| 10 | Offshore (Polymarket International trading; offshore perps) | **Not legally usable** for trading by a US individual. | Polymarket International remains a free read-only reference, but Polymarket US now covers the same families with better data. | — | — | **Excluded** for trading; Phase 2 stays Phase 2. |
+| 11 | Equities, retail forex | Yes. | — | — | The most efficient markets; PDT, wash-sale and tax complexity at this size. | **Last**, per Session 36. |
+
+Also noted, not ranked: IBKR routes **Kalshi** event contracts at $0.01
+commission + $0.01 exchange fee per contract, flat. That is dearer than Kalshi
+direct at every price (direct taker ≤ 1.75¢, maker usually $0), so it is not a
+cheaper door to the same book.
+
+### Data traps found (written into `backtest/venues/README.md`)
+1. **Polymarket US weather slugs are off by one degree.** `gte60lt61f` is the
+   bucket titled "60 to 61", *inclusive* of 61. Parse titles, never slugs.
+2. **A 1¢ placeholder stands in for a missing bid** in Polymarket US price
+   history (`shortPrice` = 0.99 when there is no bid). A history point with a 1¢
+   bid is not evidence of a resting bid.
+3. **The `closed` query filter does not partition Polymarket US markets**
+   (`closed=true` returned only 2,599 sports markets). Read each market's own
+   `closed` field.
+4. **Polymarket US's weather FAQ lists five stations; six are traded** (PHL is
+   listed but absent from the table).
+5. **Most closed non-sports markets on Polymarket US are short-dated crypto**
+   (130,314 of ~138,500), and they have no stored price history. A random sample
+   of "closed markets" is a crypto sample.
+6. **Kalshi perps' funding is zero about half the time** on the crypto books
+   because of the 1 bp deadband. A mean over periods is not a mean over
+   paying periods.
+
+### Pre-registration — written 2026-10-18, BEFORE any H10/H11/H12 return was computed
+What had been seen when this was written: the funding summary table above (mean,
+share positive, share zero, last-30-day mean per perp, from
+`backtest/reports/venue_kalshi_perps_funding.txt`); two live cross-venue weather
+snapshots for event day 2026-10-19 (`venue_weather_cross_snapshot.txt`); the
+Polymarket US census (`venue_polymarket_us_census.json`); 3 days of KXBTCPERP
+hourly candles (2026-06-05 → 06-08) to confirm the schema; DTB3 = 4.10%
+(2026-10-15). **No** carry P&L, basket crossing count, or historical
+cross-venue quote comparison had been computed.
+
+**Bonferroni family for Session 38: H10, H11, H12 → α = 0.05/3 = 0.0167.**
+
+**H11 — Kalshi ↔ Polymarket US same-station weather crossings (cheapest; run
+next session, $0).**
+- *Universe.* Daily-high ladders on six station pairs: KXHIGHNY/`nychigh`
+  (KNYC), KXHIGHTSFO/`sfohigh` (KSFO), KXHIGHMIA/`miahigh` (KMIA),
+  KXHIGHCHI/`mdwhigh` (KMDW), KXHIGHLAX/`laxhigh` (KLAX), KXHIGHPHIL/`phlhigh`
+  (KPHL). Event days from the first day both venues list a city (Polymarket US
+  from 2026-04-22) to 2026-10-17. A rung is matched only when its integer-°F YES
+  set is identical on both venues (Polymarket intervals parsed from **titles**;
+  Kalshi from Session 31's strike conventions). Unmatched rungs are counted and
+  excluded.
+- *Observation.* Each Kalshi hourly candle (closing `yes_bid`/`yes_ask`) on a
+  matched rung, paired with the last Polymarket US history point no more than
+  60 s before the candle end. Both books must be two-sided: Kalshi
+  0 < bid < ask < 1; Polymarket ask < 0.99 and bid > 0.01 (the placeholder is
+  excluded, which can only remove worthless crossings).
+- *Baskets*, each paying exactly $1: A = Kalshi YES ask + (1 − PM YES bid);
+  B = PM YES ask + (1 − Kalshi YES bid). Net cost adds 0.07·p(1−p) (Kalshi) and
+  0.0695·p(1−p) (Polymarket US) per leg. Sensitivity only: Kalshi fee rounded up
+  to the cent on a 10-contract order.
+- *Crossing* = net cost < $1.000. An *episode* = consecutive crossing hours on one
+  rung. Locked profit per episode = (1 − net cost) × **10 contracts**. Neither
+  source records size, so 10 is an assumption, stated as such.
+- *Statistic.* Locked profit summed per event date, all dates in the window
+  included (zero days count); mean $/day. Bootstrap whole dates (10,000),
+  one-sided P(mean ≤ 0). Periods: P1 2026-04-22 → 06-30, P2 07-01 → 08-31,
+  P3 09-01 → 10-17.
+- *Also reported, not tested:* any matched rung that settled differently on the
+  two venues (both read the same CLI, so expect zero); Polymarket US's own
+  ladder sum-of-YES-asks below $1 (the canary covers Kalshi only); the
+  distribution of |Kalshi mid − PM mid| on matched rungs.
+- **Kill — H11 is dead if ANY holds:** mean locked profit < **$10/day** across
+  all six cities; p ≥ 0.0167; any period's mean $/day = 0; or **any** matched
+  rung settled differently on the two venues (the guarantee is then not a
+  guarantee).
+- *If it survives:* a forward depth check from live `/bbo` and Kalshi
+  `/orderbook` (both carry size) before anything else. Trading Polymarket US is a
+  change to the Phase 1 venue invariant (`s2_cross_platform_enabled`) and is the
+  operator's decision, not this test's.
+
+**H10 — Kalshi BTC/ETH perp funding carry (cheap; part run next session, binding
+read at the checkpoint).**
+- *Universe.* KXBTCPERP and KXETHPERP (launched 2026-06-03).
+- *Rule, zero free parameters.* At each **Monday 20:00 UTC funding**: if the mean
+  of the last 21 funding rates (7 days, including that one) is > 0, hold
+  **short perp + long spot** for the next week; otherwise hold T-bills. Positive
+  funding is taken to mean longs pay shorts. This is inferred from Kalshi's
+  premium-index definition (book above index ⇒ positive) and **must be confirmed
+  from Kalshi's perps rulebook before the run**. If it cannot be confirmed, the
+  test does not run.
+- *Execution, on quotes.* Enter on the hourly candle ending 21:00 UTC, after the
+  20:00 funding: sell the perp at the candle's closing **bid**; exit at the
+  closing **ask**. Weeks where the position continues are marked at mid with no
+  cost. Perp fee 12.0 bps per side (tier 0). Spot leg: Coinbase BTC-USD/ETH-USD
+  hourly close (a trade price) plus a frozen **10 bps per side** hedge cost and
+  **0.25%/yr** holding cost. That is ETF-like; Coinbase retail spot fees are
+  higher and are a sensitivity, unverified.
+- *Funding.* Each 8h funding the short receives rate × mark × quantity (pays if
+  negative), from `/margin/funding_rates/historical`.
+- *Capital.* Notional × (1 + 2/leverage_estimate at $10k), frozen from the
+  2026-10-18 snapshot: BTC 6.38× → **1.31**, ETH 4.87× → **1.41**. No interest is
+  assumed on Kalshi margin. Benchmark: DTB3 accrued on the same capital.
+- *Statistic.* Weekly excess return over T-bills on committed capital (flat weeks
+  = 0), equal-weight BTC and ETH, annualized × 52. Bootstrap whole weeks
+  (10,000), one-sided P(mean ≤ 0).
+- *Samples.* In-sample 2026-06-15 → 2026-10-19 (~18 weeks, **contaminated**: the
+  funding means were seen). Forward 2026-10-19 → 2026-11-30 (6 weeks, unseen).
+  Binding read: combined (~24 weeks, which meets gate 2's 20), with the forward
+  6 weeks reported separately. Periods: three equal thirds of the combined
+  window.
+- *Also reported:* the largest adverse hourly perp move within each held week
+  against the margin buffer (a liquidation proxy); the static always-on carry for
+  comparison.
+- **Kill — H10 is dead if ANY holds:** combined annualized excess ≤ 0; p ≥ 0.0167;
+  any period ≤ 0; forward 6 weeks ≤ 0 in aggregate; any held week whose adverse
+  move exceeds 80% of the margin buffer (a real margin call); or annualized excess
+  **< 2.0%** on committed capital. The 2% floor is a materiality judgment, not
+  statistics: below it, two-venue liquidation risk, operating burden and
+  unverified tax treatment cost more than the carry pays. **The operator should
+  accept or change this floor before the run.**
+
+**H12 — metals and index perps carry, forward only.** KXGOLDPERP, KXSILVERPERP,
+KXUS500PERP: too young (12–38 funding periods) for an in-sample read. The same
+rule and kill criteria as H10, run on 2026-10-19 → 2026-11-30 only. Hedge:
+GLD/SLV/VOO-like, 5 bps per side plus each ETF's expense ratio (0.40%, 0.50%,
+0.03%/yr, to be confirmed from the issuers before the run). Capital
+1 + 2/leverage: gold 15.27× → 1.13, silver 8.30× → 1.24, US500 13.74× → 1.15. Six
+weeks cannot meet gate 2. H12 can therefore only *kill* or *carry forward* the
+idea; it cannot confirm it. It is counted in the family regardless.
+
+### Expected size, stated before the run so it cannot be rationalised after
+At BTC's observed +8.8%/yr funding, capital 1.31× notional gives ~6.7% on
+capital before costs. Minus ~0.25%/yr hedge carry, minus ~0.44% per entry/exit
+round trip, against 4.10% T-bills: **roughly +1.5% to +2.5% a year of excess**
+if funding persists. At $10k of capital that is **$150–$250 a year**. If H10
+passes, it means a modest, real yield premium with tail risk, not an edge.
+Gold, silver and US500 show larger funding (13–19%/yr) on far less history.
+That is why H12 exists, and why it is forward-only.
+
+### Methodology gate accounting
+| gate | H10 | H11 | H12 |
+|---|---|---|---|
+| 1 Bonferroni | family of 3, α = 0.0167 | same | same |
+| 2 ≥20 independent | ~24 weeks combined; in-sample alone (~18) does not | ~170 event dates | **fails by design** (6 weeks); kill-or-carry only |
+| 3 three periods | thirds of the combined window | P1/P2/P3 by date | three 2-week thirds |
+| 4 ≥2h lead | n/a: the return accrues after entry and is not a forecast | n/a: payout is fixed by construction | n/a |
+| 5 out of sample | forward 6 weeks unseen; in-sample contaminated and declared | all historical quotes unseen; two live snapshots for 2026-10-19 seen | fully forward |
+| 6 market baseline | T-bills on the same capital, net of all fees | $1 payout vs both venues' executable quotes and fees | as H10 |
+
+### Decisions
+1. **No venue is adopted, no account is opened, and no live code is written.**
+   This was a screen.
+2. **Polymarket as a read-only fair value is closed for daily-high weather**,
+   the family both venues list on the same stations. Polymarket US quotes the
+   same ladders at the same prices, and on the evidence so far the same makers
+   set both. Macro, politics and culture were not snapshotted; they are presumed
+   to share makers, not shown to. H11
+   is the last $0 check, and it tests for executable crossings, not a fair value.
+3. **Kalshi perps funding carry is the one venue-class candidate worth a test.**
+   This is not because the venue is inefficient. A funding premium accrues every
+   8 hours to whoever holds the position, so a slow participant is not
+   disadvantaged. Its likely size is small, and that is recorded above in
+   advance.
+4. **ForecastEx, Coinbase US perps, Gemini, CDNA and PredictIt are parked for
+   want of free quote history**, not ruled out on economics. ForecastEx's flat
+   1¢ fee and 3.38% coupon are the most interesting terms seen. They would matter
+   only for a strategy that already has an edge.
+5. **Sequence from here, relative to the existing dates:**
+   - **Next session:** run H11 to a result (one session, $0). Run H10's
+     in-sample half as a plumbing check, reported as contaminated. Confirm the
+     funding sign from Kalshi's perps rulebook first.
+   - **~2026-10-28:** the C2 maker-split forward re-run, unchanged and frozen as
+     in Session 36. Nothing here moves it.
+   - **Health Monitor deploy-confirm** stays a prerequisite for anything that
+     carries variance, carry included: a short perp whose monitor has died is a
+     liquidation nobody sees. The `sid`-scoped sequence fix stays tied to
+     market-making and is only needed if market-making is yes.
+   - **~2026-11-30 checkpoint:** read H10's binding combined result and H12's
+     forward screen alongside C2. The decision becomes one of three: market-make
+     (C2 positive plus the order layer), run a small carry (H10 passes its floor
+     plus access, hedge-account and tax questions answered by the operator), or
+     **park the project** with its falsification infrastructure intact. If H11
+     dies, C2 is negative and H10 fails its floor, park. That is the outcome this
+     screen makes most likely, and it is recorded here so it reads as a plan, not
+     a surprise.
+6. **Flagged for the operator, not acted on:** (a) a reported CFTC proposal
+   (2026-10-09) to classify event contracts as swaps. It was not read from the
+   primary source because the CFTC site was unreachable, and it belongs with the
+   regulatory-intelligence feed. (b) Kalshi perps access ("rolling out member by
+   member") and the tax treatment of perps against an ETF hedge both need answers
+   before H10 could become anything real.
+
 ## 2026-10-18 — Session 37: C10 (weather post-peak nowcast) and C9 (cross-series consistency) both tested to a result and both DEAD. The stopping rule fires: no further Kalshi signal search; the next session is the offline venue screen. No live-path code written.
 
 ### Pre-registration — written 2026-10-18 ~18:45 UTC, BEFORE any H7/H8 outcome was examined
