@@ -1,0 +1,150 @@
+H11 — Kalshi <-> Polymarket US same-station daily-high crossings. Run 2026-10-19T17:48Z.
+Window: event dates 2026-04-22 -> 2026-10-17 (179 dates). Size per episode: 10 contracts (assumed). Kill: mean < $10/day, p >= 0.0167, any period mean = 0, any matched rung settled differently.
+
+fetch failures listed in failed.txt: 0
+Polymarket rungs with unparseable titles (excluded): 0
+
+====================================================================================================
+BINDING (strict: PM bid < ask required)
+====================================================================================================
+  matched_rungs                                 4,694
+  kalshi_rungs_unmatched                          328
+  pm_rungs_unmatched                              327
+  kalshi_rungs_no_pm_event                      1,422
+  matched_rung_missing_kalshi_candles               0
+  matched_rung_missing_pm_history                   0
+  kalshi_candles                              184,641
+  paired_obs                                   99,687
+  crossing_hours_A                              2,919
+  crossing_hours_B                                918
+  episodes                                      2,645
+  dates with >=1 jointly listed city              167
+
+  mean locked $/day, all 179 dates: 5.4143   95% CI [3.6041, 7.5410]   one-sided P(mean<=0) = 0.0000
+    P1: n= 70 dates  mean $11.1069/day  total $777.48
+    P2: n= 62 dates  mean $1.4318/day  total $88.77
+    P3: n= 47 dates  mean $2.1893/day  total $102.90
+  sensitivity, jointly listed dates only (n=167): mean 5.8033/day, P(mean<=0) = 0.0000
+  upper bound, best hour of each episode: mean $5.9065/day
+  locked $ by city: laxhigh 186.52, mdwhigh 186.39, miahigh 154.35, nychigh 165.86, phlhigh 0.20, sfohigh 275.81
+  episodes: hours median 1, max 14; first-hour net cost median 0.9937
+  cheapest 15 episodes (first-hour net cost):
+    2026-06-04 nychigh      90.. basket A start 06-04T04Z hours  1 first 0.4684 best 0.4684  KXHIGHNY-26JUN04-T89
+    2026-06-12 mdwhigh      ..76 basket A start 06-12T01Z hours  1 first 0.4886 best 0.4886  KXHIGHCHI-26JUN12-T77
+    2026-06-12 laxhigh    80..81 basket A start 06-11T22Z hours  2 first 0.5187 best 0.5187  KXHIGHLAX-26JUN12-B80.5
+    2026-05-14 laxhigh      ..64 basket A start 05-13T15Z hours  7 first 0.5387 best 0.5387  KXHIGHLAX-26MAY14-T65
+    2026-05-29 laxhigh      74.. basket A start 05-28T15Z hours  1 first 0.5387 best 0.5387  KXHIGHLAX-26MAY29-T73
+    2026-06-08 laxhigh      ..66 basket A start 06-07T15Z hours  1 first 0.5387 best 0.5387  KXHIGHLAX-26JUN08-T67
+    2026-06-08 laxhigh    67..68 basket A start 06-07T15Z hours  2 first 0.5387 best 0.5387  KXHIGHLAX-26JUN08-B67.5
+    2026-06-09 laxhigh      ..67 basket A start 06-08T15Z hours  1 first 0.5387 best 0.5387  KXHIGHLAX-26JUN09-T68
+    2026-06-08 miahigh      ..85 basket A start 06-07T15Z hours  1 first 0.5387 best 0.5387  KXHIGHMIA-26JUN08-T86
+    2026-06-12 miahigh      ..85 basket A start 06-11T15Z hours  1 first 0.5387 best 0.5387  KXHIGHMIA-26JUN12-T86
+    2026-05-29 nychigh      86.. basket A start 05-28T15Z hours  2 first 0.5387 best 0.5387  KXHIGHNY-26MAY29-T85
+    2026-06-13 nychigh      95.. basket A start 06-12T15Z hours  1 first 0.5387 best 0.5387  KXHIGHNY-26JUN13-T94
+    2026-05-18 mdwhigh      90.. basket A start 05-17T15Z hours  2 first 0.5494 best 0.5387  KXHIGHCHI-26MAY18-T89
+    2026-06-08 mdwhigh      88.. basket A start 06-07T15Z hours  2 first 0.5494 best 0.5494  KXHIGHCHI-26JUN08-T87
+    2026-05-29 laxhigh      ..65 basket A start 05-28T15Z hours  1 first 0.5494 best 0.5494  KXHIGHLAX-26MAY29-T66
+
+====================================================================================================
+LITERAL as written (PM locked/crossed points allowed)
+====================================================================================================
+  matched_rungs                                 4,694
+  kalshi_rungs_unmatched                          328
+  pm_rungs_unmatched                              327
+  kalshi_rungs_no_pm_event                      1,422
+  matched_rung_missing_kalshi_candles               0
+  matched_rung_missing_pm_history                   0
+  kalshi_candles                              184,641
+  paired_obs                                  101,446
+  crossing_hours_A                              4,305
+  crossing_hours_B                                990
+  episodes                                      3,111
+  dates with >=1 jointly listed city              167
+
+  mean locked $/day, all 179 dates: 8.3820   95% CI [5.8571, 11.2671]   one-sided P(mean<=0) = 0.0000
+    P1: n= 70 dates  mean $17.6322/day  total $1234.25
+    P2: n= 62 dates  mean $2.3280/day  total $144.33
+    P3: n= 47 dates  mean $2.5912/day  total $121.79
+  sensitivity, jointly listed dates only (n=167): mean 8.9843/day, P(mean<=0) = 0.0000
+  upper bound, best hour of each episode: mean $9.4191/day
+  locked $ by city: laxhigh 310.77, mdwhigh 279.22, miahigh 207.28, nychigh 335.10, phlhigh 1.84, sfohigh 366.18
+  episodes: hours median 1, max 34; first-hour net cost median 0.9934
+  cheapest 15 episodes (first-hour net cost):
+    2026-07-04 nychigh     106.. basket A start 07-03T15Z hours  1 first 0.0747 best 0.0747  KXHIGHNY-26JUL04-T105
+    2026-06-09 nychigh      ..77 basket A start 06-08T15Z hours  1 first 0.0960 best 0.0960  KXHIGHNY-26JUN09-T78
+    2026-06-03 nychigh    78..79 basket A start 06-02T15Z hours  1 first 0.1066 best 0.1066  KXHIGHNY-26JUN03-B78.5
+    2026-06-09 nychigh    84..85 basket A start 06-08T15Z hours  1 first 0.1701 best 0.1701  KXHIGHNY-26JUN09-B84.5
+    2026-05-07 mdwhigh      ..57 basket A start 05-06T16Z hours  1 first 0.1805 best 0.1805  KXHIGHCHI-26MAY07-T58
+    2026-06-03 nychigh      84.. basket A start 06-02T15Z hours  2 first 0.1909 best 0.1383  KXHIGHNY-26JUN03-T83
+    2026-06-03 mdwhigh    80..81 basket A start 06-02T15Z hours  1 first 0.2945 best 0.2945  KXHIGHCHI-26JUN03-B80.5
+    2026-06-12 mdwhigh      ..76 basket A start 06-12T03Z hours  3 first 0.4381 best 0.4381  KXHIGHCHI-26JUN12-T77
+    2026-06-12 nychigh      98.. basket A start 06-12T03Z hours  1 first 0.4487 best 0.4487  KXHIGHNY-26JUN12-T97
+    2026-06-17 nychigh    80..81 basket A start 06-16T15Z hours  4 first 0.4487 best 0.4487  KXHIGHNY-26JUN17-B80.5
+    2026-06-08 mdwhigh      88.. basket A start 06-08T07Z hours  1 first 0.4594 best 0.4594  KXHIGHCHI-26JUN08-T87
+    2026-06-04 nychigh      90.. basket A start 06-04T04Z hours  2 first 0.4684 best 0.4684  KXHIGHNY-26JUN04-T89
+    2026-06-09 nychigh      86.. basket A start 06-08T15Z hours  2 first 0.4700 best 0.4700  KXHIGHNY-26JUN09-T85
+    2026-06-15 nychigh      86.. basket A start 06-14T15Z hours  1 first 0.4700 best 0.4700  KXHIGHNY-26JUN15-T85
+    2026-06-12 mdwhigh      ..76 basket A start 06-12T01Z hours  1 first 0.4886 best 0.4886  KXHIGHCHI-26JUN12-T77
+
+====================================================================================================
+SENSITIVITY strict + Kalshi fee ceil'd to the cent on 10 lots
+====================================================================================================
+  matched_rungs                                 4,694
+  kalshi_rungs_unmatched                          328
+  pm_rungs_unmatched                              327
+  kalshi_rungs_no_pm_event                      1,422
+  matched_rung_missing_kalshi_candles               0
+  matched_rung_missing_pm_history                   0
+  kalshi_candles                              184,641
+  paired_obs                                   99,687
+  crossing_hours_A                              2,755
+  crossing_hours_B                                811
+  episodes                                      2,449
+  dates with >=1 jointly listed city              167
+
+  mean locked $/day, all 179 dates: 5.3582   95% CI [3.5475, 7.4803]   one-sided P(mean<=0) = 0.0000
+    P1: n= 70 dates  mean $11.0139/day  total $770.97
+    P2: n= 62 dates  mean $1.3955/day  total $86.52
+    P3: n= 47 dates  mean $2.1623/day  total $101.63
+  sensitivity, jointly listed dates only (n=167): mean 5.7432/day, P(mean<=0) = 0.0000
+  upper bound, best hour of each episode: mean $5.8355/day
+  locked $ by city: laxhigh 184.05, mdwhigh 184.08, miahigh 152.44, nychigh 164.22, phlhigh 0.19, sfohigh 274.15
+  episodes: hours median 1, max 14; first-hour net cost median 0.9940
+  cheapest 15 episodes (first-hour net cost):
+    2026-06-04 nychigh      90.. basket A start 06-04T04Z hours  1 first 0.4690 best 0.4690  KXHIGHNY-26JUN04-T89
+    2026-06-12 mdwhigh      ..76 basket A start 06-12T01Z hours  1 first 0.4892 best 0.4892  KXHIGHCHI-26JUN12-T77
+    2026-06-12 laxhigh    80..81 basket A start 06-11T22Z hours  2 first 0.5193 best 0.5193  KXHIGHLAX-26JUN12-B80.5
+    2026-05-14 laxhigh      ..64 basket A start 05-13T15Z hours  7 first 0.5394 best 0.5394  KXHIGHLAX-26MAY14-T65
+    2026-05-29 laxhigh      74.. basket A start 05-28T15Z hours  1 first 0.5394 best 0.5394  KXHIGHLAX-26MAY29-T73
+    2026-06-08 laxhigh      ..66 basket A start 06-07T15Z hours  1 first 0.5394 best 0.5394  KXHIGHLAX-26JUN08-T67
+    2026-06-08 laxhigh    67..68 basket A start 06-07T15Z hours  2 first 0.5394 best 0.5394  KXHIGHLAX-26JUN08-B67.5
+    2026-06-09 laxhigh      ..67 basket A start 06-08T15Z hours  1 first 0.5394 best 0.5394  KXHIGHLAX-26JUN09-T68
+    2026-06-08 miahigh      ..85 basket A start 06-07T15Z hours  1 first 0.5394 best 0.5394  KXHIGHMIA-26JUN08-T86
+    2026-06-12 miahigh      ..85 basket A start 06-11T15Z hours  1 first 0.5394 best 0.5394  KXHIGHMIA-26JUN12-T86
+    2026-05-29 nychigh      86.. basket A start 05-28T15Z hours  2 first 0.5394 best 0.5394  KXHIGHNY-26MAY29-T85
+    2026-06-13 nychigh      95.. basket A start 06-12T15Z hours  1 first 0.5394 best 0.5394  KXHIGHNY-26JUN13-T94
+    2026-05-18 mdwhigh      90.. basket A start 05-17T15Z hours  2 first 0.5504 best 0.5394  KXHIGHCHI-26MAY18-T89
+    2026-06-08 mdwhigh      88.. basket A start 06-07T15Z hours  2 first 0.5504 best 0.5504  KXHIGHCHI-26JUN08-T87
+    2026-05-29 laxhigh      ..65 basket A start 05-28T15Z hours  1 first 0.5504 best 0.5504  KXHIGHLAX-26MAY29-T66
+
+====================================================================================================
+DESCRIPTIVE (binding variant)
+====================================================================================================
+matched rungs compared at settlement: 4694; settled differently or unresolved on either venue: 2
+    2026-08-29 KXHIGHMIA ..87 kalshi=no pm_yes=True
+    2026-08-29 KXHIGHMIA 90..91 kalshi=yes pm_yes=False
+|Kalshi mid - PM mid| on 99,687 paired obs: p50 0.0100  p75 0.0200  p90 0.0350  p99 0.2050  max 0.7450; share 0: 0.196
+Polymarket US own YES-basket (sum of YES asks + fees), hourly marks with every rung quoted: 29,174 obs, 180 below $1, cheapest 0.0641
+
+====================================================================================================
+POST-HOC DIAGNOSTIC (not part of the test): where the binding $/day comes from
+====================================================================================================
+  A, PM bid still the 0.5 listing seed     episodes   159  locked $   521.35  = $2.913/day
+  other                                    episodes  2118  locked $   379.92  = $2.122/day
+  within 6h of first PM quote point        episodes   368  locked $    67.88  = $0.379/day
+  excluding seed-bid episodes, by first-hour net cost:
+    0.90-0.97    episodes   253  locked $   140.21  = $0.783/day
+    0.97-1.00    episodes  2148  locked $   147.79  = $0.826/day
+    net < 0.90   episodes    85  locked $   159.81  = $0.893/day
+  episodes on the mis-settled KXHIGHMIA 2026-08-29 event: 1
+    90..91 basket A hours 1 first 0.9936

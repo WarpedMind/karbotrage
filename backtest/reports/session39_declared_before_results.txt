@@ -1,0 +1,72 @@
+Session 39 — deviations and implementation choices, declared BEFORE any H11 or H10 result was computed.
+Written 2026-10-19 ~17:35 UTC. At this point: Polymarket US price histories and Kalshi candles were still
+downloading; no crossing, basket, P&L, settlement comparison or carry return had been computed. The only
+data looked at were (a) the Polymarket US climate market listing (titles, slugs, date coverage, fee
+coefficient, status), (b) ONE price-history response (tc-temp-nychigh-2026-05-01-lt61f) to learn the
+format, (c) one Kalshi event's strikes (KXHIGHNY-26MAY01), and (d) the KXBTCPERP market record, the first
+and last two funding rows, and four hourly candles from 2026-06-15 to learn the schema.
+
+The pre-registration (DECISIONS.md Session 38) is unchanged. Where it is silent or a data fact forces a
+choice, the choice is fixed here. Each is labelled DEVIATION (changes what the text says) or
+IMPLEMENTATION (fills a gap the text leaves open).
+
+H11
+1. DEVIATION — Polymarket US locked/crossed points excluded. The opening history points of a market are a
+   0.5/0.5 seed (longPrice 0.5, shortPrice 0.5, i.e. bid = ask = 0.50) for hours before any quoting. A
+   resting book cannot be locked or crossed on a price-time-priority exchange, so such a point is a
+   placeholder, exactly like the 1c bid the pre-registration already excludes. The pre-registration
+   requires 0 < bid < ask < 1 on Kalshi but only ask < 0.99 and bid > 0.01 on Polymarket; the binding run
+   also requires Polymarket bid < ask. Without it, a 0.5/0.5 seed against a Kalshi ask of 0.30 would
+   "cross" by ~20c. The literal (as-written) variant is run and reported alongside, so the effect of this
+   deviation is visible.
+2. IMPLEMENTATION — titles. 40 Polymarket titles use a degree sign ("56° to 57°", "55° or below"). The
+   title parser strips "°"; slugs are still never read for intervals.
+3. IMPLEMENTATION — "all dates in the window". Binding: every calendar event date 2026-04-22 → 2026-10-17
+   (179 dates), zero when nothing is jointly listed (Polymarket US lists none of the six cities on 12
+   dates; PHL only from 2026-10-15). Sensitivity: only dates with at least one jointly listed city.
+4. IMPLEMENTATION — episode. Consecutive hourly candles (end times 3600 s apart) on one rung and one
+   basket (A or B) that both cross. An hour that is unobservable (no Polymarket point within 60 s, or
+   either book not two-sided) is not a crossing hour and ends the episode. Locked profit uses the net
+   cost of the episode's FIRST hour (the price on offer when first seen); the best hour is reported as an
+   upper-bound sensitivity.
+5. IMPLEMENTATION — pairing. "Last Polymarket point no more than 60 s before the candle end" = the
+   latest point with candle_end − 60 ≤ timestamp ≤ candle_end.
+6. IMPLEMENTATION — dates and periods are by EVENT date (the climate day the rung settles on), not the
+   calendar date of the quote.
+7. IMPLEMENTATION — settlement comparison uses Kalshi `result` (yes/no) against Polymarket US
+   `outcomePrices` (["1","0"] = YES). A Kalshi `scalar` result on a matched rung is reported separately
+   and counted as "not the same" for the kill criterion.
+8. IMPLEMENTATION — Polymarket ladder sum-of-YES-asks (descriptive): evaluated at the same hourly marks,
+   only when every rung of that Polymarket city-day has a usable ask point within 60 s and the rungs
+   parse to an exhaustive, disjoint partition of the integers.
+
+H10
+9. IMPLEMENTATION — sign. Confirmed from Kalshi's own help center ("How Funding Works", dated
+   2026-06-03, saved under backtest/cache/venues/primary_sources/): "If the funding rate is positive
+   (perp trading above spot): long holders pay short holders." This is Kalshi's published product
+   documentation, not the rulebook PDF (kalshi.com returns 429 to scripts). Treated as a primary source.
+10. IMPLEMENTATION — funding received in a held week = Σ rate × mark × contracts over funding times in
+   (entry 21:00, exit 21:00], i.e. 21 fundings, the exit Monday's 20:00 included and the entry Monday's
+   20:00 (the decision rate) excluded.
+11. IMPLEMENTATION — margin buffer = the posted perp margin, 2/L × notional (L = the frozen leverage
+   estimate: BTC 6.38, ETH 4.87). Adverse move = the CUMULATIVE maximum adverse excursion from the held
+   week's starting perp price (hourly ask high, since a short buys back at the ask), as a fraction of
+   notional; a week fails if it exceeds 80% of the buffer. The largest single-hour move is also reported.
+   Cumulative is the stricter reading and is binding.
+12. IMPLEMENTATION — benchmark. DTB3 (FRED, discount basis) on the decision date (last available value),
+   accrued as DTB3 × 7/360 per week. Excess = week return on capital − that accrual; flat weeks = 0.
+13. IMPLEMENTATION — capital per held week = multiplier × spot notional at the week's start; quantity is
+   fixed while the position continues; no rebalancing cost.
+14. IMPLEMENTATION — the in-sample half needs the 2026-10-19 21:00 UTC candle to close its last week. It
+   is run after that candle exists.
+15. NOTE, not used — Kalshi's "How Margin Works" page says margin earns ~3.25% APY at the clearinghouse.
+   The pre-registration freezes "no interest on Kalshi margin"; that stands. Reported as a sensitivity.
+16. Sensitivity only, unverified: a 60 bps per side retail spot fee in place of the frozen 10 bps.
+17. IMPLEMENTATION (added ~18:00 UTC, still before any H10 number) — a held week pays the exit cost (perp
+   bought back at the 21:00 closing ask, spot sold, fees) only if the NEXT Monday's decision is flat;
+   otherwise it is marked at mid with no cost, as pre-registered. For the last in-sample week
+   (2026-10-12 -> 10-19) the next decision is the 2026-10-19 20:00 one, read from the data once it
+   exists. Perp quantity = $1 / entry perp price, spot quantity = $1 / entry spot price (equal notional
+   at entry), both held fixed while the position continues. Spot = Coinbase Exchange hourly candle that
+   STARTS at 20:00 UTC (its close is the 21:00 price). Weekly thirds of the combined 24-week window:
+   weeks 1-8, 9-16, 17-24; the in-sample half covers weeks 1-18.

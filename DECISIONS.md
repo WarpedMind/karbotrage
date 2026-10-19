@@ -1,6 +1,209 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-10-19 — Session 39: H11 (Kalshi ↔ Polymarket US weather crossings) is DEAD on two kill criteria, and the guarantee itself failed once. H10's in-sample half ran as a contaminated plumbing check: the equal-weight carry lost to T-bills (−0.13%/yr), and because the combined window's first third is entirely in-sample and negative, H10's binding read at the checkpoint is already determined: DEAD. No accounts, no money, no live-path code.
+
+### Status of each claim, labeled up front
+- **PRIMARY SOURCE, read this session**: Kalshi's help center, "How Funding Works"
+  (dated 2026-06-03): *"If the funding rate is positive (perp trading above
+  spot): long holders pay short holders."* Same site: BTC contract
+  specifications (0.0001 BTC per contract, funding 00/08/16 ET, cap ±2%),
+  "Perps Fees Explained" (fees on notional, both legs), "How Margin Works"
+  (margin earns ~3.25% APY at the clearinghouse). The NWS's own CLIMIA
+  products for 2026-08-29 (via IEM's AFOS archive). Kalshi's perps OpenAPI spec
+  (signed payment amounts, no sign convention for the rate). Saved locally under
+  `backtest/cache/venues/primary_sources/` (gitignored).
+- **NOT read**: Kalshi's perps rulebook PDF. `kalshi.com` returns 429 to
+  scripts. The help center is Kalshi's own published product documentation and
+  is treated as primary for the sign; the rulebook would be stronger.
+- **MEASURED this session**: everything in the tables below, from public
+  endpoints, no auth.
+- **Declared before any result**: `backtest/reports/session39_declared_before_results.txt`
+  (17 items; 1 deviation, the rest implementation choices where the
+  pre-registration was silent). Written at ~17:35 UTC, while the data were still
+  downloading. Also copied to the session-notes folder at that time.
+
+### The one deviation, and why it does not decide anything
+The pre-registration excluded Polymarket's 1¢ placeholder bid but not a
+**locked** point (bid = ask). Every new Polymarket US market opens at
+`longPrice` 0.5 / `shortPrice` 0.5 for hours before anyone quotes, so a locked
+0.5/0.5 seed against a 30¢ Kalshi ask would read as a 20¢ crossing. The binding
+run requires Polymarket bid < ask, matching the 0 < bid < ask < 1 already
+required of Kalshi. The literal variant was run alongside: it gives *more*
+profit ($8.38/day) and still fails the same kill line. Every variant fails.
+
+### H11 result
+Universe: six station pairs, event dates 2026-04-22 → 2026-10-17 (179 dates;
+Polymarket US lists none of the six on 12 of them, and PHL only from
+2026-10-15). 4,694 matched rungs (328 Kalshi and 327 Polymarket rungs on
+offset ladders unmatched and excluded; 1,422 Kalshi rungs on days Polymarket
+did not list). 184,641 Kalshi hourly candles, 99,687 paired observations with
+both books two-sided. Zero fetch failures, zero unparseable titles.
+
+| variant | episodes | mean $/day (179 dates) | 95% CI | P(mean ≤ 0) | P1 | P2 | P3 |
+|---|---|---|---|---|---|---|---|
+| **BINDING** (PM bid < ask) | 2,645 | **$5.41** | [3.60, 7.54] | 0.0000 | $11.11 | $1.43 | $2.19 |
+| literal as written | 3,111 | $8.38 | [5.86, 11.27] | 0.0000 | $17.63 | $2.33 | $2.59 |
+| binding + Kalshi fee ceil'd to the cent (10 lots) | 2,449 | $5.36 | [3.55, 7.48] | 0.0000 | $11.01 | $1.40 | $2.16 |
+
+Also: jointly-listed dates only (167): $5.80/day. Best hour of each episode
+instead of first (upper bound): $5.91/day. Episodes last a median of 1 hour;
+median first-hour net cost $0.9937, i.e. 0.6¢ per contract.
+
+**Kill criteria (binding):**
+| criterion | result | verdict |
+|---|---|---|
+| mean locked profit < $10/day | $5.41/day | **KILLED** |
+| p ≥ 0.0167 | p = 0.0000 | passes |
+| any period's mean = 0 | P1 $11.11, P2 $1.43, P3 $2.19 | passes |
+| any matched rung settled differently | **2 rungs** (KXHIGHMIA 2026-08-29) | **KILLED** |
+
+**H11 is dead.** It fails on size, and on the one criterion that turns an
+arbitrage into a bet.
+
+### The settlement split, read from the NWS products
+The NWS Miami office issued the CLI for 2026-08-29 twice the next morning,
+46 minutes apart, both headed as the day's climate summary and neither marked
+corrected: **4:24 AM EDT: maximum 90 °F at 3:25 PM; 5:10 AM EDT: maximum 85 °F
+at 5:11 AM.** The diff is the maximum, the average and the degree days, nothing
+else. Kalshi settled at 90.00 (`expiration_value`, settled 12:00 UTC), so its
+90–91 rung paid YES. Polymarket US settled "87 or below" YES. The station's
+METARs that day peaked at 85 °F in the early morning, so the later report is
+the one the observations support. A basket of Kalshi YES "≤87" plus Polymarket
+NO "≤87" would have lost both legs. **Two venues reading "the same CLI" is not
+one settlement source when the NWS re-issues.** This is the cross-venue version
+of Session 32's lesson that a settlement rule is a fact to measure, not assume.
+
+### What the $5.41/day is made of (post-hoc, descriptive, cannot rescue anything)
+- **$2.91/day (54%) is the listing seed again, in a second form.** When a
+  Polymarket market's first ask arrives, `longPrice` moves but `shortPrice` can
+  stay at exactly 0.5 for hours until someone bids. That reads as a 50¢ bid that
+  never existed, and against a 1–2¢ Kalshi ask it looks like a 45¢ crossing. All
+  of the ~$0.54 "baskets" at 15:00 UTC (Kalshi's listing hour) are this.
+- **$0.38/day** comes from the first six hours after Polymarket's first quote point.
+- **The remaining $2.12/day**, by first-hour net cost: below $0.90, $0.89/day (85
+  episodes, mostly one-hour blips such as a 57¢ bid on a 2% rung, with no depth
+  information); $0.90–0.97, $0.78/day; **$0.97–1.00, $0.83/day across 2,148
+  episodes**. That last group is the one that looks like real one-tick
+  dislocations, and at 10 contracts it averages about 4¢ an episode.
+- One binding episode sat on the mis-settled Miami event (90–91 rung, basket A:
+  Kalshi YES + Polymarket NO, net $0.9936). Both legs paid, so it returned $2 by
+  luck. The opposite basket on that rung would have returned $0.
+
+### Descriptive extras
+- **|Kalshi mid − Polymarket mid|** on 99,687 paired observations: median 1.0¢,
+  p75 2.0¢, p90 3.5¢, p99 20.5¢; 19.6% exactly equal. Same market, same makers,
+  as the Session 38 snapshot said.
+- **Polymarket US's own YES-basket** (sum of all six asks + fees, at hourly marks
+  with every rung quoted): 29,174 observations, 180 below $1, cheapest $0.064.
+  The cheapest values cannot be real (six asks summing to 6¢ on a partition).
+  They are the same stale or seed quotes. Not investigated further, and not a
+  candidate.
+
+### Gate accounting, H11
+| gate | result |
+|---|---|
+| 1 Bonferroni | family of 3 (H10/H11/H12), α = 0.0167; H11 passes p, irrelevant given the kills |
+| 2 ≥20 independent | 179 dates (167 jointly listed) |
+| 3 three periods | positive in all three, but P2/P3 at $1.4–2.2/day are 15–20% of the floor |
+| 4 ≥2h lead | n/a (payout fixed by construction, except when it isn't, as above) |
+| 5 out of sample | all historical quotes unseen before the run |
+| 6 market baseline | the $1 payout against both venues' executable quotes and fees: **fails the materiality floor and the settlement guarantee** |
+
+### H10 in-sample half (2026-06-15 → 2026-10-19, 18 weeks) — CONTAMINATED plumbing check
+Run at 21:05 UTC, after the 2026-10-19 21:00 candle closed (declared item 14).
+Frozen parameters exactly as Session 38: rule = hold short perp + long spot for
+the week iff the mean of the last 21 funding rates > 0; enter/exit on the 21:00
+closing bid/ask; perp fee 12 bps per side; hedge 10 bps per side + 0.25%/yr;
+capital 1.31× (BTC) / 1.41× (ETH) notional; no margin interest; DTB3 benchmark.
+Data: zero missing funding rows at decision times, no candle gaps at any
+Monday 20:00/21:00 (the perps skip one hour every Thursday for maintenance).
+
+| variant | equal-weight excess, %/yr | 95% CI | P(mean ≤ 0) | weeks 1–8 | 9–16 | 17–18 |
+|---|---|---|---|---|---|---|
+| **FROZEN** | **−0.13** | [−2.45, +1.97] | 0.525 | **−2.51** | +1.09 | +4.58 |
+| sensitivity: spot fee 60 bps/side (unverified) | −2.74 | [−7.62, +1.32] | 0.887 | −6.08 | −1.23 | +4.58 |
+| sensitivity: Kalshi margin earns 3.25% APY | +0.34 | [−1.92, +2.38] | 0.367 | −2.07 | +1.59 | +4.96 |
+
+Per asset (frozen): **BTC held 18/18 weeks, +2.50%/yr** excess (p = 0.039), which
+is at the top of the +1.5–2.5% Session 38 stated in advance. **ETH held 3/18 weeks,
+−2.75%/yr**: each time the trailing 7-day mean turned positive, funding reverted
+within the week, and the round trip (spread + 2 × 12 bps + 2 × 10 bps ≈ 0.45%)
+was never recovered. Static always-on carry: −1.59%/yr equal-weight (BTC +2.01%,
+ETH −5.19%). The plumbing reconciles: BTC's weekly return tracks its funding
+income to within entry costs. Funding received sums to 2.46% of capital over 18
+weeks, ~7.1%/yr on capital or ~9.3%/yr on notional, consistent with Session
+38's +8.8%/yr since launch and +12.0% over the last 30 days.
+
+**Liquidation proxy.** No week crossed the margin-call line, but one came within
+3%: BTC rose **23.5% in the week of 2026-08-17** (Coinbase spot confirms the move;
+it is not a wick), a cumulative adverse excursion of **24.4% against a 25.1% call
+threshold** (80% of a 31.3% buffer). The hedge was fine, but its gain sits at
+the spot venue while the loss is marked against isolated Kalshi margin twice a
+day, so a real carry would have had to post fresh cash to Kalshi within days.
+
+**Kill criteria, read against the in-sample half (not binding, contaminated):**
+| criterion | in-sample | verdict if it were binding |
+|---|---|---|
+| annualised excess ≤ 0 | −0.13%/yr | would kill |
+| p ≥ 0.0167 | 0.525 | would kill |
+| any third ≤ 0 | weeks 1–8: −2.51%/yr | would kill |
+| any margin call | none (worst 97% of threshold) | passes, narrowly |
+| annualised excess < 2.0% | −0.13%/yr | would kill |
+| forward 6 weeks ≤ 0 | not yet observed | — |
+
+**The binding read is already determined.** The pre-registered thirds are
+thirds of the *combined* 24-week window, and the first third (weeks 1–8,
+2026-06-15 → 08-09) lies entirely inside the in-sample half. Its mean is fixed
+at −2.51%/yr, so "any period ≤ 0" kills H10 at the checkpoint whatever the
+forward six weeks show. Separately, reaching the 2% floor on the combined window
+would need about +8.4%/yr of excess over the six forward weeks, against
+in-sample thirds of −2.5%, +1.1% and +4.6%. Contamination does
+not soften this: knowing the funding means in advance can only have biased the
+rule toward passing. **H10 is dead.** The forward weeks are still worth logging
+at the checkpoint, at zero cost, for the record.
+
+### Gate accounting, H10 (in-sample half)
+| gate | result |
+|---|---|
+| 1 Bonferroni | family of 3, α = 0.0167; p = 0.525 |
+| 2 ≥20 independent | 18 weeks in-sample; the combined 24 was never going to be reached with a passing first third |
+| 3 three periods | first third −2.51%/yr, fixed; fails |
+| 4 ≥2h lead | n/a |
+| 5 out of sample | contaminated, as declared; the forward six weeks cannot change the verdict |
+| 6 market baseline | T-bills on the same capital, net of all fees: **−0.13%/yr** |
+
+### Family accounting after this session
+H11 dead (run, killed). H10 dead (binding verdict fixed by in-sample data under
+the pre-registered thirds). H12 forward-only, read at the checkpoint, can only
+kill or carry forward. The family size stays 3 and α stays 0.0167 for H12.
+
+
+### Decisions
+1. **H11 is closed.** Kalshi and Polymarket US weather ladders are one market
+   quoted twice. The crossings that exist are listing artifacts or one-tick
+   blips worth cents, and the "guaranteed" payout broke once in 4,694 rungs
+   because the venues read different issuances of the same NWS report. No
+   forward depth check is warranted. The Phase 1 venue invariant
+   (`s2_cross_platform_enabled`) is not touched.
+2. **Polymarket US price history needs a seed rule before anyone reuses it.**
+   Treat a `shortPrice` that has been exactly 0.5 since listing as "no bid"
+   (trap 10 in `backtest/venues/README.md`). Session 38's census and snapshot
+   are unaffected: the snapshot used live `/bbo`, which has no seed.
+3. **H10 is dead, and the checkpoint does not need to wait for it.** Funding
+   carry on Kalshi's two largest perps did not beat T-bills after costs over 18
+   weeks. The one leg that worked (BTC, +2.5%/yr) is the size Session 38
+   predicted, came within 3% of a margin call in one real week, and rests on an
+   unverified access path (perps "rolling out member by member"). H12 (gold, silver, US500, forward only) still
+   runs at the checkpoint as pre-registered, but it can only kill or carry
+   forward, so **the "small carry" branch of the checkpoint now rests on H12
+   alone, and H12 cannot confirm anything in six weeks.** The practical options
+   at ~2026-11-30 are market-make (if C2 is positive and the operator funds a
+   build and pilot) or park.
+4. **Sequence unchanged:** ~2026-10-28 C2 re-run; ~2026-11-30 checkpoint reads
+   H10 combined, H12 forward and C2 together. With H11 dead, the checkpoint's
+   options are market-make, a small carry, or park.
+
 ## 2026-10-19 — Session 38 (addendum): the operator's review. 2% floor accepted; is the project a failure; is market-making feasible; should "better information" be pursued; Health Monitor deploy deferred until a go decision
 
 The operator accepted H10's 2% floor and then asked four direct questions. The

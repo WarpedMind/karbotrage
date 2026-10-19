@@ -1,6 +1,47 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-10-19 (Session 39 — H11 and H10 run as pre-registered; both dead; no live-path code)
+
+### Mandate
+Run H11 to a result and H10's in-sample half as a contaminated plumbing check,
+exactly as pre-registered in DECISIONS.md Session 38. Confirm the funding sign
+from a Kalshi primary source first. Offline only.
+
+### What was done
+1. **Declared every implementation choice before any result**
+   (`backtest/reports/session39_declared_before_results.txt`, 17 items, one
+   deviation: Polymarket locked bid = ask points excluded, since the 0.5/0.5
+   listing seed would otherwise read as a crossing; the literal variant was run
+   alongside).
+2. **H11 data:** Polymarket US climate universe (5,248 markets), minute quote
+   history for 5,021 daily-high rungs, Kalshi candles for 2026-04-22 → 05-21
+   from the historical tier (1,080 markets; later days reused from Session 37).
+   Zero fetch failures.
+3. **H11 result:** $5.41/day locked (floor $10), p = 0.0000, all periods
+   positive, and **two matched Miami rungs settled differently** (NWS issued
+   the 2026-08-29 CLI twice: 90 °F, then 85 °F). Dead on two criteria. A
+   post-hoc breakdown shows 54% of the profit is the Polymarket 0.5 seed
+   surviving on the bid side after the first ask.
+4. **Funding sign confirmed** from Kalshi's help center: positive = longs pay
+   shorts.
+5. **H10 in-sample** (run after the 2026-10-19 21:00 UTC candle closed):
+   equal-weight −0.13%/yr excess (p = 0.525); BTC +2.50%, ETH −2.75%; no margin
+   call, but BTC reached 97% of the threshold in the real +23.5% week of
+   2026-08-17. The combined window's first third is in-sample at −2.51%/yr, so
+   the binding read is already a kill.
+6. A rule test caught a float bug before any result: `1 − 0.99` > 0.01 let the
+   1¢ placeholder through. 20 new rule tests; suite 386/386.
+
+### What was decided
+H11 and H10 are closed. H12 still runs forward at the checkpoint. The
+checkpoint is now market-make (C2 positive plus a funded build and pilot) or
+park.
+
+### What to do first next session
+Nothing new until the ~2026-10-28 C2 re-run. At the checkpoint, confirm the
+H12 ETF expense ratios from the issuers before reading it.
+
 ## 2026-10-19 (Session 38 addendum — operator review: 2% floor accepted; Health Monitor deploy deferred)
 
 - Operator **accepted H10's 2% floor**, adding that even 2–5% above T-bills may

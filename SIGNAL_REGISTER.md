@@ -237,6 +237,14 @@ materiality floor (2%/yr), not whether a forecast beats the market.
 ForecastEx, Coinbase US perps, Gemini Titan, CDNA and PredictIt are parked for
 lack of free quote history.
 
+**Session 39 update:** H10 (BTC/ETH carry) is dead. Its in-sample half lost to
+T-bills (−0.13%/yr equal-weight; BTC +2.5%, ETH −2.75%), and the first third of
+the combined window is in-sample and negative, which fixes the pre-registered
+"any third ≤ 0" kill. Only H12 (gold, silver, US500, forward only) remains, and
+it can kill or carry forward but not confirm. The funding sign is confirmed
+from Kalshi's help center: positive means longs pay shorts. DECISIONS.md
+Session 39.
+
 ---
 
 ## Tested — no edge found
@@ -371,9 +379,35 @@ identical 2 °F buckets. On 36 matched rungs, quotes were equal or Polymarket 1�
 wider on every one, and no guaranteed-$1 basket crossed (cheapest $1.012 net).
 The same makers appear to set both books, so as a *different population's*
 fair value it adds nothing. Macro, politics and culture were not snapshotted
-and are presumed to share makers, not shown to. The only remaining check is for executable
-crossings over history, which is H11 (DECISIONS.md Session 38), an arbitrage
-test, not a signal.
+and are presumed to share makers, not shown to. The only remaining check was
+for executable crossings over history: H11, tested in Session 39 (next entry).
+
+### Cross-venue weather crossings (H11): Kalshi ↔ Polymarket US daily highs — FAILED, Session 39 (2026-10-19)
+
+An arbitrage test, not a signal. Full detail: DECISIONS.md Session 39; code:
+`backtest/venues/h11_*`; report: `backtest/reports/venue_h11_crossings.txt`.
+
+Rule (pre-registered Session 38): on every rung whose integer-°F set is
+identical on both venues, at every Kalshi hourly close, buy YES on one venue
+and NO on the other when the pair costs less than $1 after both venues' fees.
+Locked profit = (1 − cost) × 10 contracts per episode, summed by event date.
+
+| Gate | Result |
+|---|---|
+| 1. Multiple-comparisons correction | Family of 3 (H10–H12), α = 0.0167. p = 0.0000, passes. |
+| 2. ≥20 independent resolutions | 179 event dates, 4,694 matched rungs, 99,687 paired quotes. |
+| 3. Replication across periods | Positive in all three ($11.11, $1.43, $2.19/day), but P2/P3 are a fraction of the floor. |
+| 4. ≥2h lead | n/a: payout is fixed by construction. |
+| 5. Out-of-sample | All historical quotes unseen before the run. |
+| 6. **Baseline is the market price** | **Fails.** $5.41/day against the $10/day materiality floor, and the "guaranteed" payout broke once. |
+
+**Why it fails, measured:** it is one market quoted twice (median mid gap 1¢,
+19.6% exactly equal). 54% of the locked profit is a Polymarket listing seed
+(a `shortPrice` stuck at 0.5 reads as a 50¢ bid nobody placed). The
+crossings that look real average about 4¢ an episode. And the settlement
+source is not shared after all: on 2026-08-29 the NWS issued Miami's climate
+report twice (90 °F, then 85 °F); Kalshi settled on the first, Polymarket US on
+the second, so two matched rungs paid differently.
 
 ## Tested — edge confirmed
 

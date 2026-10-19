@@ -458,6 +458,36 @@ provider on one market family failed, for a legible reason. Full record:
 trades, no live exposure. That was the whole argument for sequencing divergence
 first, and it held.
 
+## The last two venue tests are dead too, 2026-10-19 (Session 39)
+
+**Weather on two exchanges (H11).** Kalshi and Polymarket US list the same
+daily-high temperature ladders on the same airport stations. If one ever
+priced a rung differently enough, buying opposite sides on the two would lock
+in a profit. Over six months of hourly prices, the locked profit came to about
+$5 a day at 10 contracts a trade, half the $10 a day set in advance as the
+minimum worth having. More than half of that was a display quirk in
+Polymarket's history (an opening placeholder price that looks like a bid but
+isn't). What's left is worth well under $1 a day. Worse, the "guaranteed"
+payout failed once: the weather service published Miami's 2026-08-29 report
+twice, 46 minutes apart, first 90 °F and then 85 °F. Kalshi paid out on the
+first and Polymarket on the second, so a hedged pair on those rungs could have
+lost on both sides.
+
+**Bitcoin/Ether funding carry (H10).** Holding a short perpetual future against
+the coin itself collects a funding payment every 8 hours. From mid-June to
+mid-October the rule written down beforehand earned 0.1% a year *less* than
+Treasury bills after costs. Bitcoin alone made about 2.5% a year above T-bills,
+exactly the size predicted beforehand. In one week of it, Bitcoin rose 23.5%,
+which would have come within 3% of a margin call. Ether's funding kept turning
+negative right after the rule stepped in. Because of how the test was written,
+its final reading in late November is already a fail. Funding direction was
+confirmed from Kalshi's own documentation first.
+
+That leaves the late-October market-making re-run and the ~2026-11-30
+checkpoint, where the realistic choices are market-making (only if that re-run
+is positive and the operator funds a build and a small live pilot) or parking
+the project. Code: `backtest/venues/`. Record: DECISIONS.md Session 39.
+
 ## Other venues screened; one narrow candidate left, 2026-10-18 (Session 38)
 
 With the Kalshi signal search stopped, this session asked a different question:
@@ -792,10 +822,10 @@ hours of logs instead of waiting days for an actual trade.
     Both dead (Session 37); the stopping rule fired.
 7j. ✅ **Offline venue screen** (Session 38). No other event venue is a better
     game; Kalshi perps funding carry is the one candidate, as a yield trade.
-7k. **H11** (Kalshi ↔ Polymarket US weather crossings): next session, $0.
-    **H10/H12** (perps carry): binding read at the ~2026-11-30 checkpoint.
-    The operator accepted H10's 2% floor but doubts carry is worth doing even
-    if it passes.
+7k. ✅ **H11** (Kalshi ↔ Polymarket US weather crossings): dead (Session 39).
+    ✅ **H10** (BTC/ETH carry): dead; the in-sample half fixes the binding
+    verdict (Session 39). **H12** (gold, silver, US500 carry) is still read
+    forward at the ~2026-11-30 checkpoint.
 7l. **Checkpoint ~2026-11-30**: market-make, small carry, or park. Park is the
     likeliest outcome. Market-making needs a positive C2 re-run and a funded
     build plus a small real-money pilot. The Health Monitor deploy-confirm now

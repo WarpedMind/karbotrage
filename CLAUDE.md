@@ -109,6 +109,13 @@ async def run(self): ...
   **No `DivergenceScannerAgent` and no `FairValueEngineAgent` were built**,
   and no live-path code was touched. Market-making (S8) and the S5a/S5b
   canary are untouched by this result — see "Next session priorities".
+- **Session 39 (2026-10-19): H11 and H10 both dead.** Kalshi and Polymarket
+  US weather ladders are one market quoted twice ($5.41/day of crossings, below
+  the $10 floor, and the two venues once settled the same rung differently off
+  two NWS issuances). BTC/ETH perp carry lost to T-bills in-sample, and the
+  pre-registered thirds make the checkpoint read a kill already. Code:
+  `backtest/venues/h11_*`, `h10_*` (offline only). Authoritative record:
+  **DECISIONS.md Session 39**.
 - **Session 38 (2026-10-18): offline venue screen done; nothing adopted.**
   Polymarket US (a CFTC DCM) lists Kalshi's daily-high ladders on the same NWS
   stations at the same prices (36 matched rungs, never crossed, cheapest
@@ -179,7 +186,7 @@ async def run(self): ...
   for weather and later strategies, with a hard statistical methodology gate
   (Bonferroni, n≥20, 3-period replication, market-price baseline) that any
   candidate must clear before it can influence a position.
-- Full test suite: **366/366 passing as of Session 38** (5 new `tests/test_backtest_venues.py`) — was **361/361 passing as of Session 37** (14 new `tests/test_backtest_nowcast_rule.py`, 5 new `tests/test_backtest_consistency_rule.py`) — was **342/342 passing as of Session 36** (7 new `backtest/tape` rule tests, `tests/test_backtest_tape_rules.py`) — was **335/335 as of Session 35** (9 new canary leg-set tests; earlier count follows) — was **321/321** (was documented as 301 through Session
+- Full test suite: **386/386 passing as of Session 39** (12 new `tests/test_backtest_h11_rule.py`, 8 new `tests/test_backtest_h10_rule.py`) — was **366/366 passing as of Session 38** (5 new `tests/test_backtest_venues.py`) — was **361/361 passing as of Session 37** (14 new `tests/test_backtest_nowcast_rule.py`, 5 new `tests/test_backtest_consistency_rule.py`) — was **342/342 passing as of Session 36** (7 new `backtest/tape` rule tests, `tests/test_backtest_tape_rules.py`) — was **335/335 as of Session 35** (9 new canary leg-set tests; earlier count follows) — was **321/321** (was documented as 301 through Session
   32; re-counted directly Session 33 and actually collected 305 pre-existing —
   a small, unexplained pre-existing discrepancy in this doc, not investigated
   further — plus 16 new Session 33 Telegram `/mute`/`/unmute` tests). Runner
@@ -239,6 +246,33 @@ async def run(self): ...
 
 ## KNOWN DEBT
 
+### H11 + H10 — Session 39 (2026-10-19): both dead; the checkpoint is market-make or park. Read this first.
+**Authoritative record: DECISIONS.md Session 39** (results tables, kill
+verdicts, gate accounting). Choices declared before any result:
+`backtest/reports/session39_declared_before_results.txt`. What a future session
+most needs:
+- **H11 (Kalshi ↔ Polymarket US weather crossings) is dead.** $5.41/day locked
+  at 10 contracts (floor $10/day) over 179 dates and 4,694 matched rungs, and
+  two rungs settled differently. 54% of that profit is a Polymarket listing
+  artifact; the real-looking one-tick crossings are worth ~$0.83/day.
+- **"Same NWS station" is not "same settlement".** The NWS issued Miami's
+  2026-08-29 climate report twice, 46 minutes apart (90 °F, then 85 °F).
+  Kalshi settled on the first, Polymarket US on the second. Any future
+  cross-venue weather idea must treat CLI re-issues as a live risk.
+- **H10 (BTC/ETH perp carry) is dead.** In-sample (contaminated) equal-weight
+  excess −0.13%/yr; BTC +2.50%, ETH −2.75%. The pre-registered thirds are of
+  the combined window, the first third is entirely in-sample at −2.51%/yr, so
+  the binding read at the checkpoint is already a kill. BTC came within 3% of
+  the margin-call proxy in a real week (+23.5%, 2026-08-17).
+- **Funding sign confirmed** from Kalshi's help center ("How Funding Works"):
+  positive rate = longs pay shorts. The rulebook PDF itself was not read.
+- **New data traps** (`backtest/venues/README.md`, items 10–16): the
+  Polymarket `shortPrice` 0.5 seed outlives the first quote; `1 − 0.99` float
+  dust; degree-sign titles; CLI re-issues; Cloudflare 1015 bans for unpaced
+  callers; Thursday perp maintenance gap.
+- **H12 still runs at the checkpoint** (forward only, can kill or carry
+  forward, cannot confirm).
+
 ### VENUE SCREEN — Session 38 (2026-10-18): read this first.
 **Authoritative record: DECISIONS.md Session 38** (ranked table, data traps,
 pre-registration of H10/H11/H12). What a future session most needs:
@@ -253,7 +287,8 @@ pre-registration of H10/H11/H12). What a future session most needs:
   (`external-api.kalshi.com/trade-api/v2/margin`, a different host from event
   contracts). It is a yield trade with liquidation risk across two venues, and
   is stated in advance to be worth ~$150–$250/yr per $10k if it works.
-- **Before running H10:** confirm the funding sign convention from Kalshi's
+- **Before running H10** (done Session 39: sign confirmed from Kalshi's help
+  center; H10 then failed): confirm the funding sign convention from Kalshi's
   perps rulebook (inferred, not documented in the API). The 2%/yr materiality
   floor was accepted by the operator on 2026-10-19, with the caveat that even
   2–5% may not be worth tying up capital for. The perps fee PDF in
@@ -1368,7 +1403,20 @@ market that is the sole member of its batch, before calling it fixed.
   guidance, bot refuses to start until cleared and documented.
 
 ## Next session priorities (in order)
-**READ FIRST (Session 38, 2026-10-18): the venue screen is done; see KNOWN
+**READ FIRST (Session 39, 2026-10-19): H11 and H10 are both dead; see KNOWN
+DEBT's top entry and DECISIONS.md Session 39.** Sequence now:
+1. **~2026-10-28**: the C2 maker-split re-run, frozen as in Session 36. This is
+   now the only input that can turn the checkpoint into anything but park.
+2. **~2026-11-30 checkpoint**: read C2 and H12's forward screen (gold, silver,
+   US500; confirm the ETF expense ratios from the issuers first). Log H10's
+   forward six weeks for the record; its verdict is already fixed. Options:
+   market-make (C2 positive **and** the operator funds a build plus a small
+   real-money pilot) or **park**. Small carry rests on H12 alone, which cannot
+   confirm in six weeks.
+3. **Only after a go:** Health Monitor deploy-confirm, then the `sid`-scoped
+   sequence fix.
+
+**Earlier READ FIRST (Session 38, 2026-10-18): the venue screen is done; see KNOWN
 DEBT's top entry and DECISIONS.md Session 38.** Sequence now:
 1. **Next session: run H11** (Kalshi ↔ Polymarket US same-station weather
    crossings) to a result, exactly as pre-registered. One session, $0. Kalshi

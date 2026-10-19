@@ -1,0 +1,75 @@
+H10 IN-SAMPLE HALF — CONTAMINATED (funding means seen in Session 38). Plumbing check, NOT the binding read. Run 2026-10-19T21:05Z.
+Decisions (Monday 20:00 UTC): 2026-06-15 .. 2026-10-19 -> 18 weeks. Sign: positive rate = longs pay shorts (Kalshi help center).
+Kill (binding version, at the checkpoint): combined ann. excess <= 0; p >= 0.0167; any third <= 0; forward 6 weeks <= 0; any margin call; ann. excess < 2.0% (operator-accepted floor).
+
+====================================================================================================
+FROZEN
+====================================================================================================
+  equal-weight weekly excess: mean -0.0024%/wk = -0.13%/yr; 95% CI/yr [-2.45%, 1.97%]; one-sided P(mean<=0) = 0.5252
+    weeks 1-8                    mean -2.51%/yr  (n=8)
+    weeks 9-16                   mean 1.09%/yr  (n=8)
+    weeks 17-18 (partial third)  mean 4.58%/yr  (n=2)
+  KXBTCPERP: held 18/18 weeks; ann. excess 2.50%/yr (P=0.0390); missing decision-time funding rows 0; next-decision signal True
+    week       held  in out    ret%  fund%  excess% n_f cand worst cum% worst 1h% call
+    2026-06-15    Y   Y      -0.173  0.018   -0.244  21  167       0.70      1.47     
+    2026-06-22    Y           0.143  0.153    0.071  21  167       0.10      3.77     
+    2026-06-29    Y           0.091  0.090    0.018  21  167       6.25      2.44     
+    2026-07-06    Y           0.009  0.009   -0.063  21  167       1.44      1.44     
+    2026-07-13    Y           0.056  0.046   -0.017  21  167       5.82      1.99     
+    2026-07-20    Y           0.005  0.023   -0.067  21  167       2.46      1.02     
+    2026-07-27    Y           0.086  0.070    0.011  21  167       0.74      1.14     
+    2026-08-03    Y           0.008  0.032   -0.064  21  167       2.76      0.92     
+    2026-08-10    Y           0.286  0.272    0.213  21  167       0.74      0.79     
+    2026-08-17    Y           0.222  0.233    0.149  21  167      24.37      7.51     
+    2026-08-24    Y           0.214  0.230    0.142  21  167       3.33      2.15     
+    2026-08-31    Y           0.193  0.197    0.120  21  167       4.42      2.21     
+    2026-09-07    Y           0.239  0.231    0.166  21  167       0.85      1.70     
+    2026-09-14    Y           0.099  0.108    0.022  21  167      10.53      3.21     
+    2026-09-21    Y           0.090  0.095    0.012  21  167       0.36      1.20     
+    2026-09-28    Y           0.124  0.120    0.044  21  167       4.49      1.95     
+    2026-10-05    Y           0.218  0.236    0.139  21  167       1.11      1.21     
+    2026-10-12    Y           0.292  0.293    0.213  21  167       1.32      2.32     
+    margin buffer 31.3% of notional; call threshold 25.1%; margin calls: 0
+  KXETHPERP: held 3/18 weeks; ann. excess -2.75%/yr (P=1.0000); missing decision-time funding rows 0; next-decision signal True
+    week       held  in out    ret%  fund%  excess% n_f cand worst cum% worst 1h% call
+    2026-06-15       flat (T-bills)
+    2026-06-22       flat (T-bills)
+    2026-06-29       flat (T-bills)
+    2026-07-06       flat (T-bills)
+    2026-07-13       flat (T-bills)
+    2026-07-20    Y   Y   Y  -0.345 -0.018   -0.418  21  167       4.14      1.40     
+    2026-07-27       flat (T-bills)
+    2026-08-03       flat (T-bills)
+    2026-08-10       flat (T-bills)
+    2026-08-17       flat (T-bills)
+    2026-08-24       flat (T-bills)
+    2026-08-31       flat (T-bills)
+    2026-09-07       flat (T-bills)
+    2026-09-14       flat (T-bills)
+    2026-09-21    Y   Y      -0.144  0.027   -0.222  21  167       0.19      1.25     
+    2026-09-28    Y       Y  -0.232 -0.073   -0.312  21  167       3.58      1.60     
+    2026-10-05       flat (T-bills)
+    2026-10-12       flat (T-bills)
+    margin buffer 41.1% of notional; call threshold 32.9%; margin calls: 0
+  static always-on carry (enter week 1, exit after week 18): -1.59%/yr excess, P(mean<=0) = 0.9793; BTC 2.01%, ETH -5.19%
+
+====================================================================================================
+SENS spot fee 60 bps/side (unverified)
+====================================================================================================
+  equal-weight weekly excess: mean -0.0527%/wk = -2.74%/yr; 95% CI/yr [-7.62%, 1.32%]; one-sided P(mean<=0) = 0.8873
+    weeks 1-8                    mean -6.08%/yr  (n=8)
+    weeks 9-16                   mean -1.23%/yr  (n=8)
+    weeks 17-18 (partial third)  mean 4.58%/yr  (n=2)
+  KXBTCPERP: held 18/18 weeks; ann. excess 1.39%/yr (P=0.2448); missing decision-time funding rows 0; next-decision signal True
+  KXETHPERP: held 3/18 weeks; ann. excess -6.88%/yr (P=1.0000); missing decision-time funding rows 0; next-decision signal True
+
+====================================================================================================
+SENS + Kalshi margin interest 3.25% APY
+====================================================================================================
+  equal-weight weekly excess: mean 0.0065%/wk = 0.34%/yr; 95% CI/yr [-1.92%, 2.38%]; one-sided P(mean<=0) = 0.3672
+    weeks 1-8                    mean -2.07%/yr  (n=8)
+    weeks 9-16                   mean 1.59%/yr  (n=8)
+    weeks 17-18 (partial third)  mean 4.96%/yr  (n=2)
+  KXBTCPERP: held 18/18 weeks; ann. excess 3.26%/yr (P=0.0126); missing decision-time funding rows 0; next-decision signal True
+  KXETHPERP: held 3/18 weeks; ann. excess -2.59%/yr (P=1.0000); missing decision-time funding rows 0; next-decision signal True
+

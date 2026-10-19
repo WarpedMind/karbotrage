@@ -3,13 +3,18 @@
 Read-only probes of venues other than Kalshi's event contracts, written for the
 Session 38 venue screen. Public endpoints only, no auth, no accounts. **Never
 imported by the live path.** Stdlib plus `requests`, as elsewhere in `backtest/`.
-Authoritative record: DECISIONS.md Session 38.
+Authoritative record: DECISIONS.md Session 38 (screen) and Session 39 (H11 and H10 results).
 
 | module | what it answers | output |
 |---|---|---|
 | `polymarket_us_census` | Polymarket US universe by category, open vs closed; whether settled markets carry quote history | `reports/venue_polymarket_us_census.json` |
 | `weather_cross_snapshot` | Live Kalshi vs Polymarket US daily-high ladders on the same NWS station; cheapest guaranteed-$1 basket | `reports/venue_weather_cross_snapshot.txt` |
 | `kalshi_perps_funding` | Funding history summary for every Kalshi perp (mean, share positive/zero, last 30 days, spread, volume) | `reports/venue_kalshi_perps_funding.txt` |
+| `h11_fetch`, `h11_rule`, `h11_analyze` | **H11 (Session 39):** Kalshi ↔ Polymarket US same-station weather crossings over 2026-04-22 → 10-17, as pre-registered | `reports/venue_h11_crossings.txt` |
+| `h10_rule`, `h10_carry` | **H10 (Session 39):** BTC/ETH perp funding carry vs T-bills; in-sample half only (contaminated) | `reports/venue_h10_carry_insample.txt` |
+
+Choices declared before any Session 39 result: `reports/session39_declared_before_results.txt`.
+Rule tests: `tests/test_backtest_h11_rule.py`, `tests/test_backtest_h10_rule.py`.
 
 Run any of them as `karbotrage_env/bin/python -m backtest.venues.<module>`.
 
@@ -51,3 +56,31 @@ Run any of them as `karbotrage_env/bin/python -m backtest.venues.<module>`.
 9. **Coinbase's public perp list with funding rates is Coinbase International**
    (`-INTX`), which US persons cannot use. The US perp-style products
    (`BIP-20DEC30-CDE` etc.) show a blank `funding_rate` in the public API.
+10. **The 0.5 listing seed outlives the first quote** (Session 39). A new
+    Polymarket US market starts at `longPrice` 0.5 / `shortPrice` 0.5. When
+    the first ask arrives `longPrice` moves, but `shortPrice` can sit at exactly
+    0.5 for hours until someone bids, so it reads as a 50¢ bid that never
+    existed. Requiring bid < ask removes only the locked case. In H11 this
+    seed produced 54% of the binding locked profit. Treat a `shortPrice` that
+    has been exactly 0.5 since listing as "no bid".
+11. **`1 − 0.99` is 0.01000000000000001 in floating point**, so a naive
+    `bid > 0.01` lets the 1¢ placeholder through. Round the derived bid
+    (`h11_rule.pm_quote`).
+12. **Some Polymarket US titles carry a degree sign** ("56° to 57°"); 40 of
+    the climate rungs. The title parser strips it.
+13. **The same NWS CLI can be issued twice with different highs, and the two
+    venues can settle on different issuances.** KMIA 2026-08-29: the 4:24 AM
+    EDT report said 90 °F, a 5:10 AM re-issue said 85 °F (both headed "final",
+    neither marked corrected). Kalshi settled at 90, Polymarket US on 85. A
+    cross-venue "guaranteed" basket on those rungs could lose on both legs.
+    List every issuance with IEM's `api/1/nws/afos/list.json?pil=CLIMIA`.
+14. **Polymarket US's gateway bans unpaced scripts** with Cloudflare error 1015
+    (a temporary IP ban), not a 429. Keep every caller on a shared pacer
+    (`h11_fetch.pm_get`, ≤14 req/s).
+15. **Kalshi perp candles skip one hour every Thursday** (08:00 → 10:00 UTC,
+    maintenance). Monday decision and entry hours are unaffected.
+16. **The funding sign is confirmed** (Session 39) from Kalshi's help center
+    article "How Funding Works" (dated 2026-06-03, saved in
+    `backtest/cache/venues/primary_sources/`): a positive rate means longs pay
+    shorts. That supersedes trap 7. The rulebook PDF itself was not read
+    (kalshi.com returns 429 to scripts).
