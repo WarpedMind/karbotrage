@@ -110,6 +110,10 @@ backtest/                 # Offline calibration harness — NEVER imported by th
   verify_alignment.py     # Gate: prove the NBM valid-time -> local-day mapping
   run_calibration.py      # The report
   diagnose_gap.py         # Why the market wins: point forecast vs uncertainty
+  tape/                   # Session 36: trade-tape and quote return tests (favourite-longshot, C2 maker split)
+  nowcast/                # Session 37: C10 weather post-peak nowcast (H7/H8)
+  consistency/            # Session 37: C9 spread ladder vs game winner (H9)
+  venues/                 # Sessions 38-39: venue screen probes, H11 weather crossings, H10 perps carry
   reports/                # Committed raw output
 canary/                   # S5a/S5b arbitrage canary — separate process, NEVER on the live path
   kalshi_rest.py          # Sweep primitive + authoritative order-book top
@@ -512,10 +516,10 @@ not speed. But it is a payment for tying up capital and taking liquidation risk,
 not an edge. Written down before any test: if it works, it is worth roughly
 1.5–2.5% a year above T-bills, about $150–$250 a year per $10,000.
 
-Three tests are pre-registered and none has been run: H11 (do the two weather
-venues ever cross at hourly marks?) next session; H10 (Bitcoin/Ether carry) and
-H12 (gold, silver, S&P 500 carry, forward only) read at the ~2026-11-30
-checkpoint alongside the market-making re-run. Code: `backtest/venues/`. Record:
+Three tests were pre-registered: H11 (do the two weather venues ever cross at
+hourly marks?), H10 (Bitcoin/Ether carry) and H12 (gold, silver, S&P 500 carry,
+forward only). *Update: H11 and H10 ran in Session 39 and are both dead (see
+above); H12 is still read at the ~2026-11-30 checkpoint.* Code: `backtest/venues/`. Record:
 DECISIONS.md Session 38.
 
 ## Two more candidates tested and dead; the signal search stops, 2026-10-18 (Session 37)
@@ -645,7 +649,10 @@ no errors. **Live-confirmed same session** — the operator sent `/mute` and
   **493 candidates found, 95.2% confirmed on recheck** — not zero, as this
   file said until now. Market-making, a different `FairValueProvider`, and
   infrastructure consolidation all remain on the table to revisit; this was
-  sequencing, not elimination. The larger direction question is still open.
+  sequencing, not elimination. *Since then (Sessions 35–39) the arbitrage
+  ceiling, every new Kalshi signal and the venue screen have all come back
+  negative; the direction question is now the ~2026-11-30 checkpoint:
+  market-make or park.*
 - ~~**Does Kalshi refund a voided position at cost?**~~ **Answered — and the
   question was framed wrong.** Kalshi's own `rules_secondary` says a cancelled
   match *"will resolve to a fair price in accordance with the rules"* — neither
@@ -826,8 +833,9 @@ hours of logs instead of waiting days for an actual trade.
     ✅ **H10** (BTC/ETH carry): dead; the in-sample half fixes the binding
     verdict (Session 39). **H12** (gold, silver, US500 carry) is still read
     forward at the ~2026-11-30 checkpoint.
-7l. **Checkpoint ~2026-11-30**: market-make, small carry, or park. Park is the
-    likeliest outcome. Market-making needs a positive C2 re-run and a funded
+7l. **Checkpoint ~2026-11-30**: market-make or park (a small carry now rests
+    on H12 alone, which cannot confirm in six weeks). Park is the likeliest
+    outcome. Market-making needs a positive C2 re-run and a funded
     build plus a small real-money pilot. The Health Monitor deploy-confirm now
     waits for a go decision. Reasoning: DECISIONS.md Session 38 addendum.
 7i. **Forward re-run around 2026-10-28** of the maker-side favourite split,

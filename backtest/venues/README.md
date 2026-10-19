@@ -47,9 +47,9 @@ Run any of them as `karbotrage_env/bin/python -m backtest.venues.<module>`.
    is missing from the table).
 6. **Kalshi perps funding has a deadband** (1 bp per 8h on crypto, 0.2 bp on
    metals and indices); about half of all crypto periods pay exactly zero.
-7. **Funding sign convention is inferred, not documented** in the API spec
-   (premium = book above index ⇒ positive). Confirm it from Kalshi's perps
-   rulebook before any P&L is computed.
+7. **Funding sign convention is not documented in the API spec** (premium =
+   book above index ⇒ positive). *Confirmed in Session 39 from Kalshi's help
+   center; see trap 16.*
 8. **The perps fee schedule in `documentation/kalshi-fee-schedule.pdf` is dated
    2026-07-07**; `kalshi.com` returns 429 to scripts, so its currency is
    unconfirmed.
