@@ -794,6 +794,12 @@ hours of logs instead of waiting days for an actual trade.
     game; Kalshi perps funding carry is the one candidate, as a yield trade.
 7k. **H11** (Kalshi ↔ Polymarket US weather crossings): next session, $0.
     **H10/H12** (perps carry): binding read at the ~2026-11-30 checkpoint.
+    The operator accepted H10's 2% floor but doubts carry is worth doing even
+    if it passes.
+7l. **Checkpoint ~2026-11-30**: market-make, small carry, or park. Park is the
+    likeliest outcome. Market-making needs a positive C2 re-run and a funded
+    build plus a small real-money pilot. The Health Monitor deploy-confirm now
+    waits for a go decision. Reasoning: DECISIONS.md Session 38 addendum.
 7i. **Forward re-run around 2026-10-28** of the maker-side favourite split,
     frozen as recorded. $0, no code. This feeds the market-making decision; it
     is not a strategy.

@@ -254,8 +254,9 @@ pre-registration of H10/H11/H12). What a future session most needs:
   contracts). It is a yield trade with liquidation risk across two venues, and
   is stated in advance to be worth ~$150–$250/yr per $10k if it works.
 - **Before running H10:** confirm the funding sign convention from Kalshi's
-  perps rulebook (inferred, not documented in the API), and have the operator
-  accept or change the 2%/yr materiality floor. The perps fee PDF in
+  perps rulebook (inferred, not documented in the API). The 2%/yr materiality
+  floor was accepted by the operator on 2026-10-19, with the caveat that even
+  2–5% may not be worth tying up capital for. The perps fee PDF in
   `documentation/` is dated 2026-07-07; kalshi.com 429s to scripts.
 - **Data traps** (in `backtest/venues/README.md`): Polymarket US weather slugs
   are off by one degree (parse titles); a 1¢ placeholder stands in for a
@@ -1375,13 +1376,16 @@ DEBT's top entry and DECISIONS.md Session 38.** Sequence now:
    needs the historical tier (~2 req/s). In the same session, confirm the perps
    funding sign from Kalshi's rulebook and run **H10's in-sample half** as a
    plumbing check, reported as contaminated.
-2. **Health Monitor deploy-confirm.** A prerequisite for anything carrying
-   variance, carry included.
-3. **~2026-10-28**: the C2 maker-split re-run, unchanged.
-4. **~2026-11-30 checkpoint**: H10's binding combined result plus H12's forward
+2. **~2026-10-28**: the C2 maker-split re-run, unchanged.
+3. **~2026-11-30 checkpoint**: H10's binding combined result plus H12's forward
    screen, read together with C2. The options are market-make, a small carry, or
-   park. If H11 dies, C2 is negative and H10 misses its floor, park.
-   The `sid`-scoped sequence fix is needed only if market-making is yes.
+   park. If H11 dies, C2 is negative and H10 misses its floor, park. The
+   operator's review (DECISIONS.md Session 38 addendum) makes **park the
+   likeliest outcome**; market-making needs C2 positive **and** the operator
+   funding the build plus a small real-money pilot.
+4. **Only after a go at the checkpoint:** Health Monitor deploy-confirm
+   (deferred 2026-10-19, since nothing carries variance before then), then the
+   `sid`-scoped sequence fix if market-making is yes.
 
 **Earlier READ FIRST (Session 37, 2026-10-18): C10 and C9 are both dead, so the
 stopping rule has fired.** No further Kalshi signal search. The sequence,

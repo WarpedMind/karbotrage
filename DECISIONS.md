@@ -1,6 +1,90 @@
 # Decision Log
 # Entries are ordered newest-to-oldest. Most recent decision is at the top.
 
+## 2026-10-19 — Session 38 (addendum): the operator's review. 2% floor accepted; is the project a failure; is market-making feasible; should "better information" be pursued; Health Monitor deploy deferred until a go decision
+
+The operator accepted H10's 2% floor and then asked four direct questions. The
+answers are recorded because they shape the checkpoint more than any single
+test does.
+
+### 1. The 2% floor, and whether carry is worth it at all
+Accepted before any run. The operator added that tying up capital for 2%, or
+even 5%, above T-bills may not be worthwhile. That is a fair reading: T-bills
+pay 4.10% with no liquidation risk, no second account and no tax ambiguity.
+**A pass at the floor is therefore necessary, not sufficient.** H10 still runs,
+because it costs half a session and settles the question with data. The
+pre-stated expectation is that it fails or passes narrowly, and a narrow pass
+does not by itself mean carry should be done.
+
+### 2. "Is Karbot Rage a total failure?"
+As a profit engine: nothing has worked, and the remaining steps are not expected
+to change that. As research: it did its job. It found out cheaply, without
+losing money, that Kalshi's quoted prices are accurate for a small, slow,
+public-data participant. Opportunities exist, but every test located them
+somewhere this project cannot reach:
+- **Speed.** Weather rungs decided by an observation are taken a median 1.1
+  minutes later (Session 37), worth ~$62/day across 18 cities.
+- **Market making.** The maker population is the side that gets paid (C2), and
+  it holds inventory and cancels stale quotes faster than a poller can.
+- **Information.** Public forecasts are priced in (S6, C9).
+- **Scale.** Carry pays percentages that matter only on large capital.
+Takers as a class lose ~3.2% after fees (Session 36). The search has stopped
+(Session 36 decision 6); the project is now finishing a bounded set of tests
+before the ~2026-11-30 checkpoint. The likeliest checkpoint outcome is **park**,
+unless C2 comes back clearly positive.
+
+### 3. Is market-making feasible?
+**Technically yes, economically unproven, and the specific risk is a known one.**
+- *For it:* makers who bought favourites (70–99¢) were paid in both tape periods
+  (+1.9% to +8.9%, Session 36). Most series charge no maker fee. 489 markets
+  showed ≥2¢ spreads with ≥100 contracts both sides (Session 30).
+- *Against it:* the tape measures the maker **population**, which includes
+  professionals who cancel stale quotes within seconds. Session 37 measured
+  who pays for the one-minute weather race: whoever leaves a stale resting
+  quote. **A slow maker is exactly the quote the fast takers pick off.** All
+  makers together earned +1.1%, not significant. Kalshi's reply on individual
+  eligibility for its Market Maker Program was "not specified" (Session 35).
+- *Cost:* the live order layer does not exist (place, cancel, amend,
+  reconcile, cancel-on-disconnect, inventory limits). Neither does the `sid`
+  sequence fix, nor a paper fill model that is not tautological. That is the
+  largest build in the project's history, several sessions, before the first
+  real fill.
+- *What a real test needs:* fill quality cannot be measured offline. Queue
+  position and the timing of adverse selection only show up by quoting. The
+  first honest measurement is a **small real-money pilot**: a few
+  zero-maker-fee favourite markets, $500–$1,000 at risk, quotes pulled ahead
+  of known information events. It would be the project's first live trading,
+  so it is the operator's call.
+- **Recommendation:** pursue only if the ~2026-10-28 C2 re-run is positive at
+  α = 0.05 as frozen, **and** the operator is willing to fund the build and a
+  small live pilot as a measurement. Otherwise park. Even a successful pilot is
+  expected to earn modest dollars at this capital.
+
+### 4. Should "better information" be pursued?
+**Not as a project direction, unless the operator has a specific edge to bring.**
+- The illegal version (material non-public information) is off the table.
+  Insider trading is the CFTC's first enforcement priority, the first event
+  contract prosecution was CFTC v. Van Dyke (2026-04-23), and this project's
+  rules require public data only.
+- The legal versions are paid data, or real domain expertise. Paid data was
+  answered in the Session 32 addendum: the venue's volume is in sports, where
+  the price-setters already buy the best feeds, and C4 plus this session show
+  prices tied across venues. A search session cannot discover domain
+  expertise. It either exists in the operator's own knowledge (a niche where
+  they genuinely know more than the crowd) or it does not.
+- **Recommendation:** if the operator can name a niche where they know more
+  than the market, the existing `backtest/` gate can score their calls
+  offline at $0, as a manual decision-support tool, not an autonomous bot.
+  Otherwise, do not open a new search; that is exactly what the stopping rule
+  exists to prevent.
+
+### 5. Sequencing change: Health Monitor deploy-confirm deferred
+Nothing will carry variance before the checkpoint, so deploy-confirming the
+Health Monitor now would spend a session on a prerequisite for decisions not
+yet taken. **Deferred until the checkpoint returns a go** (market-making or
+carry), and then it is the first step. The next session runs H11 and H10's
+in-sample half together.
+
 ## 2026-10-18 — Session 38: offline venue screen. No new event-contract venue offers a slower or cheaper game than Kalshi, and the weather ladders on Polymarket US are Kalshi's ladders at a 1¢ wider spread. The one venue class where being small and slow plausibly hurts least is Kalshi's own perpetual futures (funding carry), and that is a yield trade, not an edge. Two kill tests pre-registered; nothing run against outcomes; no accounts, no money, no live-path code.
 
 ### Status of each claim, labeled up front
@@ -165,8 +249,11 @@ read at the checkpoint).**
   move exceeds 80% of the margin buffer (a real margin call); or annualized excess
   **< 2.0%** on committed capital. The 2% floor is a materiality judgment, not
   statistics: below it, two-venue liquidation risk, operating burden and
-  unverified tax treatment cost more than the carry pays. **The operator should
-  accept or change this floor before the run.**
+  unverified tax treatment cost more than the carry pays. **Operator accepted the
+  2% floor on 2026-10-19, before any run**, and added that even 2–5% above
+  T-bills may not justify tying up capital. So a pass at the floor is a
+  necessary condition for carry, not a sufficient one; the checkpoint decides
+  whether a passing carry is worth doing at all.
 
 **H12 — metals and index perps carry, forward only.** KXGOLDPERP, KXSILVERPERP,
 KXUS500PERP: too young (12–38 funding periods) for an in-sample read. The same

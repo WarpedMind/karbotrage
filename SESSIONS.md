@@ -1,6 +1,20 @@
 # Karbot Rage! Session Summary
 # Entries are ordered newest-to-oldest. Most recent session is at the top.
 
+## 2026-10-19 (Session 38 addendum — operator review: 2% floor accepted; Health Monitor deploy deferred)
+
+- Operator **accepted H10's 2% floor**, adding that even 2–5% above T-bills may
+  not justify tying up capital. A pass is necessary, not sufficient.
+- Asked whether the project is a failure, whether market-making is feasible, and
+  whether "better information" is worth pursuing. Answers recorded in
+  DECISIONS.md, Session 38 addendum. In short: no profit engine found; likeliest
+  checkpoint outcome is park. Market-making is feasible to build but unproven,
+  with a slow maker the natural victim of fast takers; it is worth pursuing only
+  if C2 is positive and the operator funds a small live pilot. Information edge
+  only if the operator brings a specific niche of their own.
+- **Health Monitor deploy-confirm deferred** until the checkpoint returns a go.
+  Next session runs H11 plus H10's in-sample half.
+
 ## 2026-10-18 (Session 38 — offline venue screen; Polymarket US mirrors Kalshi; Kalshi perps carry is the one candidate; three tests pre-registered, none run; no live-path code)
 
 ### Mandate
