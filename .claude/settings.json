@@ -26,8 +26,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "STAGED=$(git diff --cached --name-only 2>/dev/null); if [ -z \"$STAGED\" ]; then exit 0; fi; FORBIDDEN=$(echo \"$STAGED\" | grep -vE '(^|/)\\.env\\.example$' | grep -iE '(^|/)\\.env(\\.[^/]*)?$|\\.pem(\\.[^/]*)?$|\\.key(\\.[^/]*)?$|config[^/]*\\.ya?ml(\\.[^/]*)?$|(^|[/_.-])secrets?([_.-]|$)|(^|[/_.-])credentials?([_.-]|$)'); if [ -n \"$FORBIDDEN\" ]; then echo \"BLOCKED: potential secret files staged — review before committing: $FORBIDDEN\"; exit 1; fi",
-            "statusMessage": "Checking staged files for secrets..."
+            "command": "INPUT=$(cat); CMD=$(echo \"$INPUT\" | jq -r '.tool_input.command // \"\"'); if echo \"$CMD\" | grep -qE '(^|[;&|])[[:space:]]*git[[:space:]]+([^;&|]*[[:space:]])?commit([[:space:]]|$)'; then STAGED=$(git diff --cached --name-only 2>/dev/null); FORBIDDEN=$(echo \"$STAGED\" | grep -vE '(^|/)\\.env\\.example$' | grep -iE '(^|/)\\.env(\\.[^/]*)?$|\\.pem(\\.[^/]*)?$|\\.key(\\.[^/]*)?$|(^|/)config[^/]*\\.ya?ml(\\.[^/]*)?$|(^|/)config/.*\\.ya?ml(\\.[^/]*)?$|(^|/)config[^/]*\\.json$|(^|/)config/.*\\.json$|(^|[/_.-])secrets?([_.-]|$)|(^|[/_.-])credentials?([_.-]|$)|(^|[/_.-])service[_-]?account[_-]?.*\\.json$|(^|/)id_(rsa|dsa|ecdsa|ed25519)$|\\.tfstate(\\.[^/]*)?$|\\.tfvars$|(^|/)\\.npmrc$|\\.pfx$'); if [ -n \"$FORBIDDEN\" ]; then echo \"BLOCKED by secrets-guard: these staged files look like credentials and must not be committed: $(echo \"$FORBIDDEN\" | tr '\\n' ' ' | sed 's/ *$//'). Unstage each one (git rm --cached <file> -- works even before the first commit, and leaves the file on disk) or add it to .gitignore, then commit again. If a match is a false positive, the pattern lives in .claude/settings.json.\" >&2; exit 2; fi; fi; exit 0",
+            "statusMessage": "Checking staged files for credentials..."
           }
         ]
       }
